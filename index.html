@@ -3091,22 +3091,47 @@ persist=function(){
   _origPersist();
 };
 
-// Arrancar inmediatamente con datos locales
-arrancar();
+// Si hay datos locales arranca de inmediato, si no muestra pantalla de carga
+var _tieneLocal=!!localStorage.getItem('bmp_camara');
+if(_tieneLocal){
+  arrancar();
+} else {
+  mostrarCargando();
+}
 
-// Luego sincronizar con Supabase en segundo plano
+var _arrancado=false;
+function arrancarUnaVez(){
+  if(_arrancado)return;
+  _arrancado=true;
+  ocultarCargando();
+  arrancar();
+}
+
+// Timeout de seguridad — si Supabase no responde en 5s, arranca con datos vacíos
+var _timeoutArranque=setTimeout(function(){arrancarUnaVez();},5000);
+
+// Sincronizar con Supabase
 fetch(SB_URL+'/rest/v1/bodega_data?select=key,value&apikey='+SB_KEY,{headers:SB_HEADERS})
   .then(function(r){return r.json();})
   .then(function(rows){
+    clearTimeout(_timeoutArranque);
     if(Array.isArray(rows)&&rows.length>0){
       var data={};
       rows.forEach(function(r){data[r.key]=r.value;});
       aplicarDatos(data);
       sbStatus(true);
-      mostrarNotifSync();
+      if(_tieneLocal){
+        // Ya estaba arrancado — solo refrescar la vista si hubo cambios
+        mostrarNotifSync();
+        if(CUR_TAB)nav(CUR_TAB);
+      }
     }
+    arrancarUnaVez(); // para usuarios sin datos locales
   })
-  .catch(function(){sbStatus(false);});
+  .catch(function(){
+    sbStatus(false);
+    arrancarUnaVez();
+  });
 </script>
 </body>
 </html>
