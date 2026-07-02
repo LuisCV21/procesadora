@@ -3091,21 +3091,10 @@ persist=function(){
   _origPersist();
 };
 
-// Mostrar pantalla de carga y traer datos de Supabase
-mostrarCargando();
+// Arrancar inmediatamente con datos locales
+arrancar();
 
-var _arrancado=false;
-function arrancarUnaVez(){
-  if(_arrancado)return;
-  _arrancado=true;
-  ocultarCargando();
-  arrancar();
-}
-
-// Timeout de seguridad — si en 4 segundos no respondió Supabase, arranca igual
-setTimeout(function(){arrancarUnaVez();},4000);
-
-// Intentar cargar de Supabase
+// Luego sincronizar con Supabase en segundo plano
 fetch(SB_URL+'/rest/v1/bodega_data?select=key,value&apikey='+SB_KEY,{headers:SB_HEADERS})
   .then(function(r){return r.json();})
   .then(function(rows){
@@ -3114,13 +3103,10 @@ fetch(SB_URL+'/rest/v1/bodega_data?select=key,value&apikey='+SB_KEY,{headers:SB_
       rows.forEach(function(r){data[r.key]=r.value;});
       aplicarDatos(data);
       sbStatus(true);
+      mostrarNotifSync();
     }
-    arrancarUnaVez();
   })
-  .catch(function(){
-    sbStatus(false);
-    arrancarUnaVez();
-  });
+  .catch(function(){sbStatus(false);});
 </script>
 </body>
 </html>
