@@ -2717,7 +2717,7 @@ function rConfig(){
       '</tbody></table></div>';
   } else if(CFG_TAB==='proveedores'){
     body='<div class="card-hdr"><div class="card-title">Proveedores</div><button class="btn btn-p" onclick="mAddItem(\'proveedor\')">+ Agregar proveedor</button></div>'+
-      '<div>'+PROVEEDORES.map(function(p,i){return '<div class="list-item"><span>'+p+'</span><button class="btn btn-xs btn-d" onclick="delItem(\'proveedor\','+i+')">Eliminar</button></div>';}).join('')+'</div>';
+      '<div>'+PROVEEDORES.map(function(p,i){return {p:p,i:i};}).sort(function(a,b){return a.p.localeCompare(b.p,'es');}).map(function(x){return '<div class="list-item"><span>'+x.p+'</span><button class="btn btn-xs btn-d" onclick="delItem(\'proveedor\','+x.i+')">Eliminar</button></div>';}).join('')+'</div>';
   } else if(CFG_TAB==='clientes'){
     body='<div class="card-hdr"><div class="card-title">Clientes</div><button class="btn btn-p" onclick="mAddItem(\'cliente\')">+ Agregar cliente</button></div>'+
       '<div>'+CLIENTES.map(function(c,i){return '<div class="list-item"><span>'+c+'</span><button class="btn btn-xs btn-d" onclick="delItem(\'cliente\','+i+')">Eliminar</button></div>';}).join('')+'</div>';
