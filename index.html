@@ -394,10 +394,17 @@ function load(key,def){
 // ══════════════════════════════════════════════════════
 //  USUARIOS / AUTH
 // ══════════════════════════════════════════════════════
+// Usuario temporal de configuración inicial — reemplazar desde Configuración > Usuarios
 var USERS_DEF=[
-  {id:1,user:'admin',pass:'1234',nombre:'Administrador',rol:'admin',avatar:'A',color:'#1d9e75'},
-  {id:2,user:'gerente',pass:'1234',nombre:'Gerente General',rol:'gerente',avatar:'G',color:'#388bfd'},
+  {id:1,user:'setup',pass:'Setup@BMP2026',nombre:'Configuración inicial',rol:'admin',avatar:'S',color:'#1d9e75'},
 ];
+// Versión de usuarios — incrementar aquí fuerza que todos los navegadores actualicen su lista
+var USERS_VER=2;
+if(parseInt(localStorage.getItem('bmp_users_ver')||'1')<USERS_VER){
+  saveLocal('users',USERS_DEF);
+  saveLocal('users_ver',USERS_VER);
+  sbSet('users',USERS_DEF);
+}
 var USERS=load('users',USERS_DEF);
 var SESSION=load('session',null);
 var ROL='gerente';
@@ -2881,7 +2888,7 @@ function mAddUsuario(){
       '<div class="field" style="margin-bottom:10px"><label>Nombre completo</label><input id="un" type="text" placeholder="Ej: Juan López"></div>'+
       '<div class="field" style="margin-bottom:10px"><label>Usuario (para iniciar sesión)</label><input id="uu" type="text" placeholder="Ej: juan"></div>'+
       '<div class="field" style="margin-bottom:10px"><label>Contraseña</label><input id="up" type="password" placeholder="••••••"></div>'+
-      '<div class="field"><label>Rol</label><select id="ur"><option value="gerente">Gerente</option></select></div>'+
+      '<div class="field"><label>Rol</label><select id="ur"><option value="admin">Administrador</option><option value="gerente">Gerente</option></select></div>'+
     '</div>'+
     '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gUsuario()">Crear usuario</button></div>'+
   '</div>');
