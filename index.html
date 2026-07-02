@@ -398,13 +398,13 @@ function load(key,def){
 var USERS_DEF=[
   {id:1,user:'setup',pass:'Setup@BMP2026',nombre:'Configuración inicial',rol:'admin',avatar:'S',color:'#1d9e75'},
 ];
-// Versión de usuarios — incrementar aquí fuerza que todos los navegadores actualicen su lista
+// Limpiar credenciales antiguas del localStorage (sin tocar Supabase)
 var USERS_VER=2;
 if(parseInt(localStorage.getItem('bmp_users_ver')||'1')<USERS_VER){
-  saveLocal('users',USERS_DEF);
-  saveLocal('users_ver',USERS_VER);
-  sbSet('users',USERS_DEF);
+  localStorage.removeItem('bmp_users');
+  localStorage.setItem('bmp_users_ver',USERS_VER);
 }
+// Supabase es la fuente de verdad para usuarios; USERS_DEF es solo el último recurso
 var USERS=load('users',USERS_DEF);
 var SESSION=load('session',null);
 var ROL='gerente';
