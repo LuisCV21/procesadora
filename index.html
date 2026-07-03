@@ -1620,7 +1620,7 @@ function gRecibirPedido(id){
       ent:today(),cad:fechaMas3Meses(),est:'ok',
       costo:costoAjust,precio:precioVenta};
     // Actualizar precio en la partida del pedido
-    pt.kgReal=kgReal;pt.costoAjust=costoAjust;pt.precioVenta=precioVenta;
+    pt.kgReal=kgReal;pt.costoAjust=costoAjust;pt.precioVenta=precioVenta;pt.lote=loteAuto;
     if(dest==='bodega'){bodega.push(item);}else{camara.push(item);}
   });
   // Recalcular total con kilos reales
