@@ -468,14 +468,49 @@ var SESSION=load('session',null);
 var ROL='gerente';
 var CUR_USER=null;
 
-function doLogin(){
+// ── Seguridad: hash SHA-256 ────────────────────────────
+async function hashPass(s){
+  var buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,'0');}).join('');
+}
+
+// ── Seguridad: límite de intentos ─────────────────────
+var _lb=JSON.parse(localStorage.getItem('bmp_lb')||'{"n":0,"hasta":0}');
+function _saveLb(){localStorage.setItem('bmp_lb',JSON.stringify(_lb));}
+function _loginBloqueado(){
+  if(Date.now()<_lb.hasta){
+    var mins=Math.ceil((_lb.hasta-Date.now())/60000);
+    var err=g('login-err');
+    err.textContent='Demasiados intentos fallidos. Espera '+mins+' min.';
+    err.style.display='block';
+    return true;
+  }
+  return false;
+}
+
+async function doLogin(){
+  if(_loginBloqueado())return;
   var u=g('li-user').value.trim().toLowerCase();
   var p=g('li-pass').value;
-  var found=USERS.find(function(x){return x.user===u&&x.pass===p;});
-  if(!found){g('login-err').style.display='block';return;}
+  if(!p){g('login-err').textContent='Escribe tu contraseña.';g('login-err').style.display='block';return;}
+  var h=await hashPass(p);
+  // Acepta hash nuevo O texto plano (migración automática)
+  var found=USERS.find(function(x){return x.user===u&&(x.pass===h||x.pass===p);});
+  if(!found){
+    _lb.n++;
+    if(_lb.n>=5){_lb.n=0;_lb.hasta=Date.now()+5*60*1000;}
+    _saveLb();
+    var restantes=Math.max(0,5-_lb.n);
+    g('login-err').textContent='Usuario o contraseña incorrectos.'+(restantes>0?' ('+restantes+' intentos restantes)':'');
+    g('login-err').style.display='block';
+    return;
+  }
+  // Migrar a hash si aún era texto plano
+  if(found.pass===p&&found.pass!==h){found.pass=h;save('users',USERS);}
+  _lb.n=0;_lb.hasta=0;_saveLb();
   SESSION=found;CUR_USER=found;ROL=found.rol;
   audit('Inició sesión','Sistema','');
-  saveLocal('session',found);
+  saveLocal('session',Object.assign({},found,{loginTime:Date.now()}));
   g('login-err').style.display='none';
   g('login-screen').style.display='none';
   g('app').classList.add('visible');
@@ -3171,12 +3206,13 @@ function mAddUsuario(){
   '</div>');
 }
 
-function gUsuario(){
+async function gUsuario(){
   var n=g('un').value.trim(),u=g('uu').value.trim().toLowerCase(),p=g('up').value,r=g('ur').value;
   if(!n||!u||!p){alert('Completa todos los campos');return;}
   if(USERS.find(function(x){return x.user===u;})){alert('Ese nombre de usuario ya existe');return;}
   var cols={admin:'#1d9e75',gerente:'#388bfd'};
-  USERS.push({id:uid(),user:u,pass:p,nombre:n,rol:r,avatar:n[0].toUpperCase(),color:cols[r]||'#388bfd'});
+  var h=await hashPass(p);
+  USERS.push({id:uid(),user:u,pass:h,nombre:n,rol:r,avatar:n[0].toUpperCase(),color:cols[r]||'#388bfd'});
   audit('Creó usuario','Usuarios',n+' ('+u+') · '+r);
   save('users',USERS);cm();nav('config');
 }
@@ -3187,11 +3223,11 @@ function mCambiaPass(id){
     '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gPass('+id+')">Guardar</button></div>'+
   '</div>');
 }
-function gPass(id){
+async function gPass(id){
   var p=g('cp').value;
   if(!p||p.length<3){alert('La contraseña debe tener al menos 3 caracteres');return;}
   var u=USERS.find(function(x){return x.id===id;});
-  if(u)u.pass=p;
+  if(u)u.pass=await hashPass(p);
   save('users',USERS);cm();nav('config');
 }
 function delUser(id){
@@ -3300,18 +3336,31 @@ function ocultarCargando(){
   if(div)div.remove();
 }
 
+var SESSION_MAX=8*60*60*1000; // 8 horas
 function arrancar(){
   initNN();
   var session=loadLocal('session',null);
   if(session){
-    SESSION=session;CUR_USER=session;ROL=session.rol;
-    g('login-screen').style.display='none';
-    g('app').classList.add('visible');
-    updateUserUI();
-    if(ROL!=='admin')g('ni-config-wrap').style.display='none';
-    nav('dashboard');
+    if(Date.now()-(session.loginTime||0)>SESSION_MAX){
+      saveLocal('session',null);
+      session=null;
+    } else {
+      SESSION=session;CUR_USER=session;ROL=session.rol;
+      g('login-screen').style.display='none';
+      g('app').classList.add('visible');
+      updateUserUI();
+      if(ROL!=='admin')g('ni-config-wrap').style.display='none';
+      nav('dashboard');
+    }
   }
-  // Iniciar sincronización en tiempo real después de arrancar
+  // Verificar expiración cada minuto
+  setInterval(function(){
+    var s=loadLocal('session',null);
+    if(s&&Date.now()-(s.loginTime||0)>SESSION_MAX){
+      alert('Tu sesión expiró por inactividad. Inicia sesión nuevamente.');
+      doLogout();
+    }
+  },60000);
   iniciarRealtime();
   reintentarPendientes();
   actualizarBadgePendientes();
