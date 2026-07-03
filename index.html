@@ -968,7 +968,9 @@ function rCam(){
       '<td>'+pill(estGrupo)+'</td>'+
       (min?'<td class="mn" style="color:'+(bajMin?'var(--danger)':'var(--text3)')+'">'+min+' kg</td>':'<td style="color:var(--text3);font-size:12px">—</td>')+
       (canEdit?'<td><div style="display:flex;gap:4px">'+
-        (isAdmin?'<button class="btn btn-xs btn-d" onclick="bajaLote(\''+esp.replace(/'/g,"\\'")+'\',true)">Dar de baja todo</button>':'')+
+        (lotes.length===1?
+          (isAdmin?'<button class="btn btn-xs" onclick="mEditLote('+lotes[0].id+')">Editar</button><button class="btn btn-xs btn-d" onclick="bajaLote('+lotes[0].id+',false)">Baja</button>':'')
+          :(isAdmin?'<button class="btn btn-xs btn-d" onclick="bajaLote(\''+esp.replace(/'/g,"\\'")+'\',true)">Dar de baja todo</button>':''))+
       '</div></td>':'')+
     '</tr>';
 
@@ -988,8 +990,6 @@ function rCam(){
           '</div></td>':'')+
         '</tr>';
       }).join('');
-    } else if(lotes.length===1&&canEdit&&isAdmin){
-      filaP=filaP.replace('Dar de baja todo','Dar de baja');
     }
     return filaP+filasLote;
   }).join('');
@@ -2468,7 +2468,10 @@ function rBodega(){
       '<td class="mn">'+costoStr+'</td>'+
       '<td class="mn" style="color:var(--info)">'+precioStr+'</td>'+
       (min?'<td class="mn" style="color:'+(bajMin?'var(--danger)':'var(--text3)')+'">'+min+'</td>':'<td style="color:var(--text3)">—</td>')+
-      (canEdit?'<td></td>':'')+
+      (canEdit?'<td>'+(gr.lotes.length===1?'<div style="display:flex;gap:4px">'+
+        (isAdmin?'<button class="btn btn-xs" onclick="mEditBodega('+gr.lotes[0].id+')">Editar</button>':'')+
+        (isAdmin?'<button class="btn btn-xs btn-d" onclick="bajaBodega('+gr.lotes[0].id+')">Baja</button>':'')+
+      '</div>':'')+'</td>':'')+
     '</tr>';
 
     var filasLote='';
