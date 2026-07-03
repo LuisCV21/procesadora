@@ -1372,6 +1372,7 @@ function verPedido(id){
       (canEdit?'<button class="btn btn-w" onclick="cm();mEditarPedido('+id+')">✏ Editar</button>':'')+
       (p.est==='pendiente'&&(ROL==='admin'||ROL==='gerente')?'<button class="btn" style="border-color:var(--info);color:var(--info)" onclick="cm();recibirPedido('+id+')">📦 Recibir</button>':'')+
       (p.est==='recibido'&&!p.pagado&&(ROL==='admin'||ROL==='gerente')?'<button class="btn btn-p" onclick="cm();pagarPedido('+id+')">💰 Registrar pago</button>':'')+
+      (ROL==='admin'&&(p.est==='recibido'||p.pagado)?'<button class="btn btn-d" onclick="cm();mRevertirPedido('+id+')">↩ Corregir</button>':'')+
       '<button class="btn btn-p" onclick="imprimirPedido('+id+')">🖨 Imprimir</button>'+
     '</div>'+
   '</div>');
@@ -1553,6 +1554,51 @@ function gRecibirPedido(id){
     p.abonos.push({monto:p.total,forma:'efectivo',fecha:today(),hora:new Date().toTimeString().slice(0,5),nota:'Pago de contado al recibir'});
   }
   persist();cm();nav('pedidos');
+}
+
+function mRevertirPedido(id){
+  var p=pedidos.find(function(x){return x.id===id;});if(!p)return;
+  var loteRef=p.numPedido;
+  var enCam=loteRef?camara.filter(function(i){return i.lote===loteRef;}).length:0;
+  var enBod=loteRef?bodega.filter(function(i){return i.lote===loteRef;}).length:0;
+  var abEfect=(p.abonos||[]).filter(function(a){return a.forma==='efectivo';}).reduce(function(s,a){return s+a.monto;},0);
+  var abTrans=(p.abonos||[]).filter(function(a){return a.forma==='transferencia';}).reduce(function(s,a){return s+a.monto;},0);
+  var lineas='';
+  if(enCam>0)lineas+='<li>Se eliminarán <b>'+enCam+' lote(s)</b> de cámara (lote '+loteRef+')</li>';
+  if(enBod>0)lineas+='<li>Se eliminarán <b>'+enBod+' lote(s)</b> de bodega (lote '+loteRef+')</li>';
+  if(enCam===0&&enBod===0)lineas+='<li style="color:var(--warn)">No se encontraron lotes con clave <b>'+loteRef+'</b> — el inventario NO se modificará automáticamente; corrígelo tú manualmente si es necesario.</li>';
+  if(abEfect>0)lineas+='<li>Se devolverán <b>'+money(abEfect)+'</b> al efectivo en caja</li>';
+  if(abTrans>0)lineas+='<li>Se eliminarán los movimientos de transferencia registrados (<b>'+money(abTrans)+'</b>)</li>';
+  lineas+='<li>El pedido regresará a estado <b>Pendiente</b> para que puedas editarlo y volver a recibirlo</li>';
+  modal('<div class="modal" style="max-width:480px"><div class="modal-hdr" style="background:var(--danger-dim)"><div class="modal-title" style="color:var(--danger)">↩ Corregir pedido '+(p.numPedido||'')+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div class="alert al-w" style="margin-bottom:14px"><div class="al-dot"></div><b>Solo para correcciones excepcionales.</b> Esta acción revertirá la recepción y el pago.</div>'+
+      '<p style="font-size:14px;color:var(--text2);margin-bottom:10px">Se realizarán los siguientes cambios:</p>'+
+      '<ul style="font-size:14px;color:var(--text2);padding-left:20px;line-height:2">'+lineas+'</ul>'+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-d" onclick="revertirPedido('+id+')">Confirmar corrección</button></div>'+
+  '</div>');
+}
+
+function revertirPedido(id){
+  var p=pedidos.find(function(x){return x.id===id;});if(!p)return;
+  var loteRef=p.numPedido;
+  // Quitar lotes de cámara y bodega creados por este pedido
+  if(loteRef){
+    camara=camara.filter(function(i){return i.lote!==loteRef;});
+    bodega=bodega.filter(function(i){return i.lote!==loteRef;});
+  }
+  // Restaurar efectivo de abonos en efectivo
+  var abEfect=(p.abonos||[]).filter(function(a){return a.forma==='efectivo';}).reduce(function(s,a){return s+a.monto;},0);
+  if(abEfect>0)efectivoDeclarado+=abEfect;
+  // Quitar movimientos de transferencia de este pedido
+  movTransferencias=movTransferencias.filter(function(m){
+    return !(p.abonos||[]).some(function(a){return a.forma==='transferencia'&&a.monto===m.monto&&a.fecha===m.fecha;});
+  });
+  // Resetear pedido a pendiente
+  p.est='pendiente';p.pagado=false;p.montoPagado=0;p.abonos=[];
+  persist();cm();nav('pedidos');
+  alert('Pedido '+(p.numPedido||'')+ ' revertido. Ahora puedes editarlo y volver a registrar la recepción.');
 }
 
 function pagarPedido(id){
