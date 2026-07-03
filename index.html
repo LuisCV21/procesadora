@@ -960,7 +960,8 @@ function rCam(){
     var filaP='<tr style="background:'+(bajMin?'rgba(192,57,43,.04)':'')+'">'+
       '<td class="pr" style="cursor:pointer" onclick="toggleCamExp(\''+esp.replace(/'/g,"\\'")+'\')" >'+
         (lotes.length>1?'<span style="color:var(--accent);font-weight:700;margin-right:6px">'+(expanded?'▼':'▶')+'</span>':'')+
-        esp+(bajMin?'<span style="color:var(--danger);font-size:11px;margin-left:8px">⚠ Stock bajo</span>':'')+
+        esp+(lotes.length===1?'<span style="color:var(--text3);font-size:12px;font-weight:normal;margin-left:8px">· Lote '+lotes[0].lote+'</span>':'')+
+        (bajMin?'<span style="color:var(--danger);font-size:11px;margin-left:8px">⚠ Stock bajo</span>':'')+
       '</td>'+
       '<td class="mn" style="font-weight:700;color:var(--accent)">'+g.totalKg.toFixed(1)+' kg</td>'+
       '<td class="mn">'+costoStr+'</td>'+
@@ -2462,7 +2463,8 @@ function rBodega(){
     var filaP='<tr style="background:'+(bajMin?'rgba(192,57,43,.04)':'')+'">'+
       '<td class="pr" style="cursor:pointer" onclick="toggleBodExp(\''+esp.replace(/'/g,"\\'")+'\')">'+
         (gr.lotes.length>1?'<span style="color:var(--accent);font-weight:700;margin-right:6px">'+(expanded?'▼':'▶')+'</span>':'')+
-        esp+(bajMin?'<span style="color:var(--danger);font-size:11px;margin-left:8px">⚠ Stock bajo</span>':'')+
+        esp+(gr.lotes.length===1?'<span style="color:var(--text3);font-size:12px;font-weight:normal;margin-left:8px">· Lote '+gr.lotes[0].lote+'</span>':'')+
+        (bajMin?'<span style="color:var(--danger);font-size:11px;margin-left:8px">⚠ Stock bajo</span>':'')+
       '</td>'+
       '<td class="mn" style="font-weight:700;color:var(--accent)">'+gr.totalKg.toFixed(1)+' '+gr.unidad+'</td>'+
       '<td class="mn">'+costoStr+'</td>'+
