@@ -692,6 +692,12 @@ var nextPedidoNum=load('next_pedido_num',1);
 var vales=load('vales',[]);
 var auditLog=load('auditLog',[]);
 
+// Utilidad / patrimonio: meta fija, deuda con Janet (distinta a los vales por cobrar de sucursales) y gastos
+var metaPatrimonio=load('meta_patrimonio',1000000);
+var deudaJanet=load('deuda_janet',0);
+var deudaJanetMovs=load('deuda_janet_movs',[]);
+var gastos=load('gastos',[]);
+
 function persist(){
   save('camara',camara);save('procesos',procesos);save('pedidos',pedidos);save('notas',notas);
   save('next_id',NEXT_ID);save('next_folio',nextFolio);
@@ -700,6 +706,8 @@ function persist(){
   save('mov_tarjeta',movTransferencias);save('saldo_tarjeta',saldoTransferencias);
   save('compensaciones',compensaciones);save('temp_logs',tempLogs);
   save('next_pedido_num',nextPedidoNum);save('vales',vales);save('auditLog',auditLog);
+  save('meta_patrimonio',metaPatrimonio);save('deuda_janet',deudaJanet);
+  save('deuda_janet_movs',deudaJanetMovs);save('gastos',gastos);
 }
 
 // ══════════════════════════════════════════════════════
@@ -2629,9 +2637,12 @@ function rCaja(){
     return {nombre:s,pendiente:pendiente,compPagadas:compPagadas};
   });
 
+  var patrimonioTotal=efectivoDeclarado+valInv+deudaJanet;
+  var utilidadTotal=patrimonioTotal-metaPatrimonio;
+
   // Tabs de caja
   var CAJA_TAB=window._CAJA_TAB||'resumen';
-  var tabs=[['resumen','Resumen'],['vales','Vales por cobrar'],['movimientos','Movimientos'],['compensaciones','Compensaciones sucursales']];
+  var tabs=[['resumen','Resumen'],['vales','Vales por cobrar'],['deuda-janet','Deuda con Janet'],['gastos','Gastos'],['movimientos','Movimientos'],['compensaciones','Compensaciones sucursales'],['corte','Corte del periodo']];
   var tabBar='<div class="config-tabs" style="margin-bottom:16px">'+tabs.map(function(t){
     return '<div class="cfg-tab'+(CAJA_TAB===t[0]?' active':'')+'" onclick="setCajaTab(\''+t[0]+'\')">'+t[1]+'</div>';
   }).join('')+'</div>';
@@ -2670,7 +2681,19 @@ function rCaja(){
             '</div>';
           }).join('')+
         '</div></div>'+
-      '</div>';
+      '</div>'+
+      '<div class="card" style="margin-top:18px;border-color:'+(utilidadTotal>=0?'rgba(46,204,113,.35)':'rgba(192,57,43,.3)')+'">'+
+        '<div class="card-hdr"><div class="card-title">💰 Utilidad de la procesadora</div>'+
+        (isAdmin?'<button class="btn btn-xs" onclick="mMetaPatrimonio()">Editar meta</button>':'')+
+        '</div><div class="card-body">'+
+        '<div style="font-size:13px;color:var(--text3);margin-bottom:14px">Efectivo + inventario (cámara+bodega) + saldo pendiente de la deuda con Janet debe sumar la meta fija. Lo que exceda esa meta es utilidad.</div>'+
+        '<div class="stat-grid">'+
+          '<div class="stat"><div class="stat-lbl">Meta (capital base)</div><div class="stat-val">'+money(metaPatrimonio)+'</div></div>'+
+          '<div class="stat"><div class="stat-lbl">Deuda pendiente con Janet</div><div class="stat-val c-warn">'+money(deudaJanet)+'</div><div class="stat-sub" style="cursor:pointer;color:var(--info)" onclick="setCajaTab(\'deuda-janet\')">Ver detalle</div></div>'+
+          '<div class="stat"><div class="stat-lbl">Patrimonio actual</div><div class="stat-val">'+money(patrimonioTotal)+'</div><div class="stat-sub">Efectivo + inventario + deuda Janet</div></div>'+
+          '<div class="stat" style="border-color:'+(utilidadTotal>=0?'rgba(46,204,113,.4)':'rgba(192,57,43,.4)')+'"><div class="stat-lbl">UTILIDAD ACUMULADA</div><div class="stat-val" style="font-size:20px;color:'+(utilidadTotal>=0?'var(--accent)':'var(--danger)')+'">'+money(utilidadTotal)+'</div><div class="stat-sub">Antes de descontar gastos del mes</div></div>'+
+        '</div>'+
+      '</div></div>';
   } else if(CAJA_TAB==='vales'){
     var valesPend=vales.filter(function(v){return v.est==='pendiente';});
     var valesCob=vales.filter(function(v){return v.est==='cobrado';});
@@ -2803,11 +2826,101 @@ function rCaja(){
         '</tr>';
       }).join(''))+
       '</tbody></table></div></div>';
+  } else if(CAJA_TAB==='deuda-janet'){
+    content='<div class="stat-grid" style="margin-bottom:18px">'+
+        '<div class="stat"><div class="stat-lbl">Saldo pendiente con Janet</div><div class="stat-val c-warn">'+money(deudaJanet)+'</div>'+
+        (isAdmin?'<div style="margin-top:6px"><button class="btn btn-xs btn-p" onclick="mAjustarDeudaJanet()">Ajustar saldo</button></div>':'')+
+        '</div>'+
+      '</div>'+
+      (canOp?'<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">Registrar pago a Janet</div></div><div class="card-body">'+
+        '<p style="font-size:13px;color:var(--text3);margin-bottom:12px">Esta deuda es distinta a los "Vales por cobrar" — es lo que la procesadora le debe a Janet de antes, y disminuye conforme se le va pagando.</p>'+
+        '<div class="fg2" style="display:grid;gap:12px">'+
+          '<div class="field"><label>Monto ($)</label><input id="pj1" type="number" placeholder="0" min="0"></div>'+
+          '<div class="field"><label>Forma de pago</label><select id="pj2"><option value="efectivo">Efectivo</option><option value="transferencia">Transferencia</option></select></div>'+
+          '<div class="field"><label>Fecha</label><input id="pj3" type="date" value="'+today()+'"></div>'+
+          '<div class="field"><label>Nota (opcional)</label><input id="pj4" type="text" placeholder="Opcional"></div>'+
+        '</div>'+
+        '<div style="margin-top:14px"><button class="btn btn-p" onclick="gPagoJanet()">Registrar pago</button></div>'+
+      '</div></div>':'')+
+      '<div class="card"><div class="card-hdr"><div class="card-title">Historial</div></div>'+
+      '<div class="tw"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Forma</th><th>Monto</th></tr></thead><tbody>'+
+      (deudaJanetMovs.length===0?'<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text3)">Sin movimientos</td></tr>':
+      deudaJanetMovs.slice().reverse().map(function(m){
+        return '<tr><td class="mn">'+m.fecha+'</td><td>'+(m.tipo==='pago'?'<span class="pill p-ok">Pago</span>':'<span class="pill p-info">Ajuste</span>')+'</td>'+
+          '<td style="color:var(--text2)">'+(m.concepto||'—')+'</td><td class="mn" style="color:var(--text3)">'+(m.forma||'—')+'</td>'+
+          '<td class="mn" style="font-weight:700">'+money(m.monto)+'</td></tr>';
+      }).join(''))+
+      '</tbody></table></div></div>';
+  } else if(CAJA_TAB==='gastos'){
+    var totalGastos=gastos.reduce(function(a,gto){return a+gto.monto;},0);
+    content='<div class="stat-grid" style="margin-bottom:18px">'+
+        '<div class="stat"><div class="stat-lbl">Total de gastos registrados</div><div class="stat-val c-danger">'+money(totalGastos)+'</div><div class="stat-sub">Se descuentan de la utilidad en el corte del periodo</div></div>'+
+      '</div>'+
+      '<div class="card"><div class="card-hdr"><div class="card-title">Gastos de la procesadora</div>'+
+        (canOp?'<button class="btn btn-p" onclick="mAddGasto()">+ Registrar gasto</button>':'')+
+      '</div>'+
+      '<div class="tw"><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Categoría</th><th>Forma</th><th>Monto</th><th>Registró</th>'+(isAdmin?'<th></th>':'')+'</tr></thead><tbody>'+
+      (gastos.length===0?'<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text3)">Sin gastos registrados</td></tr>':
+      gastos.slice().reverse().map(function(gto){
+        return '<tr><td class="mn">'+gto.fecha+'</td><td class="pr">'+gto.concepto+'</td><td><span class="tag">'+(gto.categoria||'otro')+'</span></td>'+
+          '<td class="mn" style="color:var(--text3)">'+(gto.forma||'—')+'</td>'+
+          '<td class="mn" style="color:var(--danger);font-weight:700">'+money(gto.monto)+'</td>'+
+          '<td style="font-size:12px;color:var(--text3)">'+(gto.registradoPor||'—')+'</td>'+
+          (isAdmin?'<td><button class="btn btn-xs btn-d" onclick="delGasto('+gto.id+')">Eliminar</button></td>':'')+
+        '</tr>';
+      }).join(''))+
+      '</tbody></table></div></div>';
+  } else if(CAJA_TAB==='corte'){
+    var hoy=today();
+    var primerDiaMes=hoy.slice(0,8)+'01';
+    var desde=window._CORTE_DESDE||primerDiaMes;
+    var hasta=window._CORTE_HASTA||hoy;
+
+    var ventasPeriodo=notas.filter(function(n){return n.fecha>=desde&&n.fecha<=hasta;}).reduce(function(a,n){return a+(n.total||0);},0);
+    var comprasPeriodo=pedidos.filter(function(p){return p.est==='recibido'&&p.fecha>=desde&&p.fecha<=hasta;}).reduce(function(a,p){return a+(p.total||0);},0);
+    var pagosProvPeriodo=0;
+    pedidos.forEach(function(p){(p.abonos||[]).forEach(function(a){if(a.fecha>=desde&&a.fecha<=hasta)pagosProvPeriodo+=a.monto;});});
+    var cobrosClientesPeriodo=0;
+    notas.forEach(function(n){(n.abonos||[]).forEach(function(a){if(a.fecha>=desde&&a.fecha<=hasta)cobrosClientesPeriodo+=a.monto;});});
+    var gastosPeriodo=gastos.filter(function(gto){return gto.fecha>=desde&&gto.fecha<=hasta;}).reduce(function(a,gto){return a+gto.monto;},0);
+    var pagosJanetPeriodo=deudaJanetMovs.filter(function(m){return m.tipo==='pago'&&m.fecha>=desde&&m.fecha<=hasta;}).reduce(function(a,m){return a+m.monto;},0);
+    var utilidadPeriodo=ventasPeriodo-comprasPeriodo-gastosPeriodo;
+
+    content='<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">Periodo del corte</div></div><div class="card-body">'+
+      '<div class="fg2" style="display:grid;gap:12px;margin-bottom:10px">'+
+        '<div class="field"><label>Desde</label><input id="cor-desde" type="date" value="'+desde+'" onchange="setCortePeriodo()"></div>'+
+        '<div class="field"><label>Hasta</label><input id="cor-hasta" type="date" value="'+hasta+'" onchange="setCortePeriodo()"></div>'+
+      '</div>'+
+      '<button class="btn btn-p" onclick="imprimirCorte(\''+desde+'\',\''+hasta+'\')">🖨 Imprimir corte</button>'+
+    '</div></div>'+
+    '<div class="stat-grid" style="margin-bottom:18px">'+
+      '<div class="stat"><div class="stat-lbl">+ Ventas del periodo</div><div class="stat-val c-ok">'+money(ventasPeriodo)+'</div><div class="stat-sub">Notas de venta</div></div>'+
+      '<div class="stat"><div class="stat-lbl">− Compras del periodo</div><div class="stat-val c-danger">'+money(comprasPeriodo)+'</div><div class="stat-sub">Pedidos recibidos</div></div>'+
+      '<div class="stat"><div class="stat-lbl">− Gastos del periodo</div><div class="stat-val c-danger">'+money(gastosPeriodo)+'</div></div>'+
+      '<div class="stat" style="border-color:'+(utilidadPeriodo>=0?'rgba(46,204,113,.4)':'rgba(192,57,43,.4)')+'"><div class="stat-lbl">UTILIDAD DEL PERIODO</div><div class="stat-val" style="font-size:20px;color:'+(utilidadPeriodo>=0?'var(--accent)':'var(--danger)')+'">'+money(utilidadPeriodo)+'</div><div class="stat-sub">Ventas − compras − gastos</div></div>'+
+    '</div>'+
+    '<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">Movimientos de efectivo del periodo (informativo)</div></div><div class="card-body">'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Cobros a clientes</span><span style="color:var(--accent);font-weight:700">'+money(cobrosClientesPeriodo)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Pagos a proveedores</span><span style="color:var(--danger);font-weight:700">'+money(pagosProvPeriodo)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0"><span>Pagos a Janet (abono a deuda)</span><span style="color:var(--danger);font-weight:700">'+money(pagosJanetPeriodo)+'</span></div>'+
+    '</div></div>'+
+    '<div class="card"><div class="card-hdr"><div class="card-title">Patrimonio y utilidad acumulada (a hoy, no depende del periodo)</div></div><div class="card-body">'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Efectivo en caja</span><span style="font-weight:700">'+money(efectivoDeclarado)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Valor de inventario (cámara + bodega)</span><span style="font-weight:700">'+money(valInv)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Deuda pendiente con Janet</span><span style="font-weight:700;color:var(--warn)">'+money(deudaJanet)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Meta (capital base)</span><span style="font-weight:700">'+money(metaPatrimonio)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:10px 0;font-size:17px"><span style="font-weight:700">Utilidad acumulada total</span><span style="font-weight:700;color:'+(utilidadTotal>=0?'var(--accent)':'var(--danger)')+'">'+money(utilidadTotal)+'</span></div>'+
+    '</div></div>';
   }
   return tabBar+content;
 }
 
 function setCajaTab(t){window._CAJA_TAB=t;nav('caja');}
+function setCortePeriodo(){
+  window._CORTE_DESDE=g('cor-desde')?g('cor-desde').value:window._CORTE_DESDE;
+  window._CORTE_HASTA=g('cor-hasta')?g('cor-hasta').value:window._CORTE_HASTA;
+  nav('caja');
+}
 
 function mAddVale(){
   modal('<div class="modal" style="max-width:400px"><div class="modal-hdr"><div class="modal-title">Agregar vale por cobrar</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
@@ -2855,6 +2968,144 @@ function gSetEfectivo(){
   efectivoDeclarado=parseFloat(g('ef1').value)||0;
   audit('Actualizó efectivo en caja','Caja',money(antes)+' → '+money(efectivoDeclarado));
   persist();cm();nav('caja');
+}
+
+// ══════════════════════════════════════════════════════
+//  UTILIDAD: META DE PATRIMONIO, DEUDA CON JANET, GASTOS
+// ══════════════════════════════════════════════════════
+function mMetaPatrimonio(){
+  modal('<div class="modal" style="max-width:360px"><div class="modal-hdr"><div class="modal-title">Meta de patrimonio (capital base)</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body"><div class="field"><label>Meta ($)</label><input id="mp1" type="number" value="'+metaPatrimonio+'" min="0"></div>'+
+    '<div style="font-size:11px;color:var(--text3);margin-top:8px">Efectivo + inventario + deuda pendiente con Janet debe sumar esta meta. Lo que exceda es utilidad.</div></div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gMetaPatrimonio()">Guardar</button></div>'+
+  '</div>');
+}
+function gMetaPatrimonio(){
+  var antes=metaPatrimonio;
+  metaPatrimonio=parseFloat(g('mp1').value)||0;
+  audit('Actualizó meta de patrimonio','Caja',money(antes)+' → '+money(metaPatrimonio));
+  persist();cm();nav('caja');
+}
+
+function mAjustarDeudaJanet(){
+  modal('<div class="modal" style="max-width:360px"><div class="modal-hdr"><div class="modal-title">Ajustar saldo de deuda con Janet</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body"><div class="field"><label>Saldo pendiente ($)</label><input id="dj1" type="number" value="'+deudaJanet+'" min="0"></div>'+
+    '<div style="font-size:11px;color:var(--text3);margin-top:8px">Usa esto solo para correcciones. Los pagos registrados abajo actualizan el saldo automáticamente.</div></div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gAjustarDeudaJanet()">Guardar</button></div>'+
+  '</div>');
+}
+function gAjustarDeudaJanet(){
+  var antes=deudaJanet;
+  var nuevo=parseFloat(g('dj1').value)||0;
+  deudaJanetMovs.push({id:uid(),fecha:today(),tipo:'ajuste',monto:nuevo-antes,concepto:'Ajuste manual de saldo',forma:'—'});
+  deudaJanet=nuevo;
+  audit('Ajustó saldo de deuda con Janet','Caja',money(antes)+' → '+money(nuevo));
+  persist();cm();nav('caja');
+}
+function gPagoJanet(){
+  var monto=parseFloat(g('pj1')?g('pj1').value:0)||0;
+  var forma=g('pj2')?g('pj2').value:'efectivo';
+  var fecha=g('pj3')?g('pj3').value:today();
+  var nota=g('pj4')?g('pj4').value:'';
+  if(!monto||monto<=0){alert('Ingresa un monto válido');return;}
+  if(forma==='efectivo'&&monto>efectivoDeclarado){alert('Efectivo disponible: '+money(efectivoDeclarado)+'\nNo puedes pagar '+money(monto)+' en efectivo.');return;}
+  deudaJanet=Math.max(0,parseFloat((deudaJanet-monto).toFixed(2)));
+  if(forma==='efectivo')efectivoDeclarado=Math.max(0,efectivoDeclarado-monto);
+  deudaJanetMovs.push({id:uid(),fecha:fecha,tipo:'pago',monto:monto,concepto:nota||'Pago a Janet',forma:forma});
+  audit('Registró pago a Janet','Caja',money(monto)+' · '+forma+(nota?' · '+nota:''));
+  persist();cm();nav('caja');
+}
+
+function mAddGasto(){
+  modal('<div class="modal" style="max-width:400px"><div class="modal-hdr"><div class="modal-title">Registrar gasto</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body"><div class="fg2" style="display:grid;gap:10px">'+
+      '<div class="field"><label>Concepto</label><input id="ga1" type="text" placeholder="Ej: Luz, sueldos, renta..."></div>'+
+      '<div class="field"><label>Categoría</label><input id="ga2" type="text" placeholder="Ej: servicios, nómina, insumos" list="ga2-list"><datalist id="ga2-list"><option>servicios</option><option>nómina</option><option>renta</option><option>mantenimiento</option><option>insumos</option><option>otro</option></datalist></div>'+
+      '<div class="field"><label>Monto ($)</label><input id="ga3" type="number" placeholder="0" min="0"></div>'+
+      '<div class="field"><label>Forma de pago</label><select id="ga4"><option value="efectivo">Efectivo</option><option value="transferencia">Transferencia</option></select></div>'+
+      '<div class="field"><label>Fecha</label><input id="ga5" type="date" value="'+today()+'"></div>'+
+    '</div></div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gAddGasto()">Guardar</button></div>'+
+  '</div>');
+}
+function gAddGasto(){
+  var concepto=g('ga1')?g('ga1').value.trim():'';
+  var categoria=g('ga2')?g('ga2').value.trim():'';
+  var monto=parseFloat(g('ga3')?g('ga3').value:0)||0;
+  var forma=g('ga4')?g('ga4').value:'efectivo';
+  var fecha=g('ga5')?g('ga5').value:today();
+  if(!concepto||!monto){alert('Completa el concepto y el monto');return;}
+  if(forma==='efectivo'&&monto>efectivoDeclarado){alert('Efectivo disponible: '+money(efectivoDeclarado)+'\nNo puedes registrar un gasto de '+money(monto)+' en efectivo.');return;}
+  if(forma==='efectivo')efectivoDeclarado=Math.max(0,efectivoDeclarado-monto);
+  gastos.push({id:uid(),fecha:fecha,concepto:concepto,categoria:categoria||'otro',monto:monto,forma:forma,registradoPor:CUR_USER?CUR_USER.nombre:''});
+  audit('Registró gasto','Caja',concepto+' · '+money(monto)+' · '+forma);
+  persist();cm();nav('caja');
+}
+function delGasto(id){
+  if(!confirm('¿Eliminar este gasto?'))return;
+  var gto=gastos.find(function(x){return x.id===id;});
+  if(!gto)return;
+  if(gto.forma==='efectivo')efectivoDeclarado+=gto.monto;
+  audit('Eliminó gasto','Caja',gto.concepto+' · '+money(gto.monto));
+  gastos=gastos.filter(function(x){return x.id!==id;});
+  persist();nav('caja');
+}
+
+function imprimirCorte(desde,hasta){
+  var valCamara=camara.reduce(function(a,i){return a+i.kg*(i.costo||0);},0);
+  var valBodega=bodega.reduce(function(a,i){return a+i.kg*(i.costo||0);},0);
+  var valInv=valCamara+valBodega;
+  var patrimonioTotal=efectivoDeclarado+valInv+deudaJanet;
+  var utilidadTotal=patrimonioTotal-metaPatrimonio;
+  var ventasPeriodo=notas.filter(function(n){return n.fecha>=desde&&n.fecha<=hasta;}).reduce(function(a,n){return a+(n.total||0);},0);
+  var comprasPeriodo=pedidos.filter(function(p){return p.est==='recibido'&&p.fecha>=desde&&p.fecha<=hasta;}).reduce(function(a,p){return a+(p.total||0);},0);
+  var pagosProvPeriodo=0;
+  pedidos.forEach(function(p){(p.abonos||[]).forEach(function(a){if(a.fecha>=desde&&a.fecha<=hasta)pagosProvPeriodo+=a.monto;});});
+  var cobrosClientesPeriodo=0;
+  notas.forEach(function(n){(n.abonos||[]).forEach(function(a){if(a.fecha>=desde&&a.fecha<=hasta)cobrosClientesPeriodo+=a.monto;});});
+  var gastosPeriodo=gastos.filter(function(gto){return gto.fecha>=desde&&gto.fecha<=hasta;}).reduce(function(a,gto){return a+gto.monto;},0);
+  var pagosJanetPeriodo=deudaJanetMovs.filter(function(m){return m.tipo==='pago'&&m.fecha>=desde&&m.fecha<=hasta;}).reduce(function(a,m){return a+m.monto;},0);
+  var utilidadPeriodo=ventasPeriodo-comprasPeriodo-gastosPeriodo;
+
+  function fila(lbl,val,color){
+    return '<tr><td style="padding:8px 10px;border-bottom:1px solid #eee">'+lbl+'</td><td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:700;color:'+(color||'#111')+'">'+money(val)+'</td></tr>';
+  }
+  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Corte '+desde+' a '+hasta+'</title><style>'+
+    'body{font-family:Arial,sans-serif;margin:0;padding:24px;background:#fff;color:#111}'+
+    'h1{font-size:20px;margin:0 0 4px}'+
+    '.sub{color:#666;font-size:13px;margin-bottom:20px}'+
+    'h2{font-size:14px;background:#1a3a6b;color:#fff;padding:8px 10px;border-radius:4px;margin:20px 0 6px}'+
+    'table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:6px}'+
+    '.tot td{background:#f0f0f0;font-weight:700}'+
+    '</style></head><body>'+
+    '<h1>Bodega de Mariscos y Productos — Corte de periodo</h1>'+
+    '<div class="sub">Periodo: '+desde+' a '+hasta+' · Generado: '+today()+'</div>'+
+    '<h2>Resultado del periodo</h2>'+
+    '<table>'+
+      fila('+ Ventas del periodo (notas de venta)',ventasPeriodo,'#1a7a3a')+
+      fila('− Compras del periodo (pedidos recibidos)',comprasPeriodo,'#b8342e')+
+      fila('− Gastos del periodo',gastosPeriodo,'#b8342e')+
+      '<tr class="tot"><td style="padding:10px">UTILIDAD DEL PERIODO</td><td style="padding:10px;text-align:right">'+money(utilidadPeriodo)+'</td></tr>'+
+    '</table>'+
+    '<h2>Movimientos de efectivo del periodo (informativo)</h2>'+
+    '<table>'+
+      fila('Cobros a clientes',cobrosClientesPeriodo,'#1a7a3a')+
+      fila('Pagos a proveedores',pagosProvPeriodo,'#b8342e')+
+      fila('Pagos a Janet (abono a deuda)',pagosJanetPeriodo,'#b8342e')+
+    '</table>'+
+    '<h2>Patrimonio y utilidad acumulada (al día de hoy)</h2>'+
+    '<table>'+
+      fila('Efectivo en caja',efectivoDeclarado)+
+      fila('Valor de inventario (cámara + bodega)',valInv)+
+      fila('Deuda pendiente con Janet',deudaJanet)+
+      fila('Meta (capital base)',metaPatrimonio)+
+      '<tr class="tot"><td style="padding:10px">UTILIDAD ACUMULADA TOTAL</td><td style="padding:10px;text-align:right">'+money(utilidadTotal)+'</td></tr>'+
+    '</table>'+
+    '</body></html>';
+  var win=window.open('','_blank');
+  win.document.write(html);
+  win.document.close();
+  setTimeout(function(){win.print();},350);
 }
 
 function gCompensacion(){
@@ -3166,7 +3417,7 @@ function resetModulo(mod){
   if(mod==='procesos'||mod==='todo')procesos=[];
   if(mod==='camara'||mod==='todo')camara=[];
   if(mod==='bodega'||mod==='todo')bodega=[];
-  if(mod==='todo'){compensaciones=[];movTransferencias=[];tempLogs=[];efectivoDeclarado=0;}
+  if(mod==='todo'){compensaciones=[];movTransferencias=[];tempLogs=[];efectivoDeclarado=0;gastos=[];deudaJanet=0;deudaJanetMovs=[];}
   persist();nav('config');
   alert('✅ Datos borrados correctamente.');
 }
@@ -3304,6 +3555,7 @@ function exportarDatos(){
     PRODUCTOS:PRODUCTOS,PROVEEDORES:PROVEEDORES,CLIENTES:CLIENTES,PROC_TIPOS:PROC_TIPOS,
     efectivoDeclarado:efectivoDeclarado,saldoTransferencias:saldoTransferencias,
     NEXT_ID:NEXT_ID,nextFolio:nextFolio,
+    metaPatrimonio:metaPatrimonio,deudaJanet:deudaJanet,deudaJanetMovs:deudaJanetMovs,gastos:gastos,
     usuarios:load('users',null)
   };
   var blob=new Blob([JSON.stringify(datos,null,2)],{type:'application/json'});
@@ -3337,6 +3589,10 @@ function importarDatos(input){
       if(d.saldoTransferencias!==undefined)saldoTransferencias=d.saldoTransferencias;
       if(d.NEXT_ID)NEXT_ID=d.NEXT_ID;
       if(d.nextFolio)nextFolio=d.nextFolio;
+      if(d.metaPatrimonio!==undefined)metaPatrimonio=d.metaPatrimonio;
+      if(d.deudaJanet!==undefined)deudaJanet=d.deudaJanet;
+      if(d.deudaJanetMovs)deudaJanetMovs=d.deudaJanetMovs;
+      if(d.gastos)gastos=d.gastos;
       if(d.usuarios)save('users',d.usuarios);
       persist();
       alert('✅ Datos importados. Respaldo del: '+d.fecha);
@@ -3374,6 +3630,10 @@ function aplicarDatos(data){
   if(data.vales)vales=data.vales;
   if(data.auditLog)auditLog=data.auditLog;
   if(data.users)USERS=data.users;
+  if(data.meta_patrimonio!==undefined&&data.meta_patrimonio!==null)metaPatrimonio=data.meta_patrimonio;
+  if(data.deuda_janet!==undefined&&data.deuda_janet!==null)deudaJanet=data.deuda_janet;
+  if(data.deuda_janet_movs)deudaJanetMovs=data.deuda_janet_movs;
+  if(data.gastos)gastos=data.gastos;
   // Actualizar caché local con datos de Supabase
   Object.keys(data).forEach(function(k){saveLocal(k,data[k]);});
 }
