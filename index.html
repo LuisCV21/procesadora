@@ -2580,7 +2580,7 @@ function rCaja(){
     // Pagos a proveedores
     pedidos.forEach(function(p){
       if(p.abonos)p.abonos.forEach(function(a){
-        movs.push({fecha:a.fecha,hora:a.hora||'',tipo:'egreso',concepto:'Pago a '+p.prov,monto:a.monto,forma:a.forma||'efectivo',ref:'Pedido #'+p.id});
+        movs.push({fecha:a.fecha,hora:a.hora||'',tipo:'egreso',concepto:'Pago a '+p.prov,monto:a.monto,forma:a.forma||'efectivo',ref:p.numPedido||('Pedido #'+p.id)});
       });
     });
     // Compensaciones
