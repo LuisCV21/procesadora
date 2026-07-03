@@ -1066,7 +1066,7 @@ function mEditLote(id){
       '<div class="field"><label>Fecha entrada</label><input id="el6" type="date" value="'+l.ent+'"></div>'+
       '<div class="field"><label>Fecha caducidad</label><input id="el7" type="date" value="'+l.cad+'"></div>'+
     '</div></div>'+
-    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="saveEditLote('+id+')">Guardar</button></div>'+
+    '<div class="modal-footer"><button class="btn" style="margin-right:auto" onclick="moverLote('+id+',\'bodega\')">↪ Mover a Bodega</button><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="saveEditLote('+id+')">Guardar</button></div>'+
   '</div>');
 }
 function saveEditLote(id){
@@ -1076,6 +1076,24 @@ function saveEditLote(id){
   l.precio=parseFloat(g('el5').value)||0;
   l.ent=g('el6').value; l.cad=g('el7').value;
   persist();cm();nav('camara');
+}
+function moverLote(id,destino){
+  var origenArr=destino==='bodega'?camara:bodega;
+  var l=origenArr.find(function(x){return x.id===id;});
+  if(!l)return;
+  if(!confirm('¿Mover este lote de '+l.esp+' (Lote '+l.lote+') de '+(destino==='bodega'?'Cámara a Bodega':'Bodega a Cámara')+'?'))return;
+  if(destino==='bodega'){
+    camara=camara.filter(function(x){return x.id!==id;});
+    if(!l.unidad)l.unidad='kg';
+    bodega.push(l);
+  } else {
+    bodega=bodega.filter(function(x){return x.id!==id;});
+    if(!l.cad)l.cad=fechaMas3Meses();
+    if(!l.est)l.est='ok';
+    camara.push(l);
+  }
+  audit('Movió lote de '+(destino==='bodega'?'cámara a bodega':'bodega a cámara'),destino==='bodega'?'Bodega':'Camara',l.esp+' · Lote '+l.lote+' · '+l.kg+' '+(l.unidad||'kg'));
+  persist();cm();nav(destino);
 }
 
 function mEntrada(){
@@ -2135,7 +2153,7 @@ function impReporte(){
   setTimeout(function(){win.print();},350);
 }
 
-var FILAS_POR_PAGINA=15;
+var FILAS_POR_PAGINA=20;
 
 function buildNotaHTML(n, paginaIdx, totalPaginas, partidasPagina){
   var rows='';
@@ -2201,8 +2219,9 @@ function printNota(id){
   var html=pages.map(function(pg,idx){return buildNotaHTML(n,idx,pages.length,pg);}).join('');
   var win=window.open('','_blank');
   win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Nota #'+n.folio+'</title><style>'+
-    'body{font-family:Arial,sans-serif;padding:20px;background:#fff}'+
-    '.nota-wrap{max-width:380px;margin:0 auto;font-size:11px}'+
+    '@page{size:101.6mm 190mm;margin:4mm}'+
+    'body{font-family:Arial,sans-serif;margin:0;padding:8mm;background:#fff}'+
+    '.nota-wrap{width:93.6mm;margin:0 auto;font-size:11px}'+
     '.nota-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}'+
     '.nota-brand-name{font-size:13px;font-weight:700;color:#1a3a6b;line-height:1.3}'+
     '.nota-folio-box{background:#1a3a6b;color:#fff;padding:5px 10px;border-radius:3px;text-align:center;min-width:80px}'+
@@ -2219,7 +2238,7 @@ function printNota(id){
     '.nota-firmas{display:grid;grid-template-columns:1fr 1fr 1fr;border:1px solid #ddd;border-radius:3px;margin-top:8px}'+
     '.nota-firma{padding:5px 8px;text-align:center;font-size:9px;font-weight:700;color:#666;border-right:1px solid #ddd;min-height:36px}'+
     '.nota-firma:last-child{border-right:none}'+
-    '@media print{body{padding:4px}.nota-wrap{page-break-after:always}.nota-wrap:last-child{page-break-after:auto}}'+
+    '@media print{body{padding:0;width:93.6mm}.nota-wrap{page-break-after:always;margin:0 auto}.nota-wrap:last-child{page-break-after:auto}}'+
   '</style></head><body>'+html+'</body></html>');
   win.document.close();
   setTimeout(function(){win.print();},350);
@@ -2231,19 +2250,28 @@ function initNN(){
     partidas:[{cant:'',unidad:'kg',loteId:'',precio:'',importe:''},{cant:'',unidad:'kg',loteId:'',precio:'',importe:''},{cant:'',unidad:'kg',loteId:'',precio:'',importe:''}]};
 }
 
+function lotesVentaDisp(){
+  return camara.filter(function(l){return l.kg>0;}).map(function(l){return {ref:l,origen:'Cámara'};})
+    .concat(bodega.filter(function(l){return l.kg>0;}).map(function(l){return {ref:l,origen:'Bodega'};}));
+}
+function buscarLoteVenta(id){
+  return camara.find(function(x){return x.id===id;})||bodega.find(function(x){return x.id===id;});
+}
 function rNuevaNota(){
   if(!nuevaNota)initNN();
   var co=CLIENTES.map(function(c){return '<option value="'+c+'"'+(nuevaNota.cliente===c?' selected':'')+'>'+c+'</option>';}).join('');
-  var lotesDisp=camara.filter(function(l){return l.kg>0;});
-  var po=lotesDisp.map(function(l){
+  var lotesDisp=lotesVentaDisp();
+  var po=lotesDisp.map(function(o){
+    var l=o.ref;
     return '<option value="'+l.id+'"'+(nuevaNota.partidas.some(function(p){return p.loteId===l.id;})?' ':'')+'>'
-      +l.esp+' — Lote '+l.lote+' ('+l.kg.toFixed(1)+' kg · costo: '+money(l.costo||0)+'/kg)</option>';
+      +l.esp+' — Lote '+l.lote+' ('+l.kg.toFixed(1)+' '+(l.unidad||'kg')+' · costo: '+money(l.costo||0)+'/'+(l.unidad||'kg')+' · '+o.origen+')</option>';
   }).join('');
   var tot=nuevaNota.partidas.reduce(function(a,p){return a+(parseFloat(p.importe)||0);},0);
   var filas=nuevaNota.partidas.map(function(p,i){
-    var selLote=lotesDisp.find(function(l){return l.id===p.loteId;});
-    var poFila=lotesDisp.map(function(l){
-      return '<option value="'+l.id+'"'+(p.loteId===l.id?' selected':'')+'>'+l.esp+' — Lote '+l.lote+' ('+l.kg.toFixed(1)+' kg · costo: '+money(l.costo||0)+'/kg)</option>';
+    var selLote=buscarLoteVenta(p.loteId);
+    var poFila=lotesDisp.map(function(o){
+      var l=o.ref;
+      return '<option value="'+l.id+'"'+(p.loteId===l.id?' selected':'')+'>'+l.esp+' — Lote '+l.lote+' ('+l.kg.toFixed(1)+' '+(l.unidad||'kg')+' · costo: '+money(l.costo||0)+'/'+(l.unidad||'kg')+' · '+o.origen+')</option>';
     }).join('');
     return '<div class="part-row" id="prow'+i+'">'+
       '<div class="field"><label>Cant.</label><input id="nc'+i+'" type="number" value="'+p.cant+'" min="0" placeholder="0" style="padding:8px 9px;font-size:15px" oninput="cimp('+i+')"></div>'+
@@ -2318,7 +2346,7 @@ function updT(){
 function aun(i){
   var ncon=g('ncon'+i);if(!ncon)return;
   var lid=parseInt(ncon.value);
-  var lote=camara.find(function(x){return x.id===lid;});
+  var lote=buscarLoteVenta(lid);
   if(lote){
     var np=g('np'+i);
     // Precargar precio de venta autorizado del lote
@@ -2357,19 +2385,20 @@ function gNota(){
   for(var i=0;i<nuevaNota.partidas.length;i++){
     var p=nuevaNota.partidas[i];
     if(!p.loteId||!p.cant)continue;
-    var lote=camara.find(function(x){return x.id===parseInt(p.loteId);});
+    var lote=buscarLoteVenta(parseInt(p.loteId));
     if(!lote)continue;
     var cant=parseFloat(p.cant)||0;
     if(cant<=0)continue;
-    if(lote.kg<cant){errStock.push(lote.esp+' Lote '+lote.lote+': solicitado '+cant+' kg, disponible '+lote.kg.toFixed(1)+' kg');continue;}
-    parts.push({cant:cant,unidad:'kg',concepto:lote.esp,lote:lote.lote,loteId:lote.id,precio:parseFloat(p.precio)||0,importe:parseFloat(p.importe)||0});
+    var unidadLote=lote.unidad||'kg';
+    if(lote.kg<cant){errStock.push(lote.esp+' Lote '+lote.lote+': solicitado '+cant+' '+unidadLote+', disponible '+lote.kg.toFixed(1)+' '+unidadLote);continue;}
+    parts.push({cant:cant,unidad:unidadLote,concepto:lote.esp,lote:lote.lote,loteId:lote.id,precio:parseFloat(p.precio)||0,importe:parseFloat(p.importe)||0});
   }
   if(errStock.length>0){alert('Stock insuficiente:\n'+errStock.join('\n'));return;}
   if(parts.length===0){alert('Agrega al menos una partida válida');return;}
   var tot=parts.reduce(function(a,p){return a+p.importe;},0);
   var cond=nuevaNota.condiciones||'Crédito';
   parts.forEach(function(p){
-    var lote=camara.find(function(x){return x.id===p.loteId;});
+    var lote=buscarLoteVenta(p.loteId);
     if(lote)lote.kg=Math.max(0,parseFloat((lote.kg-p.cant).toFixed(3)));
   });
   var folioNuevo=nextFolio;
@@ -2535,7 +2564,7 @@ function mEditBodega(id){
       '<div class="field"><label>Costo ($)</label><input id="be5" type="number" value="'+(l.costo||0)+'" min="0"></div>'+
       '<div class="field"><label>Precio ($)</label><input id="be6" type="number" value="'+(l.precio||0)+'" min="0"></div>'+
     '</div></div>'+
-    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gEditBodega('+id+')">Guardar</button></div>'+
+    '<div class="modal-footer"><button class="btn" style="margin-right:auto" onclick="moverLote('+id+',\'camara\')">↪ Mover a Cámara</button><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gEditBodega('+id+')">Guardar</button></div>'+
   '</div>');
 }
 function gEditBodega(id){
