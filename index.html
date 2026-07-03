@@ -740,7 +740,8 @@ function nav(tab){
 function tbAct(tab){
   var canOp=ROL==='admin'||ROL==='gerente';
   var m={
-    camara:canOp?'<button class="btn btn-w" onclick="mTempLog()">🌡 Registrar temperatura</button>':'',
+    camara:(canOp?'<button class="btn btn-w" onclick="mTempLog()">🌡 Registrar temperatura</button>':'')+
+           (ROL==='admin'?'<button class="btn btn-w" onclick="actualizarCaducidades()" style="margin-left:6px">📅 Actualizar caducidades (+3 meses)</button>':''),
   };
   return m[tab]||'';
 }
@@ -993,6 +994,17 @@ function toggleCamExp(esp){
 }
 function setFC(f){FILTRO_CAM=f;nav('camara');}
 function setFCQ(v){FILTRO_CAM_Q=v;nav('camara');}
+function actualizarCaducidades(){
+  if(!confirm('¿Actualizar la fecha de caducidad de TODOS los lotes en cámara a 3 meses desde su fecha de entrada?\n\nEsto sobreescribirá las fechas actuales.'))return;
+  camara.forEach(function(item){
+    var base=item.ent||today();
+    var d=new Date(base+'T12:00:00');
+    d.setMonth(d.getMonth()+3);
+    item.cad=d.toISOString().slice(0,10);
+  });
+  audit('Actualizó caducidades masivamente','Camara','Todos los lotes → +3 meses desde fecha de entrada');
+  persist();nav('camara');
+}
 function bajaLote(id,esGrupo){
   if(esGrupo){
     // id es el nombre del grupo
