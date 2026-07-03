@@ -515,7 +515,7 @@ async function doLogin(){
   g('login-screen').style.display='none';
   g('app').classList.add('visible');
   updateUserUI();
-  if(ROL!=='admin')g('ni-config-wrap').style.display='none';
+  if(ROL!=='admin'&&ROL!=='gerente')g('ni-config-wrap').style.display='none';
   nav('dashboard');
 }
 
@@ -3018,13 +3018,15 @@ function rInvTotal(){
 //  CONFIGURACIÓN
 // ══════════════════════════════════════════════════════
 function rConfig(){
-  if(ROL!=='admin')return '<div class="card"><div class="card-body"><div style="text-align:center;padding:40px;color:var(--text3)">Solo el administrador puede acceder a la configuración.</div></div></div>';
-  var tabs=['productos','proveedores','clientes','proc_tipos','usuarios','auditoria'];
-  var labels=['Productos','Proveedores','Clientes','Tipos de proceso','Usuarios','🔍 Auditoría'];
+  if(ROL!=='admin'&&ROL!=='gerente')return '<div class="card"><div class="card-body"><div style="text-align:center;padding:40px;color:var(--text3)">Solo el administrador puede acceder a la configuración.</div></div></div>';
+  var isAdmin=ROL==='admin';
+  if(!isAdmin)CFG_TAB='productos';
+  var tabs=isAdmin?['productos','proveedores','clientes','proc_tipos','usuarios','auditoria']:['productos'];
+  var labels=isAdmin?['Productos','Proveedores','Clientes','Tipos de proceso','Usuarios','🔍 Auditoría']:['Productos'];
   var tabBar='<div class="config-tabs">'+tabs.map(function(t,i){return '<div class="cfg-tab'+(CFG_TAB===t?' active':'')+'" onclick="setCfgTab(\''+t+'\')">'+labels[i]+'</div>';}).join('')+'</div>';
   var body='';
   if(CFG_TAB==='productos'){
-    body='<div class="card-hdr"><div class="card-title">Catálogo de productos</div><button class="btn btn-p" onclick="mAddItem(\'producto\')">+ Agregar producto</button></div>'+
+    body='<div class="card-hdr"><div class="card-title">Catálogo de productos</div>'+(isAdmin?'<button class="btn btn-p" onclick="mAddItem(\'producto\')">+ Agregar producto</button>':'')+'</div>'+
       '<div class="tw"><table><thead><tr><th>#</th><th>Nombre</th><th>Unidad</th><th>Categoría</th><th>Acciones</th></tr></thead><tbody>'+
       PRODUCTOS.map(function(p,i){
         return '<tr><td class="mn" style="color:var(--text3)">'+(p.id||i+1)+'</td>'+
@@ -3033,7 +3035,7 @@ function rConfig(){
           '<td><span class="tag">'+p.cat+'</span></td>'+
           '<td><div style="display:flex;gap:3px">'+
             '<button class="btn btn-xs" onclick="mEditItem('+i+')">Editar</button>'+
-            '<button class="btn btn-xs btn-d" onclick="delItem(\'producto\','+i+')">Eliminar</button>'+
+            (isAdmin?'<button class="btn btn-xs btn-d" onclick="delItem(\'producto\','+i+')">Eliminar</button>':'')+
           '</div></td></tr>';
       }).join('')+
       '</tbody></table></div>';
@@ -3093,7 +3095,8 @@ function rConfig(){
     '</tbody></table></div>');
   }
   return tabBar+'<div class="card" style="overflow:hidden">'+body+'</div>'+
-    '<div style="margin-top:14px;font-size:13px;color:var(--text3);text-align:center">Los cambios se guardan automáticamente. Solo el administrador puede acceder a esta sección.</div>'+
+    '<div style="margin-top:14px;font-size:13px;color:var(--text3);text-align:center">Los cambios se guardan automáticamente.'+(isAdmin?' Solo el administrador puede acceder al resto de esta sección.':'')+'</div>'+
+    (!isAdmin?'':
     '<div class="card" style="margin-top:18px"><div class="card-hdr"><div class="card-title">📦 Exportar / Importar datos</div></div><div class="card-body">'+
       '<p style="font-size:14px;color:var(--text2);margin-bottom:16px">Usa esto para mover los datos entre computadoras. Exporta en una máquina e importa en la otra.</p>'+
       '<div style="display:flex;gap:12px;flex-wrap:wrap">'+
@@ -3136,7 +3139,7 @@ function rConfig(){
           '<button class="btn btn-d" onclick="resetModulo(\'todo\')">⚠ Borrar TODO</button>'+
         '</div>'+
       '</div>'+
-    '</div></div>';
+    '</div></div>');
 }
 
 function setCfgTab(t){CFG_TAB=t;nav('config');}
@@ -3401,7 +3404,7 @@ function arrancar(){
       g('login-screen').style.display='none';
       g('app').classList.add('visible');
       updateUserUI();
-      if(ROL!=='admin')g('ni-config-wrap').style.display='none';
+      if(ROL!=='admin'&&ROL!=='gerente')g('ni-config-wrap').style.display='none';
       nav('dashboard');
     }
   }
