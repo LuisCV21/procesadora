@@ -2294,7 +2294,7 @@ function rNuevaNota(){
       '<div class="field"><label>Condiciones</label><select id="nco2" style="padding:9px 10px;font-size:15px"><option value="Crédito"'+(nuevaNota.condiciones==='Crédito'?' selected':'')+'>Crédito</option><option value="Contado"'+(nuevaNota.condiciones==='Contado'?' selected':'')+'>Contado</option></select></div>'+
     '</div>'+
     '<div class="fg2" style="display:grid;gap:10px">'+
-      '<div class="field"><label>Cliente</label><select id="ncl" style="padding:9px 10px;font-size:15px"><option value="">Seleccionar cliente...</option>'+co+'</select></div>'+
+      '<div class="field"><label>Cliente</label><div style="display:flex;gap:6px"><select id="ncl" style="padding:9px 10px;font-size:15px;flex:1"><option value="">Seleccionar cliente...</option>'+co+'</select><button type="button" class="btn" style="padding:9px 12px;white-space:nowrap" onclick="mAddClienteRapido()">+ Nuevo</button></div></div>'+
       '<div class="field"><label>Teléfono</label><input id="nte" type="text" placeholder="782-000-0000" value="'+(nuevaNota.tel||'')+'"></div>'+
       '<div class="field"><label>Domicilio</label><input id="ndo" type="text" placeholder="Calle y número" value="'+(nuevaNota.domicilio||'')+'"></div>'+
       '<div class="field"><label>Ciudad / Estado</label><input id="nci" type="text" value="'+(nuevaNota.ciudad||'Poza Rica, Ver.')+'"></div>'+
@@ -2370,6 +2370,24 @@ function addP(){
   syncNN();
   nuevaNota.partidas.push({cant:'',unidad:'kg',loteId:'',precio:'',importe:''});
   nav('nueva-nota');
+}
+function mAddClienteRapido(){
+  syncNN();
+  modal('<div class="modal" style="max-width:380px"><div class="modal-hdr"><div class="modal-title">Nuevo cliente</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body"><div class="field"><label>Nombre</label><input id="ncr-n" type="text" placeholder="Nombre del cliente"></div></div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gAddClienteRapido()">Guardar</button></div>'+
+  '</div>');
+}
+function gAddClienteRapido(){
+  var n=(g('ncr-n')?g('ncr-n').value:'').trim();
+  if(!n){alert('Escribe un nombre');return;}
+  if(CLIENTES.indexOf(n)<0){
+    CLIENTES.push(n);
+    audit('Agregó cliente','Notas',n);
+    persist();
+  }
+  nuevaNota.cliente=n;
+  cm();nav('nueva-nota');
 }
 function elP(i){
   syncNN();
