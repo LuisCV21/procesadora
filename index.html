@@ -173,6 +173,60 @@ td.mn{font-family:var(--mono);font-size:13px}
 .tl-t{font-size:14px;color:var(--text);font-weight:500}
 .tl-s{font-size:13px;color:var(--text3);margin-top:2px}
 hr.div{border:none;border-top:1px solid var(--border);margin:14px 0}
+/* ── HAMBURGER ── */
+.ham-btn{display:none;align-items:center;justify-content:center;width:40px;height:40px;cursor:pointer;border:none;background:none;border-radius:var(--r);flex-shrink:0;padding:0}
+.ham-btn span{display:block;width:20px;height:2px;background:var(--text2);border-radius:2px;transition:all .2s;margin:4px 0}
+/* ── BACKDROP ── */
+.sb-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:799}
+.sb-backdrop.open{display:block}
+/* ══ MÓVIL ══ */
+@media(max-width:768px){
+  /* Sidebar: cajón deslizable */
+  .sidebar{position:fixed;top:0;left:0;height:100%;z-index:800;transform:translateX(-260px);transition:transform .25s ease;box-shadow:none}
+  .sidebar.open{transform:translateX(0);box-shadow:6px 0 28px rgba(0,0,0,.35)}
+  /* Main: ancho completo */
+  .main{width:100%}
+  /* Hamburger visible */
+  .ham-btn{display:flex}
+  /* Topbar compacta */
+  .topbar{padding:0 10px;gap:8px;height:52px}
+  .page-title{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+  .page-sub{display:none}
+  /* Contenido */
+  .content{padding:12px}
+  /* Modales: bottom sheet */
+  .overlay{padding:0;align-items:flex-end}
+  .modal,.modal-wide{max-width:100%!important;border-radius:16px 16px 0 0;max-height:92vh}
+  /* Formularios: 1 columna */
+  .fg2,.fg3,.fg4{grid-template-columns:1fr!important}
+  .two-col{grid-template-columns:1fr!important}
+  /* Part rows: simplificado */
+  .part-row{grid-template-columns:1fr 80px 86px 34px;gap:6px}
+  /* Stats: 2 columnas */
+  .stat-grid{grid-template-columns:1fr 1fr}
+  .stat{padding:12px}
+  .stat-val{font-size:20px}
+  .stat-lbl{font-size:11px}
+  /* Config tabs: scroll horizontal */
+  .config-tabs{overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px;-webkit-overflow-scrolling:touch}
+  .cfg-tab{white-space:nowrap;flex-shrink:0;padding:10px 14px}
+  /* Card headers: apilados */
+  .card-hdr{flex-direction:column;align-items:flex-start;gap:8px}
+  /* Login */
+  .login-box{width:calc(100vw - 32px);padding:28px 20px}
+  /* Status bar: solo punto */
+  #sb-label{display:none}
+  #sb-status{padding:5px 8px}
+  /* Botones: táctiles */
+  .btn{min-height:38px}
+  .btn-p{min-height:38px}
+  /* Topbar-right: sin overflow */
+  .topbar-right{overflow:hidden;gap:6px}
+}
+@media(max-width:420px){
+  .stat-grid{grid-template-columns:1fr 1fr}
+  .page-title{max-width:130px}
+}
 </style>
 </head>
 <body>
@@ -201,6 +255,7 @@ hr.div{border:none;border-top:1px solid var(--border);margin:14px 0}
 
 <!-- ══ APP ══ -->
 <div id="app">
+<div id="sb-backdrop" class="sb-backdrop" onclick="closeSidebar()"></div>
 <div class="shell">
 
 <!-- SIDEBAR -->
@@ -265,7 +320,10 @@ hr.div{border:none;border-top:1px solid var(--border);margin:14px 0}
 <!-- MAIN -->
 <div class="main">
   <div class="topbar">
-    <div>
+    <button class="ham-btn" onclick="toggleSidebar()" aria-label="Menú">
+      <span></span><span></span><span></span>
+    </button>
+    <div style="flex:1;min-width:0">
       <div class="page-title" id="page-title">Resumen del día</div>
       <div class="page-sub" id="page-sub">Resumen operativo</div>
     </div>
@@ -641,8 +699,20 @@ var TAB_INFO={
   config:{t:'Configuración del sistema',s:'Productos · proveedores · clientes · usuarios'},
 };
 
+function toggleSidebar(){
+  var s=document.querySelector('.sidebar');
+  var b=g('sb-backdrop');
+  var open=s.classList.toggle('open');
+  if(open)b.classList.add('open'); else b.classList.remove('open');
+}
+function closeSidebar(){
+  document.querySelector('.sidebar').classList.remove('open');
+  g('sb-backdrop').classList.remove('open');
+}
+
 function nav(tab){
   CUR_TAB=tab;
+  closeSidebar();
   document.querySelectorAll('.nav-item').forEach(function(el){el.classList.remove('active');});
   var ni=g('ni-'+( tab==='nueva-nota'?'notas':tab));
   if(ni)ni.classList.add('active');
