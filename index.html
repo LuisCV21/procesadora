@@ -695,6 +695,8 @@ var auditLog=load('auditLog',[]);
 // Utilidad / patrimonio: meta fija y gastos (los vales por cobrar existentes ya cubren lo que se le debe a Janet)
 var metaPatrimonio=load('meta_patrimonio',1000000);
 var gastos=load('gastos',[]);
+// Punto de partida del estado de cuenta de caja: el efectivo que había el día que se empezó a usar el sistema
+var saldoInicialCaja=load('saldo_inicial_caja',{monto:0,fecha:today()});
 
 function persist(){
   save('camara',camara);save('procesos',procesos);save('pedidos',pedidos);save('notas',notas);
@@ -704,7 +706,7 @@ function persist(){
   save('mov_tarjeta',movTransferencias);save('saldo_tarjeta',saldoTransferencias);
   save('compensaciones',compensaciones);save('temp_logs',tempLogs);
   save('next_pedido_num',nextPedidoNum);save('vales',vales);save('auditLog',auditLog);
-  save('meta_patrimonio',metaPatrimonio);save('gastos',gastos);
+  save('meta_patrimonio',metaPatrimonio);save('gastos',gastos);save('saldo_inicial_caja',saldoInicialCaja);
 }
 
 // ══════════════════════════════════════════════════════
@@ -2675,18 +2677,25 @@ function bajaBodega(id){
 // Reconstruye el estado de cuenta de efectivo a partir de las fuentes de datos
 // (notas, pedidos, vales, gastos, ajustes manuales) — no depende de un ledger aparte,
 // así nunca se puede desincronizar de los datos reales.
+// Orden dentro del mismo día: compras/pedidos, cobros de vale, gastos, vales nuevos, ventas.
+// La hora real solo existe en algunos registros (abonos de pedidos/notas); cuando no existe
+// se usa esta categoría en vez de una hora inventada, para no mezclar cosas al azar.
+var CAT_CAJA={pedido:1,valeCobro:2,gasto:3,valeNuevo:4,nota:5,ajuste:0};
 function getMovsCaja(){
   var movs=[];
+  if(saldoInicialCaja&&saldoInicialCaja.monto){
+    movs.push({fecha:saldoInicialCaja.fecha||today(),hora:'00:00',cat:-1,tipo:'inicial',concepto:'Saldo inicial',monto:saldoInicialCaja.monto,ref:'—'});
+  }
   notas.forEach(function(n){
     var tieneEfectivo=false;
     (n.abonos||[]).forEach(function(a){
       if(a.forma==='efectivo'){
         tieneEfectivo=true;
-        movs.push({fecha:a.fecha,hora:a.hora||'00:00',tipo:'abono',concepto:'Cobro nota #'+n.folio+' — '+n.cliente,monto:a.monto,ref:'Nota #'+n.folio});
+        movs.push({fecha:a.fecha,hora:a.hora||'00:00',cat:CAT_CAJA.nota,tipo:'abono',concepto:'Cobro nota #'+n.folio+' — '+n.cliente,monto:a.monto,ref:'Nota #'+n.folio});
       }
     });
     if(n.condiciones==='Contado'&&n.pagada&&!tieneEfectivo){
-      movs.push({fecha:n.fecha,hora:'00:00',tipo:'abono',concepto:'Venta de contado nota #'+n.folio+' — '+n.cliente,monto:n.total,ref:'Nota #'+n.folio});
+      movs.push({fecha:n.fecha,hora:'00:00',cat:CAT_CAJA.nota,tipo:'abono',concepto:'Venta de contado nota #'+n.folio+' — '+n.cliente,monto:n.total,ref:'Nota #'+n.folio});
     }
   });
   pedidos.forEach(function(p){
@@ -2694,24 +2703,25 @@ function getMovsCaja(){
     (p.abonos||[]).forEach(function(a){
       if(a.forma==='efectivo'){
         tieneEfectivo=true;
-        movs.push({fecha:a.fecha,hora:a.hora||'00:00',tipo:'cargo',concepto:'Pago a '+p.prov,monto:a.monto,ref:p.numPedido||('Pedido #'+p.id)});
+        movs.push({fecha:a.fecha,hora:a.hora||'00:00',cat:CAT_CAJA.pedido,tipo:'cargo',concepto:'Pago a '+p.prov,monto:a.monto,ref:p.numPedido||('Pedido #'+p.id)});
       }
     });
     if(p.condiciones==='Contado'&&p.pagado&&!tieneEfectivo){
-      movs.push({fecha:p.fecha,hora:'00:00',tipo:'cargo',concepto:'Compra de contado a '+p.prov+' (entrada directa)',monto:p.montoPagado||p.total||0,ref:p.numPedido||('Pedido #'+p.id)});
+      movs.push({fecha:p.fecha,hora:'00:00',cat:CAT_CAJA.pedido,tipo:'cargo',concepto:'Compra de contado a '+p.prov+' (entrada directa)',monto:p.montoPagado||p.total||0,ref:p.numPedido||('Pedido #'+p.id)});
     }
   });
   vales.forEach(function(v){
+    if(v.excluirEstadoCuenta)return;
     if(v.efectivoRestado){
-      movs.push({fecha:v.fecha,hora:'00:00',tipo:'cargo',concepto:'Vale a '+v.negocio+(v.concepto?' — '+v.concepto:''),monto:v.monto,ref:'Vale #'+v.id});
+      movs.push({fecha:v.fecha,hora:'00:00',cat:CAT_CAJA.valeNuevo,tipo:'cargo',concepto:'Vale a '+v.negocio+(v.concepto?' — '+v.concepto:''),monto:v.monto,ref:'Vale #'+v.id});
     }
     if(v.est==='cobrado'){
-      movs.push({fecha:v.fechaCobro,hora:'00:01',tipo:'abono',concepto:'Cobro de vale — '+v.negocio,monto:v.monto,ref:'Vale #'+v.id});
+      movs.push({fecha:v.fechaCobro,hora:'00:00',cat:CAT_CAJA.valeCobro,tipo:'abono',concepto:'Cobro de vale — '+v.negocio,monto:v.monto,ref:'Vale #'+v.id});
     }
   });
   gastos.forEach(function(gto){
     if(gto.forma==='efectivo'){
-      movs.push({fecha:gto.fecha,hora:'00:00',tipo:'cargo',concepto:'Gasto: '+gto.concepto,monto:gto.monto,ref:gto.categoria||'gasto'});
+      movs.push({fecha:gto.fecha,hora:'00:00',cat:CAT_CAJA.gasto,tipo:'cargo',concepto:'Gasto: '+gto.concepto,monto:gto.monto,ref:gto.categoria||'gasto'});
     }
   });
   auditLog.forEach(function(a){
@@ -2722,18 +2732,21 @@ function getMovsCaja(){
         var despues=parseFloat(m[2].replace(/,/g,''));
         var delta=despues-antes;
         if(delta!==0){
-          movs.push({fecha:a.fecha,hora:a.hora||'00:00',tipo:delta>0?'abono':'cargo',concepto:'Ajuste manual de efectivo',monto:Math.abs(delta),ref:'Auditoría'});
+          movs.push({fecha:a.fecha,hora:a.hora||'00:00',cat:CAT_CAJA.ajuste,tipo:delta>0?'abono':'cargo',concepto:'Ajuste manual de efectivo',monto:Math.abs(delta),ref:'Auditoría'});
         }
       }
     }
   });
   movs.sort(function(x,y){
-    var fx=x.fecha+' '+(x.hora||'00:00'),fy=y.fecha+' '+(y.hora||'00:00');
-    return fx<fy?-1:fx>fy?1:0;
+    if(x.fecha!==y.fecha)return x.fecha<y.fecha?-1:1;
+    if(x.cat!==y.cat)return x.cat-y.cat;
+    var hx=x.hora||'00:00',hy=y.hora||'00:00';
+    return hx<hy?-1:hx>hy?1:0;
   });
   var saldo=0;
   movs.forEach(function(m){
-    saldo+=(m.tipo==='abono'?m.monto:-m.monto);
+    if(m.tipo==='inicial')saldo=m.monto;
+    else saldo+=(m.tipo==='abono'?m.monto:-m.monto);
     m.saldo=saldo;
   });
   return movs;
@@ -3143,6 +3156,22 @@ function gMetaPatrimonio(){
   var antes=metaPatrimonio;
   metaPatrimonio=parseFloat(g('mp1').value)||0;
   audit('Actualizó meta de patrimonio','Caja',money(antes)+' → '+money(metaPatrimonio));
+  persist();cm();nav('caja');
+}
+function mSaldoInicialCaja(){
+  modal('<div class="modal" style="max-width:360px"><div class="modal-hdr"><div class="modal-title">Saldo inicial de caja</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<p style="font-size:13px;color:var(--text3);margin-bottom:14px">Punto de partida del estado de cuenta: el efectivo que había el día que se empezó a usar el sistema.</p>'+
+      '<div class="field" style="margin-bottom:10px"><label>Monto ($)</label><input id="si1" type="number" value="'+(saldoInicialCaja.monto||0)+'" min="0"></div>'+
+      '<div class="field"><label>Fecha</label><input id="si2" type="date" value="'+(saldoInicialCaja.fecha||today())+'"></div>'+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gSaldoInicialCaja()">Guardar</button></div>'+
+  '</div>');
+}
+function gSaldoInicialCaja(){
+  var antes=saldoInicialCaja.monto||0;
+  saldoInicialCaja={monto:parseFloat(g('si1').value)||0,fecha:g('si2').value||today()};
+  audit('Actualizó saldo inicial de caja','Caja',money(antes)+' → '+money(saldoInicialCaja.monto)+' ('+saldoInicialCaja.fecha+')');
   persist();cm();nav('caja');
 }
 
@@ -3761,6 +3790,7 @@ function aplicarDatos(data){
   if(data.users)USERS=data.users;
   if(data.meta_patrimonio!==undefined&&data.meta_patrimonio!==null)metaPatrimonio=data.meta_patrimonio;
   if(data.gastos)gastos=data.gastos;
+  if(data.saldo_inicial_caja)saldoInicialCaja=data.saldo_inicial_caja;
   // Actualizar caché local con datos de Supabase
   Object.keys(data).forEach(function(k){saveLocal(k,data[k]);});
 }
