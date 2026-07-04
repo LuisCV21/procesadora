@@ -2918,8 +2918,10 @@ function mAddVale(){
 function gVale(){
   var n=g('vn').value.trim(),c=g('vc').value.trim(),m=parseFloat(g('vm').value)||0,f=g('vf').value;
   if(!n||!m){alert('Completa negocio y monto');return;}
-  vales.push({id:uid(),negocio:n,concepto:c,monto:m,fecha:f,est:'pendiente',fechaCobro:null});
-  audit('Creó vale por cobrar','Caja',n+' · '+money(m)+(c?' · '+c:''));
+  if(m>efectivoDeclarado){alert('Efectivo disponible: '+money(efectivoDeclarado)+'\nNo puedes registrar un vale de '+money(m)+' en efectivo.');return;}
+  vales.push({id:uid(),negocio:n,concepto:c,monto:m,fecha:f,est:'pendiente',fechaCobro:null,efectivoRestado:true});
+  efectivoDeclarado=Math.max(0,efectivoDeclarado-m);
+  audit('Creó vale por cobrar — descontado del efectivo','Caja',n+' · '+money(m)+(c?' · '+c:''));
   persist();cm();nav('caja');
 }
 function cobrarVale(id){
@@ -2954,7 +2956,12 @@ function revertirVale(id){
 function delVale(id){
   if(!confirm('¿Eliminar este vale?'))return;
   var v=vales.find(function(x){return x.id===id;});
-  if(v)audit('Eliminó vale','Caja',v.negocio+' · '+money(v.monto));
+  if(v&&v.est==='pendiente'&&v.efectivoRestado){
+    efectivoDeclarado+=v.monto;
+    audit('Eliminó vale — devuelto al efectivo','Caja',v.negocio+' · '+money(v.monto));
+  }else if(v){
+    audit('Eliminó vale','Caja',v.negocio+' · '+money(v.monto));
+  }
   vales=vales.filter(function(x){return x.id!==id;});
   persist();nav('caja');
 }
