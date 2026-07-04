@@ -2713,11 +2713,17 @@ function rCaja(){
     '</div>'+
     (valesCob.length>0?
     '<div class="card"><div class="card-hdr"><div class="card-title" style="color:var(--text3)">Vales cobrados</div></div>'+
-    '<div class="tw"><table><thead><tr><th>Negocio / Cliente</th><th>Concepto</th><th>Fecha</th><th>Monto</th><th>Cobrado</th></tr></thead><tbody>'+
+    '<div class="tw"><table><thead><tr><th>Negocio / Cliente</th><th>Concepto</th><th>Fecha</th><th>Monto</th><th>Cobrado</th><th>Efectivo</th><th>Acciones</th></tr></thead><tbody>'+
     valesCob.sort(function(a,b){return b.fechaCobro.localeCompare(a.fechaCobro);}).map(function(v){
+      var sumado=v.efectivoSumado;
       return '<tr><td>'+v.negocio+'</td><td style="color:var(--text3)">'+v.concepto+'</td><td class="mn">'+v.fecha+'</td>'+
         '<td class="mn" style="color:var(--text3)">'+money(v.monto)+'</td>'+
-        '<td class="mn" style="color:var(--accent)">'+v.fechaCobro+'</td></tr>';
+        '<td class="mn" style="color:var(--accent)">'+v.fechaCobro+'</td>'+
+        '<td>'+(sumado?'<span class="pill p-ok">Sumado</span>':'<span class="pill p-warn">Pendiente acreditar</span>')+'</td>'+
+        '<td><div style="display:flex;gap:4px;flex-wrap:wrap">'+
+          (!sumado&&canOp?'<button class="btn btn-xs btn-p" onclick="acreditarValeEfectivo('+v.id+')">+ Acreditar</button>':'')+
+          (canOp?'<button class="btn btn-xs btn-w" onclick="revertirVale('+v.id+')">↩ Revertir</button>':'')+
+        '</div></td></tr>';
     }).join('')+
     '</tbody></table></div></div>':'');
 
@@ -2916,8 +2922,29 @@ function cobrarVale(id){
   var v=vales.find(function(x){return x.id===id;});
   if(!v)return;
   if(!confirm('¿Marcar como cobrado el vale de '+v.negocio+' por '+money(v.monto)+'?'))return;
-  v.est='cobrado';v.fechaCobro=today();
-  audit('Cobró vale','Caja',v.negocio+' · '+money(v.monto));
+  v.est='cobrado';v.fechaCobro=today();v.efectivoSumado=true;
+  efectivoDeclarado+=v.monto;
+  audit('Cobró vale — sumado al efectivo','Caja',v.negocio+' · '+money(v.monto));
+  persist();nav('caja');
+}
+function acreditarValeEfectivo(id){
+  var v=vales.find(function(x){return x.id===id;});
+  if(!v)return;
+  if(!confirm('¿Acreditar '+money(v.monto)+' al efectivo en caja?\nEsto suma el monto al fondo (vale de '+v.negocio+').'))return;
+  v.efectivoSumado=true;
+  efectivoDeclarado+=v.monto;
+  audit('Acreditó vale cobrado al efectivo','Caja',v.negocio+' · '+money(v.monto)+' (cobrado el '+v.fechaCobro+')');
+  persist();nav('caja');
+}
+function revertirVale(id){
+  var v=vales.find(function(x){return x.id===id;});
+  if(!v)return;
+  var msg='¿Revertir este vale a PENDIENTE?\n'+v.negocio+' · '+money(v.monto);
+  if(v.efectivoSumado)msg+='\n\nATENCIÓN: Se restará '+money(v.monto)+' del efectivo en caja.';
+  if(!confirm(msg))return;
+  if(v.efectivoSumado)efectivoDeclarado=Math.max(0,efectivoDeclarado-v.monto);
+  audit('Revirtió vale a pendiente','Caja',v.negocio+' · '+money(v.monto)+(v.efectivoSumado?' — descontado del efectivo':' — sin cargo al efectivo'));
+  v.est='pendiente';v.fechaCobro=null;v.efectivoSumado=false;
   persist();nav('caja');
 }
 function delVale(id){
