@@ -2778,7 +2778,7 @@ function rCaja(){
 
   // Tabs de caja
   var CAJA_TAB=window._CAJA_TAB||'resumen';
-  var tabs=[['resumen','Resumen'],['vales','Vales por cobrar'],['gastos','Gastos'],['movimientos','Movimientos'],['estadocuenta','Estado de cuenta'],['compensaciones','Compensaciones sucursales'],['corte','Corte del periodo']];
+  var tabs=[['resumen','Resumen'],['vales','Vales por cobrar'],['gastos','Gastos'],['estadocuenta','Movimientos'],['compensaciones','Compensaciones sucursales'],['corte','Corte del periodo']];
   var tabBar='<div class="config-tabs" style="margin-bottom:16px">'+tabs.map(function(t){
     return '<div class="cfg-tab'+(CAJA_TAB===t[0]?' active':'')+'" onclick="setCajaTab(\''+t[0]+'\')">'+t[1]+'</div>';
   }).join('')+'</div>';
@@ -2871,50 +2871,6 @@ function rCaja(){
     }).join('')+
     '</tbody></table></div></div>':'');
 
-  } else if(CAJA_TAB==='movimientos'){
-    // Construir lista unificada de movimientos: cobros de notas + pagos a proveedores + transferencias
-    var movs=[];
-    // Cobros de clientes (abonos en notas)
-    notas.forEach(function(n){
-      if(n.abonos)n.abonos.forEach(function(a){
-        movs.push({fecha:a.fecha,hora:a.hora||'',tipo:'ingreso',concepto:'Cobro nota #'+n.folio+' — '+n.cliente,monto:a.monto,forma:a.forma||'efectivo',ref:'Nota #'+n.folio});
-      });
-    });
-    // Pagos a proveedores
-    pedidos.forEach(function(p){
-      if(p.abonos)p.abonos.forEach(function(a){
-        movs.push({fecha:a.fecha,hora:a.hora||'',tipo:'egreso',concepto:'Pago a '+p.prov,monto:a.monto,forma:a.forma||'efectivo',ref:p.numPedido||('Pedido #'+p.id)});
-      });
-    });
-    // Compensaciones
-    compensaciones.forEach(function(c){
-      movs.push({fecha:c.fecha,tipo:'compensacion',concepto:c.sucursal+' pagó a '+c.proveedor,monto:c.monto,forma:'transferencia',ref:'Comp. #'+c.id});
-    });
-    // Movimientos manuales de transferencia
-    movTransferencias.forEach(function(m){
-      movs.push({fecha:m.fecha,tipo:m.tipo==='abono'?'ingreso':'egreso',concepto:m.concepto,monto:m.monto,forma:'transferencia',ref:m.ref||'—'});
-    });
-    movs.sort(function(a,b){return b.fecha.localeCompare(a.fecha);});
-    var totalEgr=movs.filter(function(m){return m.tipo==='egreso';}).reduce(function(a,m){return a+m.monto;},0);
-    var totalIng=movs.filter(function(m){return m.tipo==='ingreso';}).reduce(function(a,m){return a+m.monto;},0);
-    content=
-      '<div style="display:flex;gap:10px;margin-bottom:14px">'+
-        '<div class="stat" style="flex:1"><div class="stat-lbl">Total ingresos</div><div class="stat-val c-ok">'+money(totalIng)+'</div></div>'+
-        '<div class="stat" style="flex:1"><div class="stat-lbl">Total egresos</div><div class="stat-val c-danger">'+money(totalEgr)+'</div></div>'+
-        (isAdmin?'<button class="btn btn-p" style="align-self:center" onclick="mMovTransferencias()">+ Mov. manual</button>':'')+
-      '</div>'+
-      '<div class="card"><div class="card-hdr"><div class="card-title">Todos los movimientos</div></div>'+
-      '<div class="tw"><table><thead><tr><th>Fecha</th><th>Hora</th><th>Concepto</th><th>Tipo</th><th>Forma</th><th>Monto</th><th>Ref.</th></tr></thead><tbody>'+
-      (movs.length===0?'<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text3)">Sin movimientos</td></tr>':
-      movs.map(function(m){
-        var col=m.tipo==='ingreso'?'var(--accent)':m.tipo==='compensacion'?'var(--info)':'var(--danger)';
-        var pill=m.tipo==='ingreso'?'<span class="pill p-ok">Ingreso</span>':m.tipo==='compensacion'?'<span class="pill p-info">Compensación</span>':'<span class="pill p-danger">Egreso</span>';
-        return '<tr><td class="mn">'+m.fecha+'</td><td class="mn" style="color:var(--text3)">'+(m.hora||'—')+'</td><td class="pr">'+m.concepto+'</td><td>'+pill+'</td>'+
-          '<td style="font-size:13px;color:var(--text3)">'+m.forma+'</td>'+
-          '<td class="mn" style="color:'+col+'">'+money(m.monto)+'</td>'+
-          '<td style="font-size:13px;color:var(--text3)">'+m.ref+'</td></tr>';
-      }).join(''))+
-      '</tbody></table></div></div>';
   } else if(CAJA_TAB==='estadocuenta'){
     var movsCaja=getMovsCaja();
     var saldoCalculado=movsCaja.length>0?movsCaja[movsCaja.length-1].saldo:0;
@@ -2994,6 +2950,19 @@ function rCaja(){
           '<td style="font-size:13px;color:var(--text3)">'+(c.nota||'—')+'</td>'+
           (isAdmin?'<td><button class="btn btn-xs btn-d" onclick="elimComp('+c.id+')">Eliminar</button></td>':'')+
         '</tr>';
+      }).join(''))+
+      '</tbody></table></div></div>'+
+      '<div class="card" style="margin-top:18px"><div class="card-hdr"><div class="card-title">Movimientos de transferencia</div>'+
+        (isAdmin?'<button class="btn btn-p" onclick="mMovTransferencias()">+ Mov. manual</button>':'')+
+      '</div>'+
+      '<div class="tw"><table><thead><tr><th>Fecha</th><th>Hora</th><th>Concepto</th><th>Tipo</th><th>Monto</th><th>Ref.</th></tr></thead><tbody>'+
+      (movTransferencias.length===0?'<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text3)">Sin movimientos de transferencia</td></tr>':
+      movTransferencias.slice().reverse().map(function(m){
+        var esIngreso=m.tipo==='abono';
+        return '<tr><td class="mn">'+m.fecha+'</td><td class="mn" style="color:var(--text3)">'+(m.hora||'—')+'</td><td class="pr">'+m.concepto+'</td>'+
+          '<td>'+(esIngreso?'<span class="pill p-ok">Ingreso</span>':'<span class="pill p-danger">Egreso</span>')+'</td>'+
+          '<td class="mn" style="color:'+(esIngreso?'var(--accent)':'var(--danger)')+'">'+money(m.monto)+'</td>'+
+          '<td style="font-size:13px;color:var(--text3)">'+(m.ref||'—')+'</td></tr>';
       }).join(''))+
       '</tbody></table></div></div>';
   } else if(CAJA_TAB==='gastos'){
