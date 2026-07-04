@@ -588,6 +588,10 @@ var CLIENTES_DEF=['Mar Bravo — Centro','El Barco — Bulevard','Marisquería L
 var PROC_TIPOS_DEF=['Corte en posta','Fileteado','Empaque al vacío','Descabezado','Desvenado'];
 
 var PRODUCTOS=load('productos',PRODS_DEF);
+// Categorías cuyo producto normalmente se guarda en bodega (seco/abarrotes/bebidas), no en cámara.
+// Se usa para que las alertas de stock mínimo de cada módulo solo muestren lo que le corresponde.
+var CATS_BODEGA=['abarrote','Abarrote','bebida','cerveza','oficina','empaque','limpieza','lacteo','verdura'];
+function esProductoBodega(pr){return CATS_BODEGA.indexOf(pr.cat)!==-1;}
 var PROVEEDORES=load('proveedores',PROVS_DEF);
 var CLIENTES=load('clientes',CLIENTES_DEF);
 var PROC_TIPOS=load('proc_tipos',PROC_TIPOS_DEF);
@@ -935,10 +939,10 @@ function rCam(){
     return 0;
   });
 
-  // Alertas de mínimo
+  // Alertas de mínimo (solo productos que se guardan en cámara, no los de bodega)
   var alertasMin=[];
   PRODUCTOS.forEach(function(pr){
-    if(!pr.minStock)return;
+    if(!pr.minStock||esProductoBodega(pr))return;
     var tot=stockTotal(pr.n,camara)+stockTotal(pr.n,bodega);
     if(tot<=pr.minStock)alertasMin.push({n:pr.n,tot:tot,min:pr.minStock,u:pr.u});
   });
@@ -2522,11 +2526,10 @@ function rBodega(){
     return 0;
   });
 
-  // El mínimo es un umbral por producto (cámara + bodega combinados), igual que en Cámara y el Dashboard.
-  // Antes solo miraba el stock en bodega, por lo que productos que solo se guardan en cámara
-  // (0 en bodega) disparaban una alerta falsa de "sin stock" aquí.
+  // El mínimo es un umbral por producto (cámara + bodega combinados), igual que en Cámara y el Dashboard,
+  // pero cada pestaña solo alerta de los productos que le corresponden (ver esProductoBodega).
   var alertasMin=PRODUCTOS.filter(function(pr){
-    if(!pr.minStock)return false;
+    if(!pr.minStock||!esProductoBodega(pr))return false;
     var tot=stockTotal(pr.n,camara)+stockTotal(pr.n,bodega);
     return tot<=pr.minStock;
   });
