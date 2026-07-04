@@ -2704,7 +2704,7 @@ function rCaja(){
           '<td class="pr c-warn">'+money(v.monto)+'</td>'+
           '<td><div style="display:flex;gap:4px">'+
             (canOp?'<button class="btn btn-xs btn-p" onclick="cobrarVale('+v.id+')">✓ Cobrado</button>':'')+
-            (canOp?'<button class="btn btn-xs btn-d" onclick="delVale('+v.id+')">Eliminar</button>':'')+
+            (ROL==='admin'?'<button class="btn btn-xs btn-d" onclick="delVale('+v.id+')">Eliminar</button>':'')+
           '</div></td></tr>';
       }).join('')+
       '<tr style="background:var(--bg3)"><td colspan="3" style="font-weight:700;padding:12px 14px">Total pendiente</td>'+
@@ -2713,17 +2713,22 @@ function rCaja(){
     '</div>'+
     (valesCob.length>0?
     '<div class="card"><div class="card-hdr"><div class="card-title" style="color:var(--text3)">Vales cobrados</div></div>'+
-    '<div class="tw"><table><thead><tr><th>Negocio / Cliente</th><th>Concepto</th><th>Fecha</th><th>Monto</th><th>Cobrado</th><th>Efectivo</th><th>Acciones</th></tr></thead><tbody>'+
+    '<div class="tw"><table><thead><tr><th>Negocio / Cliente</th><th>Concepto</th><th>Fecha</th><th>Monto</th><th>Cobrado</th>'+
+      (ROL==='admin'?'<th>Efectivo</th><th>Acciones</th>':'')+
+    '</tr></thead><tbody>'+
     valesCob.sort(function(a,b){return b.fechaCobro.localeCompare(a.fechaCobro);}).map(function(v){
       var sumado=v.efectivoSumado;
       return '<tr><td>'+v.negocio+'</td><td style="color:var(--text3)">'+v.concepto+'</td><td class="mn">'+v.fecha+'</td>'+
         '<td class="mn" style="color:var(--text3)">'+money(v.monto)+'</td>'+
         '<td class="mn" style="color:var(--accent)">'+v.fechaCobro+'</td>'+
-        '<td>'+(sumado?'<span class="pill p-ok">Sumado</span>':'<span class="pill p-warn">Pendiente acreditar</span>')+'</td>'+
-        '<td><div style="display:flex;gap:4px;flex-wrap:wrap">'+
-          (!sumado&&canOp?'<button class="btn btn-xs btn-p" onclick="acreditarValeEfectivo('+v.id+')">+ Acreditar</button>':'')+
-          (canOp?'<button class="btn btn-xs btn-w" onclick="revertirVale('+v.id+')">↩ Revertir</button>':'')+
-        '</div></td></tr>';
+        (ROL==='admin'?
+          '<td>'+(sumado?'<span class="pill p-ok">Sumado</span>':'<span class="pill p-warn">Pendiente acreditar</span>')+'</td>'+
+          '<td><div style="display:flex;gap:4px;flex-wrap:wrap">'+
+            (!sumado?'<button class="btn btn-xs btn-p" onclick="acreditarValeEfectivo('+v.id+')">+ Acreditar</button>':'')+
+            '<button class="btn btn-xs btn-w" onclick="revertirVale('+v.id+')">↩ Revertir</button>'+
+          '</div></td>'
+        :'')+
+        '</tr>';
     }).join('')+
     '</tbody></table></div></div>':'');
 
@@ -2837,14 +2842,13 @@ function rCaja(){
       '<div class="card"><div class="card-hdr"><div class="card-title">Gastos de la procesadora</div>'+
         (canOp?'<button class="btn btn-p" onclick="mAddGasto()">+ Registrar gasto</button>':'')+
       '</div>'+
-      '<div class="tw"><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Categoría</th><th>Forma</th><th>Monto</th><th>Registró</th>'+(isAdmin?'<th></th>':'')+'</tr></thead><tbody>'+
-      (gastos.length===0?'<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text3)">Sin gastos registrados</td></tr>':
+      '<div class="tw"><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Categoría</th><th>Forma</th><th>Monto</th><th>Registró</th></tr></thead><tbody>'+
+      (gastos.length===0?'<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text3)">Sin gastos registrados</td></tr>':
       gastos.slice().reverse().map(function(gto){
         return '<tr><td class="mn">'+gto.fecha+'</td><td class="pr">'+gto.concepto+'</td><td><span class="tag">'+(gto.categoria||'otro')+'</span></td>'+
           '<td class="mn" style="color:var(--text3)">'+(gto.forma||'—')+'</td>'+
           '<td class="mn" style="color:var(--danger);font-weight:700">'+money(gto.monto)+'</td>'+
           '<td style="font-size:12px;color:var(--text3)">'+(gto.registradoPor||'—')+'</td>'+
-          (isAdmin?'<td><button class="btn btn-xs btn-d" onclick="delGasto('+gto.id+')">Eliminar</button></td>':'')+
         '</tr>';
       }).join(''))+
       '</tbody></table></div></div>';
