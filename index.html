@@ -2522,9 +2522,12 @@ function rBodega(){
     return 0;
   });
 
+  // El mínimo es un umbral por producto (cámara + bodega combinados), igual que en Cámara y el Dashboard.
+  // Antes solo miraba el stock en bodega, por lo que productos que solo se guardan en cámara
+  // (0 en bodega) disparaban una alerta falsa de "sin stock" aquí.
   var alertasMin=PRODUCTOS.filter(function(pr){
     if(!pr.minStock)return false;
-    var tot=bodega.filter(function(i){return i.esp===pr.n&&i.kg>0;}).reduce(function(a,i){return a+i.kg;},0);
+    var tot=stockTotal(pr.n,camara)+stockTotal(pr.n,bodega);
     return tot<=pr.minStock;
   });
 
@@ -2585,9 +2588,9 @@ function rBodega(){
     '<div class="stat"><div class="stat-lbl">Valor bodega</div><div class="stat-val c-ok">'+money(totalVal)+'</div></div>'+
     '<div class="stat"><div class="stat-lbl">⚠ Stock bajo mínimo</div><div class="stat-val '+(alertasMin.length>0?'c-danger':'c-ok')+'">'+alertasMin.length+'</div></div>'+
   '</div>'+
-  (alertasMin.length>0?'<div class="card" style="margin-bottom:14px;border-color:rgba(192,57,43,.3)"><div class="card-hdr" style="background:var(--danger-dim)"><div class="card-title" style="color:var(--danger)">⚠ Stock bajo mínimo en bodega</div></div><div class="card-body">'+
+  (alertasMin.length>0?'<div class="card" style="margin-bottom:14px;border-color:rgba(192,57,43,.3)"><div class="card-hdr" style="background:var(--danger-dim)"><div class="card-title" style="color:var(--danger)">⚠ Productos bajo stock mínimo</div></div><div class="card-body">'+
     alertasMin.map(function(pr){
-      var tot=bodega.filter(function(i){return i.esp===pr.n&&i.kg>0;}).reduce(function(a,i){return a+i.kg;},0);
+      var tot=stockTotal(pr.n,camara)+stockTotal(pr.n,bodega);
       return '<div class="alert al-d"><div class="al-dot"></div><strong>'+pr.n+'</strong> — '+tot.toFixed(1)+' '+pr.u+' · Mínimo: '+pr.minStock+' '+pr.u+'</div>';
     }).join('')+
   '</div></div>':'')+
