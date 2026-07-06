@@ -134,26 +134,26 @@ td.mn{font-family:var(--mono);font-size:13px}
 .modal-title{font-size:16px;font-weight:700;color:var(--text)}
 .modal-body{padding:22px;overflow-y:auto;flex:1}
 .modal-footer{display:flex;gap:10px;justify-content:flex-end;padding:16px 22px;border-top:2px solid var(--border);flex-shrink:0;background:var(--bg3);border-radius:0 0 16px 16px}
-/* ── NOTA PREVIEW ── */
-.nota-wrap{background:#fff;color:#111;border-radius:4px;padding:18px;font-family:Arial,sans-serif;max-width:400px;margin:0 auto;font-size:11px}
-.nota-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
-.nota-brand-name{font-size:13px;font-weight:700;color:#1a3a6b;line-height:1.3}
-.nota-folio-box{background:#1a3a6b;color:#fff;padding:5px 10px;border-radius:3px;text-align:center;min-width:80px}
-.nota-folio-lbl{font-size:8px;font-weight:700;letter-spacing:.04em}
-.nota-folio-n{font-size:16px;font-weight:700}
-.nota-grid{display:grid;grid-template-columns:1fr 1fr;border:1px solid #ddd;border-radius:3px;overflow:hidden;margin:8px 0;font-size:10px}
-.nota-field{padding:3px 7px;border-bottom:1px solid #eee;display:flex;gap:4px;align-items:center}
-.nota-field:nth-last-child(-n+2){border-bottom:none}
-.nota-field b{color:#555;min-width:55px;flex-shrink:0}
-.nota-tbl{width:100%;border-collapse:collapse;margin:8px 0;font-size:10px}
-.nota-tbl th{background:#1a3a6b;color:#fff;padding:4px 5px;text-align:center;font-size:9px}
-.nota-tbl td{padding:3px 5px;border-bottom:1px solid #eee;text-align:right}
+/* ── NOTA PREVIEW (misma estructura que se imprime en hoja carta) ── */
+.nota-wrap{background:#fff;color:#111;border-radius:4px;padding:16px 18px;font-family:Arial,sans-serif;max-width:720px;margin:0 auto;font-size:11px}
+.nota-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;border-bottom:2px solid #1a3a6b;padding-bottom:8px}
+.nota-brand-name{font-size:17px;font-weight:700;color:#1a3a6b;line-height:1.3}
+.nota-brand-sub{font-size:10px;color:#888;margin-top:2px}
+.nota-folio-box{background:#1a3a6b;color:#fff;padding:6px 16px;border-radius:4px;text-align:center;min-width:110px}
+.nota-folio-lbl{font-size:9px;font-weight:700;letter-spacing:.05em}
+.nota-folio-n{font-size:22px;font-weight:700}
+.nota-grid{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #ddd;border-radius:4px;overflow:hidden;margin:8px 0}
+.nota-field{padding:4px 8px;border-bottom:1px solid #eee;border-right:1px solid #eee;display:flex;gap:5px;font-size:10.5px}
+.nota-field b{color:#555;flex-shrink:0}
+.nota-tbl{width:100%;border-collapse:collapse;margin:6px 0;table-layout:fixed}
+.nota-tbl th{background:#1a3a6b;color:#fff;text-align:center}
+.nota-tbl td{border-bottom:1px solid #eee;text-align:right;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .nota-tbl td.left{text-align:left}
 .nota-tbl tr:nth-child(even) td{background:#f8f9fa}
-.nota-tot-row td{background:#1a3a6b!important;color:#fff!important;font-weight:700;font-size:11px}
-.nota-firmas{display:grid;grid-template-columns:1fr 1fr 1fr;border:1px solid #ddd;border-radius:3px;margin-top:8px}
-.nota-firma{padding:5px 8px;text-align:center;font-size:9px;font-weight:700;color:#666;border-right:1px solid #ddd;min-height:34px}
-.nota-firma:last-child{border-right:none}
+.nota-tot-row td{background:#1a3a6b!important;color:#fff!important;font-weight:700}
+.nota-firmas{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:22px}
+.nota-firma{text-align:center;font-size:10px;font-weight:700;color:#555}
+.nota-firma-line{border-top:1px solid #333;padding-top:4px}
 /* ── CONFIG TABS ── */
 .config-tabs{display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:20px}
 .cfg-tab{padding:11px 20px;font-size:14px;font-weight:500;color:var(--text3);cursor:pointer;border-bottom:3px solid transparent;transition:all .15s;margin-bottom:-2px}
@@ -2321,61 +2321,63 @@ function imprimirRelacionVenta(desde,hasta){
   setTimeout(function(){win.print();},350);
 }
 
-var FILAS_POR_PAGINA=20;
-
-function buildNotaHTML(n, paginaIdx, totalPaginas, partidasPagina){
-  var rows='';
-  for(var i=0;i<FILAS_POR_PAGINA;i++){
-    var p=partidasPagina[i];
-    if(p){
-      rows+='<tr style="'+(i%2===1?'background:#f8f9fa;':'')+'">'+
-        '<td style="text-align:center">'+p.cant+' '+(p.unidad||'kg')+'</td>'+
-        '<td class="left">'+p.concepto+(p.lote?' <span style="font-size:8px;color:#888">Lote '+p.lote+'</span>':'')+'</td>'+
-        '<td>$'+parseFloat(p.precio||0).toLocaleString('es-MX')+'</td>'+
-        '<td>$'+parseFloat(p.importe||0).toLocaleString('es-MX')+'</td>'+
-      '</tr>';
-    } else {
-      rows+='<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>';
-    }
-  }
-  var esUltima=paginaIdx===totalPaginas-1;
-  var folioLabel=totalPaginas>1?n.folio+'-'+(paginaIdx+1):n.folio;
-  return '<div class="nota-wrap" style="page-break-after:'+(esUltima?'auto':'always')+'">'+
+// Todo cabe en UNA sola hoja carta: el tamaño de fila/letra de la tabla de
+// partidas se escala según cuántas traiga la nota (encabezado y pie son de
+// tamaño fijo). Calibrado para que quepan hasta ~100 partidas en una hoja.
+function buildNotaHTML(n){
+  var partidas=n.partidas||[];
+  var count=Math.max(partidas.length,1);
+  var bodyPx=740; // alto aprox. disponible para la tabla en una hoja carta, tras encabezado/pie
+  var rowH=Math.max(7.6,Math.min(24,bodyPx/count))-1; // -1px reservado para el borde de la fila
+  var fs=Math.max(6.3,Math.min(11,rowH*0.58));
+  var padV=Math.max(0.3,Math.min(4,(rowH-fs*1.15)/2));
+  var thFs=Math.max(8,Math.min(10,fs+1.8));
+  var cellStyle='font-size:'+fs.toFixed(1)+'px;padding:'+padV.toFixed(1)+'px 5px';
+  var rows=partidas.map(function(p,i){
+    return '<tr style="'+(i%2===1?'background:#f8f9fa;':'')+'">'+
+      '<td style="'+cellStyle+';text-align:center;color:#999">'+(i+1)+'</td>'+
+      '<td style="'+cellStyle+';text-align:center">'+p.cant+' '+(p.unidad||'kg')+'</td>'+
+      '<td class="left" style="'+cellStyle+'">'+p.concepto+'</td>'+
+      '<td style="'+cellStyle+';text-align:center;color:#888">'+(p.lote||'—')+'</td>'+
+      '<td style="'+cellStyle+'">$'+parseFloat(p.precio||0).toLocaleString('es-MX')+'</td>'+
+      '<td style="'+cellStyle+'">$'+parseFloat(p.importe||0).toLocaleString('es-MX')+'</td>'+
+    '</tr>';
+  }).join('');
+  var campos=[
+    {l:'Cliente',v:n.cliente},{l:'Fecha',v:fmtFecha(n.fecha)},{l:'Condiciones',v:n.condiciones},
+    {l:'Domicilio',v:n.domicilio},{l:'Ciudad',v:n.ciudad},{l:'Tel',v:n.tel}
+  ].filter(function(c){return c.v;});
+  return '<div class="nota-wrap">'+
     '<div class="nota-top">'+
-      '<div><div class="nota-brand-name">BODEGA DE MARISCOS<br>Y PRODUCTOS</div></div>'+
-      '<div class="nota-folio-box"><div class="nota-folio-lbl">NOTA DE REMISIÓN</div><div style="font-size:9px;margin:1px 0">No.</div><div class="nota-folio-n">'+folioLabel+'</div>'+
-      (totalPaginas>1?'<div style="font-size:8px;margin-top:2px">Hoja '+(paginaIdx+1)+' de '+totalPaginas+'</div>':'')+
-      '</div>'+
+      '<div><div class="nota-brand-name">BODEGA DE MARISCOS Y PRODUCTOS</div><div class="nota-brand-sub">Nota de remisión</div></div>'+
+      '<div class="nota-folio-box"><div class="nota-folio-lbl">FOLIO</div><div class="nota-folio-n">'+n.folio+'</div></div>'+
     '</div>'+
     '<div class="nota-grid">'+
-      '<div class="nota-field"><b>Cliente:</b>'+n.cliente+'</div>'+
-      '<div class="nota-field"><b>Fecha:</b>'+fmtFecha(n.fecha)+'</div>'+
-      (n.domicilio?'<div class="nota-field" style="grid-column:span 2"><b>Domicilio:</b>'+n.domicilio+'</div>':'')+
-      (n.ciudad?'<div class="nota-field"><b>Ciudad:</b>'+n.ciudad+'</div>':'')+
-      (n.tel?'<div class="nota-field"><b>Tel:</b>'+n.tel+'</div>':'')+
-      (n.condiciones?'<div class="nota-field" style="grid-column:span 2"><b>Condiciones:</b>'+n.condiciones+'</div>':'')+
+      campos.map(function(c){return '<div class="nota-field"><b>'+c.l+':</b><span>'+c.v+'</span></div>';}).join('')+
     '</div>'+
-    '<table class="nota-tbl"><thead><tr><th>Cantidad</th><th>Concepto</th><th>Precio</th><th>Importe</th></tr></thead><tbody>'+rows+'</tbody>'+
-    (esUltima?'<tfoot><tr class="nota-tot-row"><td colspan="3" style="text-align:right;padding:4px 5px">TOTAL</td><td style="padding:4px 5px">'+money(n.total)+'</td></tr></tfoot>':'')+
+    '<table class="nota-tbl"><colgroup><col style="width:5%"><col style="width:12%"><col style="width:42%"><col style="width:12%"><col style="width:14%"><col style="width:15%"></colgroup>'+
+    '<thead><tr>'+
+      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:5px 4px">#</th>'+
+      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:5px 4px">Cantidad</th>'+
+      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:5px 4px;text-align:left">Concepto</th>'+
+      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:5px 4px">Lote</th>'+
+      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:5px 4px">Precio</th>'+
+      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:5px 4px">Importe</th>'+
+    '</tr></thead><tbody>'+rows+'</tbody>'+
+    '<tfoot><tr class="nota-tot-row"><td colspan="5" style="text-align:right;padding:6px 8px;font-size:'+Math.max(fs,10).toFixed(1)+'px">TOTAL</td><td style="padding:6px 8px;font-size:'+Math.max(fs,10).toFixed(1)+'px">'+money(n.total)+'</td></tr></tfoot>'+
     '</table>'+
-    (esUltima?'<div class="nota-firmas"><div class="nota-firma">FORMULÓ:</div><div class="nota-firma">CONDUCTO:</div><div class="nota-firma">RECIBÍ:</div></div>':'')+
+    '<div class="nota-firmas">'+
+      '<div class="nota-firma"><div class="nota-firma-line">FORMULÓ</div></div>'+
+      '<div class="nota-firma"><div class="nota-firma-line">CONDUCTO</div></div>'+
+      '<div class="nota-firma"><div class="nota-firma-line">RECIBÍ</div></div>'+
+    '</div>'+
   '</div>';
-}
-
-function notaPaginas(n){
-  var pages=[];
-  for(var i=0;i<n.partidas.length;i+=FILAS_POR_PAGINA){
-    pages.push(n.partidas.slice(i,i+FILAS_POR_PAGINA));
-  }
-  if(pages.length===0)pages.push([]);
-  return pages;
 }
 
 function verNota(id){
   var n=notas.find(function(x){return x.id===id;});if(!n)return;
-  var pages=notaPaginas(n);
-  var html=pages.map(function(pg,idx){return buildNotaHTML(n,idx,pages.length,pg);}).join('');
-  modal('<div class="modal modal-wide"><div class="modal-hdr"><div class="modal-title">Nota de remisión #'+n.folio+(pages.length>1?' — '+pages.length+' hojas':'')+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+  var html=buildNotaHTML(n);
+  modal('<div class="modal modal-wide"><div class="modal-hdr"><div class="modal-title">Nota de remisión #'+n.folio+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
     '<div class="modal-body" style="overflow-y:auto">'+html+'</div>'+
     '<div class="modal-footer"><button class="btn" onclick="cm()">Cerrar</button><button class="btn btn-p" onclick="printNota('+n.id+')">Imprimir / PDF</button></div>'+
   '</div>');
@@ -2383,30 +2385,31 @@ function verNota(id){
 
 function printNota(id){
   var n=notas.find(function(x){return x.id===id;});if(!n)return;
-  var pages=notaPaginas(n);
-  var html=pages.map(function(pg,idx){return buildNotaHTML(n,idx,pages.length,pg);}).join('');
+  var html=buildNotaHTML(n);
   var win=window.open('','_blank');
   win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Nota #'+n.folio+'</title><style>'+
-    '@page{size:101.6mm 190mm;margin:4mm}'+
-    'body{font-family:Arial,sans-serif;margin:0;padding:8mm;background:#fff}'+
-    '.nota-wrap{width:93.6mm;margin:0 auto;font-size:11px}'+
-    '.nota-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}'+
-    '.nota-brand-name{font-size:13px;font-weight:700;color:#1a3a6b;line-height:1.3}'+
-    '.nota-folio-box{background:#1a3a6b;color:#fff;padding:5px 10px;border-radius:3px;text-align:center;min-width:80px}'+
-    '.nota-folio-lbl{font-size:8px;font-weight:700;letter-spacing:.04em}'+
-    '.nota-folio-n{font-size:16px;font-weight:700}'+
-    '.nota-grid{display:grid;grid-template-columns:1fr 1fr;border:1px solid #ddd;border-radius:3px;overflow:hidden;margin:8px 0}'+
-    '.nota-field{padding:3px 7px;border-bottom:1px solid #eee;display:flex;gap:4px;font-size:10px}'+
-    '.nota-field b{color:#555;min-width:55px;flex-shrink:0}'+
-    '.nota-tbl{width:100%;border-collapse:collapse;margin:8px 0;font-size:10px}'+
-    '.nota-tbl th{background:#1a3a6b;color:#fff;padding:4px 5px;text-align:center;font-size:9px}'+
-    '.nota-tbl td{padding:3px 5px;border-bottom:1px solid #eee;text-align:right;height:16px}'+
+    '@page{size:215.9mm 279.4mm;margin:10mm}'+
+    'body{font-family:Arial,sans-serif;margin:0;padding:0;background:#fff;color:#111}'+
+    '.nota-wrap{width:100%;font-size:11px}'+
+    '.nota-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;border-bottom:2px solid #1a3a6b;padding-bottom:8px}'+
+    '.nota-brand-name{font-size:17px;font-weight:700;color:#1a3a6b;line-height:1.3}'+
+    '.nota-brand-sub{font-size:10px;color:#888;margin-top:2px}'+
+    '.nota-folio-box{background:#1a3a6b;color:#fff;padding:6px 16px;border-radius:4px;text-align:center;min-width:110px}'+
+    '.nota-folio-lbl{font-size:9px;font-weight:700;letter-spacing:.05em}'+
+    '.nota-folio-n{font-size:22px;font-weight:700}'+
+    '.nota-grid{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #ddd;border-radius:4px;overflow:hidden;margin:8px 0}'+
+    '.nota-field{padding:4px 8px;border-bottom:1px solid #eee;border-right:1px solid #eee;display:flex;gap:5px;font-size:10.5px}'+
+    '.nota-field b{color:#555;flex-shrink:0}'+
+    '.nota-tbl{width:100%;border-collapse:collapse;margin:6px 0;table-layout:fixed}'+
+    '.nota-tbl th{background:#1a3a6b;color:#fff;text-align:center}'+
+    '.nota-tbl td{border-bottom:1px solid #eee;text-align:right;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}'+
     '.nota-tbl td.left{text-align:left}'+
-    '.nota-tot-row td{background:#1a3a6b!important;color:#fff!important;font-weight:700;font-size:11px}'+
-    '.nota-firmas{display:grid;grid-template-columns:1fr 1fr 1fr;border:1px solid #ddd;border-radius:3px;margin-top:8px}'+
-    '.nota-firma{padding:5px 8px;text-align:center;font-size:9px;font-weight:700;color:#666;border-right:1px solid #ddd;min-height:36px}'+
-    '.nota-firma:last-child{border-right:none}'+
-    '@media print{body{padding:0;width:93.6mm}.nota-wrap{page-break-after:always;margin:0 auto}.nota-wrap:last-child{page-break-after:auto}}'+
+    '.nota-tbl tr:nth-child(even) td{background:#f8f9fa}'+
+    '.nota-tot-row td{background:#1a3a6b!important;color:#fff!important;font-weight:700}'+
+    '.nota-firmas{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:22px}'+
+    '.nota-firma{text-align:center;font-size:10px;font-weight:700;color:#555}'+
+    '.nota-firma-line{border-top:1px solid #333;padding-top:4px}'+
+    '@media print{body{padding:0}}'+
   '</style></head><body>'+html+'</body></html>');
   win.document.close();
   setTimeout(function(){win.print();},350);
