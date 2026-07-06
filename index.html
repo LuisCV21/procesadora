@@ -753,6 +753,15 @@ function money(v){return '$'+parseFloat(v||0).toLocaleString('es-MX',{minimumFra
 function pcomma(v){return parseFloat(v||0).toLocaleString('es-MX');}
 function today(){return new Date().toISOString().slice(0,10);}
 function fechaMas3Meses(){var d=new Date();d.setMonth(d.getMonth()+3);return d.toISOString().slice(0,10);}
+// Fechas se guardan internamente como YYYY-MM-DD (orden/comparación/inputs de fecha);
+// esto es solo para mostrarlas al usuario como DD/MM/YYYY.
+function fmtFecha(iso){
+  if(!iso)return '—';
+  var s=String(iso).slice(0,10);
+  var p=s.split('-');
+  if(p.length!==3||p[0].length!==4)return iso;
+  return p[2]+'/'+p[1]+'/'+p[0];
+}
 
 // ══════════════════════════════════════════════════════
 //  PAGINACIÓN POR MES — evita cargar/renderizar historiales completos
@@ -904,12 +913,12 @@ function rDash(){
   var ultTemp=tempLogs.length>0?tempLogs[tempLogs.length-1]:null;
   var eventos=[];
   notas.slice(-5).reverse().forEach(function(n){
-    eventos.push({col:'var(--info)',t:'Nota #'+n.folio+' — '+n.cliente+' · '+money(n.total),s:n.fecha+' · '+n.est});
+    eventos.push({col:'var(--info)',t:'Nota #'+n.folio+' — '+n.cliente+' · '+money(n.total),ord:n.fecha,s:fmtFecha(n.fecha)+' · '+n.est});
   });
   pedidos.slice(-3).reverse().forEach(function(p){
-    eventos.push({col:'var(--warn)',t:(p.numPedido||'Pedido')+' a '+p.prov+' · '+money(p.total||p.costo||0),s:p.fecha+' · '+p.est});
+    eventos.push({col:'var(--warn)',t:(p.numPedido||'Pedido')+' a '+p.prov+' · '+money(p.total||p.costo||0),ord:p.fecha,s:fmtFecha(p.fecha)+' · '+p.est});
   });
-  eventos.sort(function(a,b){return b.s.localeCompare(a.s);});
+  eventos.sort(function(a,b){return b.ord.localeCompare(a.ord);});
   eventos=eventos.slice(0,6);
 
   var secAlertas='';
@@ -918,7 +927,7 @@ function rDash(){
       '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:8px">⚠ Productos por vencer en cámara</div>'+
       alertasCam.map(function(a){
         return '<div class="alert '+(a.est==='danger'?'al-d':'al-w')+'"><div class="al-dot"></div>'+
-          '<div><strong>'+a.esp+'</strong> — Lote '+a.lote+' · Vence <strong>'+a.cad+'</strong> · '+a.kg+' kg</div></div>';
+          '<div><strong>'+a.esp+'</strong> — Lote '+a.lote+' · Vence <strong>'+fmtFecha(a.cad)+'</strong> · '+a.kg+' kg</div></div>';
       }).join('')+'</div>';
   }
   if(stockBajo.length>0){
@@ -946,7 +955,7 @@ function rDash(){
       notasPend.map(function(n){
         return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border:1px solid var(--border);border-radius:var(--r);margin-bottom:6px;background:var(--bg2)">'+
           '<div><div style="font-weight:600;color:var(--text)">'+n.cliente+' — Folio #'+n.folio+'</div>'+
-          '<div style="font-size:13px;color:var(--text3)">'+n.fecha+' · '+money(n.total)+'</div></div>'+
+          '<div style="font-size:13px;color:var(--text3)">'+fmtFecha(n.fecha)+' · '+money(n.total)+'</div></div>'+
           pill(n.est)+
         '</div>';
       }).join('')+'</div>';
@@ -977,7 +986,7 @@ function rDash(){
       '<div class="stat" style="cursor:pointer" onclick="mTempLog()">'+
         '<div class="stat-lbl">🌡 Temperatura</div>'+
         '<div class="stat-val c-info">'+(ultTemp?ultTemp.temp+'°C':'—')+'</div>'+
-        '<div class="stat-sub">'+(ultTemp?ultTemp.fecha:'Toca para registrar')+'</div></div>'+
+        '<div class="stat-sub">'+(ultTemp?fmtFecha(ultTemp.fecha):'Toca para registrar')+'</div></div>'+
       '<div class="stat"><div class="stat-lbl">💵 Efectivo en caja</div>'+
         '<div class="stat-val c-ok">'+money(efectivoDeclarado)+'</div>'+
         '<div class="stat-sub">Disponible</div></div>'+
@@ -1076,7 +1085,7 @@ function rCam(){
           '<td class="mn">'+money(l.costo||0)+'</td>'+
           '<td class="mn" style="color:var(--info)">'+money(l.precio||0)+'</td>'+
           '<td>'+pill(l.est)+'</td>'+
-          '<td class="mn" style="color:var(--text3)">Cad: '+l.cad+'</td>'+
+          '<td class="mn" style="color:var(--text3)">Cad: '+fmtFecha(l.cad)+'</td>'+
           (canEdit?'<td><div style="display:flex;gap:4px">'+
             (isAdmin?'<button class="btn btn-xs" onclick="mEditLote('+l.id+')">Editar</button>':'')+
             (isAdmin?'<button class="btn btn-xs btn-d" onclick="bajaLote('+l.id+',false)">Baja</button>':'')+
@@ -1093,7 +1102,7 @@ function rCam(){
     '<div class="stat"><div class="stat-lbl">Alertas caducidad</div><div class="stat-val '+(pv>0?'c-danger':'c-ok')+'">'+pv+'</div></div>'+
     '<div class="stat"><div class="stat-lbl">Valor inventario</div><div class="stat-val">'+money(camara.reduce(function(a,i){return a+i.kg*(i.costo||0);},0))+'</div></div>'+
     '<div class="stat '+(alertasMin.length>0?'':'')+'"><div class="stat-lbl">⚠ Stock bajo mínimo</div><div class="stat-val '+(alertasMin.length>0?'c-danger':'c-ok')+'">'+alertasMin.length+'</div></div>'+
-    '<div class="stat" style="cursor:pointer" onclick="mVerTemps()"><div class="stat-lbl">Última temp.</div><div class="stat-val c-info">'+(ultTemp?ultTemp.temp+'°C':'—')+'</div><div class="stat-sub">'+(ultTemp?ultTemp.fecha:'Clic para registrar')+'</div></div>'+
+    '<div class="stat" style="cursor:pointer" onclick="mVerTemps()"><div class="stat-lbl">Última temp.</div><div class="stat-val c-info">'+(ultTemp?ultTemp.temp+'°C':'—')+'</div><div class="stat-sub">'+(ultTemp?fmtFecha(ultTemp.fecha):'Clic para registrar')+'</div></div>'+
   '</div>'+
   (alertasMin.length>0?'<div class="card" style="margin-bottom:14px;border-color:rgba(192,57,43,.3)"><div class="card-hdr" style="background:var(--danger-dim)"><div class="card-title" style="color:var(--danger)">⚠ Productos bajo stock mínimo</div></div><div class="card-body">'+
     alertasMin.map(function(a){return '<div class="alert al-d"><div class="al-dot"></div><strong>'+a.n+'</strong> — Stock actual: '+a.tot.toFixed(1)+' '+a.u+' · Mínimo: '+a.min+' '+a.u+'</div>';}).join('')+
@@ -1249,7 +1258,7 @@ function mTempLog(){
         '<th style="text-align:left;padding:6px 8px;font-size:12px;font-weight:700;color:var(--text3);border-bottom:1px solid var(--border)">Registró</th></tr></thead><tbody>'+
         tempLogs.slice().reverse().map(function(t,i){
           var orig=tempLogs.length-1-i;
-          return '<tr><td style="padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text2)">'+t.fecha+'</td>'+
+          return '<tr><td style="padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text2)">'+fmtFecha(t.fecha)+'</td>'+
             '<td style="padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text2)">'+t.hora+'</td>'+
             '<td style="padding:6px 8px;border-bottom:1px solid var(--border);color:var(--info);font-weight:700">'+t.temp+'°C</td>'+
             '<td style="padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text3)">'+t.op+
@@ -1305,7 +1314,7 @@ function rProc(){
   (procesos.length===0?'<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text3)">Sin registros</td></tr>':
   procesos.slice().reverse().map(function(p){
     var salidasStr=p.salidas&&p.salidas.length>0?p.salidas.map(function(s){return s.kg.toFixed(1)+' kg '+s.esp;}).join(', '):p.kgS+' kg (salida)';
-    return '<tr><td class="mn">'+p.fecha+'</td><td class="pr">'+p.tipo+'</td>'+
+    return '<tr><td class="mn">'+fmtFecha(p.fecha)+'</td><td class="pr">'+p.tipo+'</td>'+
       '<td style="font-size:14px">'+p.esp+'<div style="font-size:12px;color:var(--text3)">Lote '+p.lote+'</div></td>'+
       '<td class="mn">'+p.kgE+' kg</td>'+
       '<td style="font-size:13px;color:var(--info)">'+salidasStr+'</td>'+
@@ -1472,7 +1481,7 @@ function rPed(){
       '<td class="pr">'+p.prov+'</td>'+
       '<td style="font-size:13px;color:var(--text2)">'+partStr+(faltaPrecio?' <span style="color:var(--warn);font-size:11px">⚠ sin precio</span>':'')+'</td>'+
       '<td class="mn">'+money(p.total||p.costo||0)+'</td>'+
-      '<td class="mn">'+p.fecha+'</td>'+
+      '<td class="mn">'+fmtFecha(p.fecha)+'</td>'+
       '<td style="font-size:13px;color:var(--text3)">'+(p.condiciones||'—')+'</td>'+
       '<td>'+pill(p.est)+'</td>'+
       '<td>'+(p.pagado?pill('pagada'):'<span style="font-size:13px;color:var(--warn)">'+(p.montoPagado&&p.montoPagado>0?money(p.montoPagado)+' / '+money(p.total||p.costo||0):'Sin abonos')+'</span>')+'</td>'+
@@ -1502,7 +1511,7 @@ function verPedido(id){
       '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:8px">Historial de pagos</div>'+
       p.abonos.map(function(a){
         return '<div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)">'+
-          '<span style="color:var(--text2)">'+a.fecha+(a.hora?' '+a.hora:'')+' · '+a.forma+'</span>'+
+          '<span style="color:var(--text2)">'+fmtFecha(a.fecha)+(a.hora?' '+a.hora:'')+' · '+a.forma+'</span>'+
           '<span style="color:var(--accent);font-weight:600">'+money(a.monto)+'</span></div>';
       }).join('')+
       '<div style="display:flex;justify-content:space-between;font-size:15px;font-weight:700;padding-top:8px;margin-top:4px">'+
@@ -1540,7 +1549,7 @@ function verPedido(id){
     '<div class="modal-body">'+
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:16px">'+
         '<div style="background:var(--bg3);border-radius:var(--r);padding:10px 14px"><div style="font-size:12px;color:var(--text3)">Proveedor</div><div style="font-weight:700;color:var(--text);font-size:15px">'+p.prov+'</div></div>'+
-        '<div style="background:var(--bg3);border-radius:var(--r);padding:10px 14px"><div style="font-size:12px;color:var(--text3)">Fecha entrega</div><div style="font-weight:700;color:var(--text);font-size:15px">'+(p.fecha||'—')+'</div></div>'+
+        '<div style="background:var(--bg3);border-radius:var(--r);padding:10px 14px"><div style="font-size:12px;color:var(--text3)">Fecha entrega</div><div style="font-weight:700;color:var(--text);font-size:15px">'+fmtFecha(p.fecha)+'</div></div>'+
         '<div style="background:var(--bg3);border-radius:var(--r);padding:10px 14px"><div style="font-size:12px;color:var(--text3)">Condiciones</div><div style="font-weight:700;color:var(--text);font-size:15px">'+(p.condiciones||'—')+'</div></div>'+
         '<div style="background:var(--accent-dim);border:1px solid var(--accent-glow);border-radius:var(--r);padding:10px 14px"><div style="font-size:12px;color:var(--accent)">Total</div><div style="font-weight:700;color:var(--accent);font-size:18px">'+money(total)+'</div></div>'+
       '</div>'+
@@ -1597,7 +1606,7 @@ function imprimirPedido(id){
   '<p class="sub">Poza Rica, Veracruz</p>'+
   '<div class="info">'+
     '<div><b>Proveedor:</b> '+p.prov+'</div>'+
-    '<div><b>Fecha entrega estimada:</b> '+p.fecha+'</div>'+
+    '<div><b>Fecha entrega estimada:</b> '+fmtFecha(p.fecha)+'</div>'+
     '<div><b>Condiciones de pago:</b> '+(p.condiciones||'—')+'</div>'+
     '<div><b>Estado:</b> '+p.est+'</div>'+
   '</div>'+
@@ -1798,7 +1807,7 @@ function pagarPedido(id){
     abonosHTML='<div style="margin-bottom:14px"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">Abonos anteriores</div>'+
       p.abonos.map(function(a){
         return '<div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid var(--border)">'+
-          '<span style="color:var(--text2)">'+a.fecha+(a.hora?' '+a.hora:'')+' · '+a.forma+'</span>'+
+          '<span style="color:var(--text2)">'+fmtFecha(a.fecha)+(a.hora?' '+a.hora:'')+' · '+a.forma+'</span>'+
           '<span style="color:var(--accent);font-weight:600">'+money(a.monto)+'</span></div>';
       }).join('')+'</div>';
   }
@@ -1913,7 +1922,7 @@ function imprimirComprobantePago(p,abono){
   '<p class="sub">Bodega de Mariscos y Productos · Poza Rica, Ver.</p>'+
   '<div class="row"><b>Proveedor</b><span class="val">'+p.prov+'</span></div>'+
   '<div class="row"><b>Folio pedido</b><span class="val">'+(p.numPedido||'—')+'</span></div>'+
-  '<div class="row"><b>Fecha de pago</b><span class="val">'+abono.fecha+(abono.hora?' '+abono.hora:'')+'</span></div>'+
+  '<div class="row"><b>Fecha de pago</b><span class="val">'+fmtFecha(abono.fecha)+(abono.hora?' '+abono.hora:'')+'</span></div>'+
   '<div class="row"><b>Forma de pago</b><span class="val">'+abono.forma+'</span></div>'+
   (abono.nota?'<div class="row"><b>Nota</b><span>'+abono.nota+'</span></div>':'')+
   '<div class="total"><span>Monto pagado</span><span>'+money(abono.monto)+'</span></div>'+
@@ -2063,7 +2072,7 @@ function rNotas(){
     else{pillPago=pill('por cobrar');}
     return '<tr>'+
       '<td class="mn" style="font-weight:500">#'+n.folio+'</td>'+
-      '<td class="mn">'+n.fecha+'</td>'+
+      '<td class="mn">'+fmtFecha(n.fecha)+'</td>'+
       '<td class="pr">'+n.cliente+'</td>'+
       '<td style="color:var(--text3)">'+n.partidas.length+' prod.</td>'+
       '<td class="mn" style="font-weight:500">'+money(n.total)+'</td>'+
@@ -2099,7 +2108,7 @@ function mEnviarNota(id){
     '<div class="modal-body">'+
       '<div style="background:var(--bg3);border-radius:var(--r);padding:12px 16px;margin-bottom:16px">'+
         '<div style="font-size:14px;font-weight:600;color:var(--text)">'+n.cliente+' — '+money(n.total)+'</div>'+
-        '<div style="font-size:13px;color:var(--text3);margin-top:2px">'+n.partidas.length+' productos · '+n.fecha+'</div>'+
+        '<div style="font-size:13px;color:var(--text3);margin-top:2px">'+n.partidas.length+' productos · '+fmtFecha(n.fecha)+'</div>'+
       '</div>'+
       '<div class="field"><label>Nota de ajuste o diferencia (opcional)</label>'+
         '<textarea id="env-nota" placeholder="Ej: Se enviaron 9 kg en lugar de 10, diferencia de 1 kg..." style="padding:10px;font-size:14px;border:2px solid var(--border);border-radius:var(--r);width:100%;min-height:80px;font-family:var(--sans);resize:vertical"></textarea>'+
@@ -2144,7 +2153,7 @@ function mAbonarNota(id){
     abonosHTML='<div style="margin-bottom:14px"><div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">Cobros anteriores</div>'+
       n.abonos.map(function(a){
         return '<div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid var(--border)">'+
-          '<span style="color:var(--text2)">'+a.fecha+(a.hora?' '+a.hora:'')+' · '+(a.forma==='compensacion'?'Saldo sucursal':a.forma||'efectivo')+'</span>'+
+          '<span style="color:var(--text2)">'+fmtFecha(a.fecha)+(a.hora?' '+a.hora:'')+' · '+(a.forma==='compensacion'?'Saldo sucursal':a.forma||'efectivo')+'</span>'+
           '<span style="color:var(--accent);font-weight:600">'+money(a.monto)+'</span></div>';
       }).join('')+'</div>';
   }
@@ -2234,7 +2243,7 @@ function impReporte(){
   var cobrado=notasFilt.filter(function(n){return n.pagada;}).reduce(function(a,n){return a+n.total;},0);
   var porCobrar=notasFilt.filter(function(n){return !n.pagada&&(n.est==='entregada'||n.est==='pagada');}).reduce(function(a,n){return a+n.total;},0);
   var filas=notasFilt.slice().reverse().map(function(n){
-    return '<tr><td>#'+n.folio+'</td><td>'+n.fecha+'</td><td>'+n.cliente+'</td><td>'+(n.condiciones||'—')+'</td><td>'+n.est+'</td><td>'+(n.pagada?'Pagada':'Por cobrar')+'</td><td style="text-align:right">$'+n.total.toLocaleString('es-MX',{minimumFractionDigits:2})+'</td></tr>';
+    return '<tr><td>#'+n.folio+'</td><td>'+fmtFecha(n.fecha)+'</td><td>'+n.cliente+'</td><td>'+(n.condiciones||'—')+'</td><td>'+n.est+'</td><td>'+(n.pagada?'Pagada':'Por cobrar')+'</td><td style="text-align:right">$'+n.total.toLocaleString('es-MX',{minimumFractionDigits:2})+'</td></tr>';
   }).join('');
   var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Reporte notas</title><style>'+
     'body{font-family:Arial,sans-serif;padding:24px;font-size:12px}'+
@@ -2287,12 +2296,12 @@ function imprimirRelacionVenta(desde,hasta){
     var costo=costoNota(n);
     var utilidad=precio-costo;
     totalPrecio+=precio;totalCosto+=costo;totalUtilidad+=utilidad;
-    filas+='<tr><td>'+n.folio+'</td><td>'+n.cliente+'</td><td>'+n.fecha+'</td>'+
+    filas+='<tr><td>'+n.folio+'</td><td>'+n.cliente+'</td><td>'+fmtFecha(n.fecha)+'</td>'+
       '<td style="text-align:right">'+money(precio)+'</td>'+
       '<td style="text-align:right">'+money(costo)+'</td>'+
       '<td style="text-align:right">'+money(utilidad)+'</td></tr>';
   });
-  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Relación de venta '+desde+' a '+hasta+'</title><style>'+
+  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Relación de venta '+fmtFecha(desde)+' a '+fmtFecha(hasta)+'</title><style>'+
     'body{font-family:Arial,sans-serif;padding:24px;font-size:12px;color:#111}'+
     'h2{color:#1a3a6b;margin-bottom:4px}p{color:#666;margin-bottom:16px}'+
     'table{width:100%;border-collapse:collapse}th{background:#1a3a6b;color:#fff;padding:6px 8px;text-align:left;font-size:11px}'+
@@ -2301,7 +2310,7 @@ function imprimirRelacionVenta(desde,hasta){
     '@media print{body{padding:8px}}'+
   '</style></head><body>'+
   '<h2>Relación de notas de venta</h2>'+
-  '<p>Periodo: '+desde+' a '+hasta+' · Generado el '+new Date().toLocaleDateString('es-MX')+'</p>'+
+  '<p>Periodo: '+fmtFecha(desde)+' a '+fmtFecha(hasta)+' · Generado el '+new Date().toLocaleDateString('es-MX')+'</p>'+
   '<table><thead><tr><th>Venta</th><th>Cliente</th><th>Fecha</th><th style="text-align:right">Precio</th><th style="text-align:right">Costo</th><th style="text-align:right">Utilidad</th></tr></thead>'+
   '<tbody>'+(filas||'<tr><td colspan="6" style="text-align:center;padding:20px;color:#999">Sin notas en este periodo</td></tr>')+'</tbody>'+
   '<tfoot><tr><td colspan="3"></td><td style="text-align:right">'+money(totalPrecio)+'</td><td style="text-align:right">'+money(totalCosto)+'</td><td style="text-align:right">'+money(totalUtilidad)+'</td></tr></tfoot>'+
@@ -2340,7 +2349,7 @@ function buildNotaHTML(n, paginaIdx, totalPaginas, partidasPagina){
     '</div>'+
     '<div class="nota-grid">'+
       '<div class="nota-field"><b>Cliente:</b>'+n.cliente+'</div>'+
-      '<div class="nota-field"><b>Fecha:</b>'+n.fecha+'</div>'+
+      '<div class="nota-field"><b>Fecha:</b>'+fmtFecha(n.fecha)+'</div>'+
       (n.domicilio?'<div class="nota-field" style="grid-column:span 2"><b>Domicilio:</b>'+n.domicilio+'</div>':'')+
       (n.ciudad?'<div class="nota-field"><b>Ciudad:</b>'+n.ciudad+'</div>':'')+
       (n.tel?'<div class="nota-field"><b>Tel:</b>'+n.tel+'</div>':'')+
@@ -2671,7 +2680,7 @@ function rBodega(){
           '<td class="mn">'+l.kg.toFixed(1)+' '+( l.unidad||'kg')+'</td>'+
           '<td class="mn">'+money(l.costo||0)+'</td>'+
           '<td class="mn" style="color:var(--info)">'+money(l.precio||0)+'</td>'+
-          '<td class="mn" style="color:var(--text3)">Ent: '+l.ent+'</td>'+
+          '<td class="mn" style="color:var(--text3)">Ent: '+fmtFecha(l.ent)+'</td>'+
           (canEdit?'<td><div style="display:flex;gap:4px">'+
             (isAdmin?'<button class="btn btn-xs" onclick="mEditBodega('+l.id+')">Editar</button>':'')+
             (isAdmin?'<button class="btn btn-xs btn-d" onclick="bajaBodega('+l.id+')">Baja</button>':'')+
@@ -2946,7 +2955,7 @@ function rCaja(){
       (valesPend.length===0?'<div class="card-body" style="text-align:center;padding:30px;color:var(--text3)">Sin vales pendientes</div>':
       '<div class="tw"><table><thead><tr><th>Negocio / Cliente</th><th>Concepto</th><th>Fecha</th><th>Monto</th><th>Acciones</th></tr></thead><tbody>'+
       valesPend.sort(function(a,b){return b.fecha.localeCompare(a.fecha);}).map(function(v){
-        return '<tr><td class="pr">'+v.negocio+'</td><td style="color:var(--text2)">'+v.concepto+'</td><td class="mn">'+v.fecha+'</td>'+
+        return '<tr><td class="pr">'+v.negocio+'</td><td style="color:var(--text2)">'+v.concepto+'</td><td class="mn">'+fmtFecha(v.fecha)+'</td>'+
           '<td class="pr c-warn">'+money(v.monto)+'</td>'+
           '<td><div style="display:flex;gap:4px">'+
             (canOp?'<button class="btn btn-xs btn-p" onclick="cobrarVale('+v.id+')">✓ Cobrado</button>':'')+
@@ -2964,9 +2973,9 @@ function rCaja(){
     '</tr></thead><tbody>'+
     valesCob.sort(function(a,b){return b.fechaCobro.localeCompare(a.fechaCobro);}).map(function(v){
       var sumado=v.efectivoSumado;
-      return '<tr><td>'+v.negocio+'</td><td style="color:var(--text3)">'+v.concepto+'</td><td class="mn">'+v.fecha+'</td>'+
+      return '<tr><td>'+v.negocio+'</td><td style="color:var(--text3)">'+v.concepto+'</td><td class="mn">'+fmtFecha(v.fecha)+'</td>'+
         '<td class="mn" style="color:var(--text3)">'+money(v.monto)+'</td>'+
-        '<td class="mn" style="color:var(--accent)">'+v.fechaCobro+'</td>'+
+        '<td class="mn" style="color:var(--accent)">'+fmtFecha(v.fechaCobro)+'</td>'+
         (ROL==='admin'?
           '<td>'+(sumado?'<span class="pill p-ok">Sumado</span>':'<span class="pill p-warn">Pendiente acreditar</span>')+'</td>'+
           '<td><div style="display:flex;gap:4px;flex-wrap:wrap">'+
@@ -2995,7 +3004,7 @@ function rCaja(){
       '<div class="tw"><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Ref.</th><th>Cargo</th><th>Abono</th><th>Saldo</th></tr></thead><tbody>'+
       (movsCaja.length===0?'<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text3)">Sin movimientos de efectivo registrados</td></tr>':
       movsCaja.map(function(m){
-        return '<tr><td class="mn">'+m.fecha+'</td><td class="pr">'+m.concepto+'</td><td style="font-size:12px;color:var(--text3)">'+m.ref+'</td>'+
+        return '<tr><td class="mn">'+fmtFecha(m.fecha)+'</td><td class="pr">'+m.concepto+'</td><td style="font-size:12px;color:var(--text3)">'+m.ref+'</td>'+
           '<td class="mn" style="color:var(--danger)">'+(m.tipo==='cargo'?money(m.monto):'')+'</td>'+
           '<td class="mn" style="color:var(--accent)">'+(m.tipo==='abono'?money(m.monto):'')+'</td>'+
           '<td class="mn" style="font-weight:700">'+money(m.saldo)+'</td></tr>';
@@ -3050,7 +3059,7 @@ function rCaja(){
           return a+n.abonos.filter(function(b){return b.forma==='compensacion';}).reduce(function(x,b){return x+b.monto;},0);
         },0);
         var saldoRestante=Math.max(0,totalPagadoSuc-totalAplicadoSuc);
-        return '<tr><td class="mn">'+c.fecha+'</td><td class="pr">'+c.sucursal+'</td>'+
+        return '<tr><td class="mn">'+fmtFecha(c.fecha)+'</td><td class="pr">'+c.sucursal+'</td>'+
           '<td class="mn" style="color:var(--accent);font-weight:700">'+money(c.monto)+'</td>'+
           '<td class="mn" style="color:var(--info)">'+money(Math.max(0,totalPagadoSuc-saldoRestante))+'</td>'+
           '<td class="mn" style="color:'+(saldoRestante>0?'var(--warn)':'var(--text3)')+'">'+money(saldoRestante)+'</td>'+
@@ -3066,7 +3075,7 @@ function rCaja(){
       (movTransferencias.length===0?'<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text3)">Sin movimientos de transferencia</td></tr>':
       movTransferencias.slice().reverse().map(function(m){
         var esIngreso=m.tipo==='abono';
-        return '<tr><td class="mn">'+m.fecha+'</td><td class="mn" style="color:var(--text3)">'+(m.hora||'—')+'</td><td class="pr">'+m.concepto+'</td>'+
+        return '<tr><td class="mn">'+fmtFecha(m.fecha)+'</td><td class="mn" style="color:var(--text3)">'+(m.hora||'—')+'</td><td class="pr">'+m.concepto+'</td>'+
           '<td>'+(esIngreso?'<span class="pill p-ok">Ingreso</span>':'<span class="pill p-danger">Egreso</span>')+'</td>'+
           '<td class="mn" style="color:'+(esIngreso?'var(--accent)':'var(--danger)')+'">'+money(m.monto)+'</td>'+
           '<td style="font-size:13px;color:var(--text3)">'+(m.ref||'—')+'</td></tr>';
@@ -3083,7 +3092,7 @@ function rCaja(){
       '<div class="tw"><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Categoría</th><th>Forma</th><th>Monto</th><th>Registró</th></tr></thead><tbody>'+
       (gastos.length===0?'<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text3)">Sin gastos registrados</td></tr>':
       gastos.slice().reverse().map(function(gto){
-        return '<tr><td class="mn">'+gto.fecha+'</td><td class="pr">'+gto.concepto+'</td><td><span class="tag">'+(gto.categoria||'otro')+'</span></td>'+
+        return '<tr><td class="mn">'+fmtFecha(gto.fecha)+'</td><td class="pr">'+gto.concepto+'</td><td><span class="tag">'+(gto.categoria||'otro')+'</span></td>'+
           '<td class="mn" style="color:var(--text3)">'+(gto.forma||'—')+'</td>'+
           '<td class="mn" style="color:var(--danger);font-weight:700">'+money(gto.monto)+'</td>'+
           '<td style="font-size:12px;color:var(--text3)">'+(gto.registradoPor||'—')+'</td>'+
@@ -3181,7 +3190,7 @@ function acreditarValeEfectivo(id){
   if(!confirm('¿Acreditar '+money(v.monto)+' al efectivo en caja?\nEsto suma el monto al fondo (vale de '+v.negocio+').'))return;
   v.efectivoSumado=true;
   efectivoDeclarado+=v.monto;
-  audit('Acreditó vale cobrado al efectivo','Caja',v.negocio+' · '+money(v.monto)+' (cobrado el '+v.fechaCobro+')');
+  audit('Acreditó vale cobrado al efectivo','Caja',v.negocio+' · '+money(v.monto)+' (cobrado el '+fmtFecha(v.fechaCobro)+')');
   persist();nav('caja');
 }
 function revertirVale(id){
@@ -3252,7 +3261,7 @@ function mSaldoInicialCaja(){
 function gSaldoInicialCaja(){
   var antes=saldoInicialCaja.monto||0;
   saldoInicialCaja={monto:parseFloat(g('si1').value)||0,fecha:g('si2').value||today()};
-  audit('Actualizó saldo inicial de caja','Caja',money(antes)+' → '+money(saldoInicialCaja.monto)+' ('+saldoInicialCaja.fecha+')');
+  audit('Actualizó saldo inicial de caja','Caja',money(antes)+' → '+money(saldoInicialCaja.monto)+' ('+fmtFecha(saldoInicialCaja.fecha)+')');
   persist();cm();nav('caja');
 }
 
@@ -3318,7 +3327,7 @@ function imprimirCorte(desde,hasta){
   function fila(lbl,val,color){
     return '<tr><td style="padding:8px 10px;border-bottom:1px solid #eee">'+lbl+'</td><td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:700;color:'+(color||'#111')+'">'+money(val)+'</td></tr>';
   }
-  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Corte '+desde+' a '+hasta+'</title><style>'+
+  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Corte '+fmtFecha(desde)+' a '+fmtFecha(hasta)+'</title><style>'+
     'body{font-family:Arial,sans-serif;margin:0;padding:24px;background:#fff;color:#111}'+
     'h1{font-size:20px;margin:0 0 4px}'+
     '.sub{color:#666;font-size:13px;margin-bottom:20px}'+
@@ -3327,7 +3336,7 @@ function imprimirCorte(desde,hasta){
     '.tot td{background:#f0f0f0;font-weight:700}'+
     '</style></head><body>'+
     '<h1>Bodega de Mariscos y Productos — Corte de periodo</h1>'+
-    '<div class="sub">Periodo: '+desde+' a '+hasta+' · Generado: '+today()+'</div>'+
+    '<div class="sub">Periodo: '+fmtFecha(desde)+' a '+fmtFecha(hasta)+' · Generado: '+fmtFecha(today())+'</div>'+
     '<h2>Resultado del periodo</h2>'+
     '<table>'+
       fila('+ Ventas del periodo (notas de venta)',ventasPeriodo,'#1a7a3a')+
@@ -3591,7 +3600,7 @@ function rConfig(){
       var rolPill=e.rol==='admin'?'<span class="pill p-ok" style="font-size:10px">Admin</span>':'<span class="pill p-info" style="font-size:10px">Gerente</span>';
       var modColor=modColores[e.modulo]||'var(--text3)';
       return '<tr>'+
-        '<td class="mn">'+e.fecha+'</td>'+
+        '<td class="mn">'+fmtFecha(e.fecha)+'</td>'+
         '<td class="mn" style="color:var(--text3)">'+e.hora+'</td>'+
         '<td><div style="font-weight:600;font-size:13px">'+e.usuario+'</div>'+rolPill+'</td>'+
         '<td><span style="font-size:12px;font-weight:700;color:'+modColor+'">'+e.modulo+'</span></td>'+
@@ -3857,7 +3866,7 @@ function _importarDatosArchivo(file){
       if(d.gastos)gastos=d.gastos;
       if(d.usuarios)save('users',d.usuarios);
       persist();
-      alert('✅ Datos importados. Respaldo del: '+d.fecha);
+      alert('✅ Datos importados. Respaldo del: '+fmtFecha(d.fecha));
       nav('dashboard');
     }catch(err){alert('Error al leer el archivo: '+err.message);}
   };
