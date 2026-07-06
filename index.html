@@ -521,7 +521,7 @@ async function doLogin(){
 
 function doLogout(){
   audit('Cerró sesión','Sistema','');
-  save('auditLog',auditLog);
+  persistAuditLog();
   SESSION=null;saveLocal('session',null);
   location.reload();
 }
@@ -532,6 +532,35 @@ function audit(accion,modulo,detalle){
   auditLog.unshift({id:uid(),fecha:today(),hora:new Date().toTimeString().slice(0,5),
     usuario:CUR_USER.nombre,rol:CUR_USER.rol,accion:accion,modulo:modulo,detalle:detalle||''});
   if(auditLog.length>1000)auditLog=auditLog.slice(0,1000);
+}
+
+// auditLog se sincroniza entre varios dispositivos a la vez; en vez de que
+// cada dispositivo sobrescriba el arreglo completo (y borre entradas de otros),
+// se combinan por id antes de guardar/aplicar.
+function mergeAuditPorId(local,remoto){
+  var mapa={};
+  (remoto||[]).forEach(function(e){mapa[e.id]=e;});
+  (local||[]).forEach(function(e){mapa[e.id]=e;});
+  var out=Object.keys(mapa).map(function(k){return mapa[k];});
+  out.sort(function(x,y){
+    var kx=x.fecha+' '+x.hora,ky=y.fecha+' '+y.hora;
+    if(kx===ky)return 0;
+    return kx<ky?1:-1;
+  });
+  return out.length>1000?out.slice(0,1000):out;
+}
+function persistAuditLog(){
+  sbGet('auditLog').then(function(remoto){
+    auditLog=mergeAuditPorId(auditLog,remoto);
+    saveLocal('auditLog',auditLog);
+    sbSet('auditLog',auditLog);
+  });
+}
+// Vaciar el log es la única vez que se quiere sobrescribir (no combinar) lo remoto
+function limpiarAuditLog(){
+  auditLog=[];
+  saveLocal('auditLog',auditLog);
+  sbSet('auditLog',auditLog);
 }
 
 document.addEventListener('keydown',function(e){if(e.key==='Enter'&&g('login-screen').style.display!=='none')doLogin();});
@@ -678,6 +707,7 @@ var FILTRO_CAM='todos';
 var FILTRO_CAM_Q='';
 var FILTRO_NOTA_CLI='todos';
 var CUR_TAB='dashboard';
+var MES_SEL={notas:mesActual(),pedidos:mesActual(),auditoria:mesActual()};
 var CFG_TAB='productos';
 var CAM_SORT={col:'esp',dir:1};
 var BOD_SORT={col:'esp',dir:1};
@@ -709,7 +739,7 @@ function persist(){
   save('bodega',bodega);save('efectivo_declarado',efectivoDeclarado);
   save('mov_tarjeta',movTransferencias);save('saldo_tarjeta',saldoTransferencias);
   save('compensaciones',compensaciones);save('temp_logs',tempLogs);
-  save('next_pedido_num',nextPedidoNum);save('vales',vales);save('auditLog',auditLog);
+  save('next_pedido_num',nextPedidoNum);save('vales',vales);persistAuditLog();
   save('meta_patrimonio',metaPatrimonio);save('gastos',gastos);save('saldo_inicial_caja',saldoInicialCaja);
 }
 
@@ -723,6 +753,29 @@ function money(v){return '$'+parseFloat(v||0).toLocaleString('es-MX',{minimumFra
 function pcomma(v){return parseFloat(v||0).toLocaleString('es-MX');}
 function today(){return new Date().toISOString().slice(0,10);}
 function fechaMas3Meses(){var d=new Date();d.setMonth(d.getMonth()+3);return d.toISOString().slice(0,10);}
+
+// ══════════════════════════════════════════════════════
+//  PAGINACIÓN POR MES — evita cargar/renderizar historiales completos
+// ══════════════════════════════════════════════════════
+var NOMBRES_MES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+function mesActual(){return today().slice(0,7);}
+function mesLabel(ym){var p=ym.split('-');return NOMBRES_MES[parseInt(p[1],10)-1]+' '+p[0];}
+function sumarMes(ym,delta){
+  var p=ym.split('-');var y=parseInt(p[0],10);var m=parseInt(p[1],10)-1+delta;
+  y+=Math.floor(m/12);m=((m%12)+12)%12;
+  return y+'-'+(m+1<10?'0':'')+(m+1);
+}
+function cambiarMes(mod,delta){MES_SEL[mod]=sumarMes(MES_SEL[mod],delta);nav(mod==='auditoria'?'config':mod);}
+function irMesActual(mod){MES_SEL[mod]=mesActual();nav(mod==='auditoria'?'config':mod);}
+function selectorMes(mod){
+  var ym=MES_SEL[mod];var esActual=ym===mesActual();
+  return '<div style="display:flex;align-items:center;gap:6px">'+
+    '<button class="btn btn-xs" onclick="cambiarMes(\''+mod+'\',-1)">‹</button>'+
+    '<span style="font-size:13px;font-weight:700;color:var(--text);min-width:120px;text-align:center">'+mesLabel(ym)+'</span>'+
+    '<button class="btn btn-xs" onclick="cambiarMes(\''+mod+'\',1)"'+(esActual?' disabled':'')+'>›</button>'+
+    (esActual?'':'<button class="btn btn-xs" onclick="irMesActual(\''+mod+'\')">Hoy</button>')+
+  '</div>';
+}
 function numPedido(n){return 'P-'+String(n).padStart(4,'0');}
 function stockTotal(esp,fuente){
   var arr=fuente||camara;
@@ -1395,6 +1448,9 @@ function rPed(){
   var porPagar=pedidos.filter(function(p){return p.est==='recibido'&&!p.pagado;}).reduce(function(a,p){
     var ab=p.montoPagado||0;return a+Math.max(0,(p.total||p.costo||0)-ab);},0);
   var sinPrecio=pedidos.filter(function(p){return p.est!=='pagado'&&p.partidas&&p.partidas.some(function(pt){return !pt.precioVenta;});}).length;
+  var ymPed=MES_SEL.pedidos;
+  // Se muestra el mes seleccionado + cualquier pedido pendiente de otros meses (para no perderlo de vista)
+  var pedidosFilt=pedidos.filter(function(p){return (p.fecha&&p.fecha.slice(0,7)===ymPed)||p.est==='pendiente';});
   return '<div class="stat-grid">'+
     '<div class="stat"><div class="stat-lbl">Pedidos totales</div><div class="stat-val">'+pedidos.length+'</div></div>'+
     '<div class="stat"><div class="stat-lbl">Por recibir</div><div class="stat-val c-warn">'+porRecibir+'</div><div class="stat-sub">Pendientes de llegar</div></div>'+
@@ -1403,10 +1459,11 @@ function rPed(){
   '</div>'+
   (sinPrecio>0&&isAdmin?'<div class="alert al-w"><div class="al-dot"></div>Hay <strong>'+sinPrecio+' pedido(s)</strong> sin precio de venta definido. Da clic en "Ver" para asignarlos.</div>':'')+
   '<div class="card"><div class="card-hdr" style="flex-wrap:wrap;gap:8px"><div class="card-title">Órdenes de compra a proveedores</div>'+
+    selectorMes('pedidos')+
     (canEdit?'<button class="btn btn-p" onclick="mPedido()">+ Nuevo pedido</button>':'<span style="font-size:13px;color:var(--text3)">Solo lectura</span>')+
   '</div><div class="tw"><table><thead><tr><th>Folio</th><th>Proveedor</th><th>Productos</th><th>Total</th><th>Entrega</th><th>Cond.</th><th>Estado</th><th>Pago</th><th>Acciones</th></tr></thead><tbody>'+
-  (pedidos.length===0?'<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--text3)">Sin pedidos</td></tr>':
-  pedidos.slice().reverse().map(function(p){
+  (pedidosFilt.length===0?'<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--text3)">Sin pedidos en este mes</td></tr>':
+  pedidosFilt.slice().reverse().map(function(p){
     var partStr=(p.partidas&&p.partidas.length>0)?p.partidas.map(function(pt){return pt.esp;}).join(', '):'—';
     if(partStr.length>40)partStr=partStr.slice(0,40)+'…';
     var faltaPrecio=p.partidas&&p.partidas.some(function(pt){return !pt.precioVenta;});
@@ -1959,7 +2016,10 @@ function gPedido(){
 function rNotas(){
   var isAdmin=ROL==='admin';
   var canPagar=ROL==='admin'||ROL==='gerente';
-  var notasFilt=FILTRO_NOTA_CLI==='todos'?notas:notas.filter(function(n){return n.cliente===FILTRO_NOTA_CLI;});
+  var ymNotas=MES_SEL.notas;
+  // Se muestra el mes seleccionado + cualquier nota pendiente de otros meses (para no perderla de vista)
+  var notasFilt=notas.filter(function(n){return (n.fecha&&n.fecha.slice(0,7)===ymNotas)||n.est==='pendiente';});
+  notasFilt=FILTRO_NOTA_CLI==='todos'?notasFilt:notasFilt.filter(function(n){return n.cliente===FILTRO_NOTA_CLI;});
   var ventaTotal=notasFilt.reduce(function(a,n){return a+n.total;},0);
   // Cobrado: suma de todos los abonos reales
   var cobrado=notasFilt.reduce(function(a,n){
@@ -1984,6 +2044,7 @@ function rNotas(){
   '</div>'+
   '<div class="card"><div class="card-hdr" style="flex-wrap:wrap;gap:8px">'+
     '<div class="card-title">Historial de notas de entrega</div>'+
+    selectorMes('notas')+
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
       '<select style="background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:7px 10px;border-radius:var(--r);font-size:14px" onchange="setFNC(this.value)">'+cliOpts+'</select>'+
       '<button class="btn" onclick="impReporte()">⎙ Imprimir reporte</button>'+
@@ -3506,22 +3567,25 @@ function rConfig(){
       '</tbody></table></div>';
   } else if(CFG_TAB==='auditoria'){
     var auFiltU=window._AU_FILT||'todos';
+    var ymAud=MES_SEL.auditoria;
+    var logMes=auditLog.filter(function(e){return e.fecha&&e.fecha.slice(0,7)===ymAud;});
     var usuarios_unicos=[];
-    auditLog.forEach(function(e){if(usuarios_unicos.indexOf(e.usuario)<0)usuarios_unicos.push(e.usuario);});
-    var logFilt=auFiltU==='todos'?auditLog:auditLog.filter(function(e){return e.usuario===auFiltU;});
+    logMes.forEach(function(e){if(usuarios_unicos.indexOf(e.usuario)<0)usuarios_unicos.push(e.usuario);});
+    var logFilt=auFiltU==='todos'?logMes:logMes.filter(function(e){return e.usuario===auFiltU;});
     var modColores={Notas:'var(--info)',Pedidos:'var(--accent)',Caja:'var(--accent)',Bodega:'var(--warn)',Camara:'var(--warn)',Usuarios:'var(--danger)',Configuracion:'var(--text3)',Sistema:'var(--text3)'};
-    body='<div class="card-hdr" style="justify-content:space-between">'+
+    body='<div class="card-hdr" style="justify-content:space-between;flex-wrap:wrap;gap:8px">'+
       '<div class="card-title">🔍 Registro de auditoría</div>'+
+      selectorMes('auditoria')+
       '<div style="display:flex;align-items:center;gap:8px">'+
         '<span style="font-size:13px;color:var(--text3)">Filtrar por usuario:</span>'+
         '<select onchange="window._AU_FILT=this.value;nav(\'config\')" style="background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:6px 10px;border-radius:var(--r);font-size:13px">'+
           '<option value="todos"'+(auFiltU==='todos'?' selected':'')+'>Todos</option>'+
           usuarios_unicos.map(function(u){return '<option value="'+u+'"'+(auFiltU===u?' selected':'')+'>'+u+'</option>';}).join('')+
         '</select>'+
-        '<button class="btn btn-xs btn-d" onclick="confirmarEliminar(\'¿Limpiar todo el registro de auditoría? Se perderá el historial de acciones.\',function(){auditLog=[];persist();nav(\'config\');},{palabra:\'BORRAR\'})">Limpiar</button>'+
+        '<button class="btn btn-xs btn-d" onclick="confirmarEliminar(\'¿Limpiar todo el registro de auditoría? Se perderá el historial de acciones.\',function(){limpiarAuditLog();nav(\'config\');},{palabra:\'BORRAR\'})">Limpiar</button>'+
       '</div>'+
     '</div>'+
-    (logFilt.length===0?'<div style="padding:30px;text-align:center;color:var(--text3)">Sin registros de auditoría</div>':
+    (logFilt.length===0?'<div style="padding:30px;text-align:center;color:var(--text3)">Sin registros de auditoría en este mes</div>':
     '<div class="tw"><table><thead><tr><th>Fecha</th><th>Hora</th><th>Usuario</th><th>Módulo</th><th>Acción</th><th>Detalle</th></tr></thead><tbody>'+
     logFilt.slice(0,300).map(function(e){
       var rolPill=e.rol==='admin'?'<span class="pill p-ok" style="font-size:10px">Admin</span>':'<span class="pill p-info" style="font-size:10px">Gerente</span>';
@@ -3825,7 +3889,7 @@ function aplicarDatos(data){
   if(data.compensaciones)compensaciones=data.compensaciones;
   if(data.temp_logs)tempLogs=data.temp_logs;
   if(data.vales)vales=data.vales;
-  if(data.auditLog)auditLog=data.auditLog;
+  if(data.auditLog)auditLog=mergeAuditPorId(auditLog,data.auditLog);
   if(data.users)USERS=data.users;
   if(data.meta_patrimonio!==undefined&&data.meta_patrimonio!==null)metaPatrimonio=data.meta_patrimonio;
   if(data.gastos)gastos=data.gastos;
