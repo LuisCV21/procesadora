@@ -741,6 +741,34 @@ function pill(e){
 
 function modal(html){g('mr').innerHTML='<div class="overlay">'+html+'</div>';}
 
+var _confDelCb=null;
+function _confDelCancel(){_confDelCb=null;cm();}
+function _confDelRun(){var cb=_confDelCb;_confDelCb=null;cm();if(cb)cb();}
+function _confDelCheck(id,palabra){
+  var v=(g(id).value||'').trim().toUpperCase();
+  g(id+'_btn').disabled=(v!==palabra);
+}
+// Modal de confirmación con fricción extra para acciones destructivas.
+// opts.palabra: si se define, exige escribir esa palabra exacta antes de habilitar el botón.
+function confirmarEliminar(msg,cb,opts){
+  opts=opts||{};
+  _confDelCb=cb;
+  var palabra=opts.palabra;
+  var detalle=opts.detalle||'';
+  var inputId='cdtxt';
+  modal('<div class="modal" style="max-width:440px">'+
+    '<div class="modal-hdr" style="background:var(--danger-dim)"><div class="modal-title" style="color:var(--danger)">⚠ Confirmar eliminación</div><button class="btn btn-icon" onclick="_confDelCancel()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div style="margin-bottom:'+(palabra?'12px':'0')+'">'+msg+'</div>'+
+      (detalle?'<div class="muted" style="margin-bottom:12px">'+detalle+'</div>':'')+
+      (palabra?('<div class="field"><label>Escribe <b>'+palabra+'</b> para confirmar</label><input id="'+inputId+'" autocomplete="off" oninput="_confDelCheck(\''+inputId+'\',\''+palabra+'\')"></div>'):'')+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="_confDelCancel()">Cancelar</button>'+
+    '<button class="btn btn-d" id="'+inputId+'_btn"'+(palabra?' disabled':'')+' onclick="_confDelRun()">Sí, eliminar</button>'+
+    '</div></div>');
+  if(palabra){setTimeout(function(){var el=g(inputId);if(el)el.focus();},50);}
+}
+
 // ══════════════════════════════════════════════════════
 //  NAV
 // ══════════════════════════════════════════════════════
@@ -1056,13 +1084,16 @@ function bajaLote(id,esGrupo){
   if(esGrupo){
     // id es el nombre del grupo
     var esp=id;
-    if(!confirm('¿Dar de baja todos los lotes de '+esp+'?'))return;
-    camara=camara.filter(function(x){return x.esp!==esp;});
+    confirmarEliminar('¿Dar de baja TODOS los lotes de '+esp+'?',function(){
+      camara=camara.filter(function(x){return x.esp!==esp;});
+      persist();nav('camara');
+    },{palabra:'BORRAR'});
   } else {
-    if(!confirm('¿Dar de baja este lote?'))return;
-    camara=camara.filter(function(x){return x.id!==id;});
+    confirmarEliminar('¿Dar de baja este lote?',function(){
+      camara=camara.filter(function(x){return x.id!==id;});
+      persist();nav('camara');
+    });
   }
-  persist();nav('camara');
 }
 
 function mEditLote(id){
@@ -1189,8 +1220,9 @@ function mTempLog(){
 }
 function mVerTemps(){mTempLog();}
 function elimTempLog(idx){
-  if(!confirm('¿Eliminar este registro?'))return;
-  tempLogs.splice(idx,1);persist();cm();mTempLog();
+  confirmarEliminar('¿Eliminar este registro de temperatura?',function(){
+    tempLogs.splice(idx,1);persist();cm();mTempLog();
+  });
 }
 function gTempLog(){
   var t=parseFloat(g('tl1').value);
@@ -1348,9 +1380,10 @@ function gProceso(){
 }
 
 function elimProc(id){
-  if(!confirm('¿Eliminar este registro de proceso?'))return;
-  procesos=procesos.filter(function(x){return x.id!==id;});
-  persist();nav('procesos');
+  confirmarEliminar('¿Eliminar este registro de proceso?',function(){
+    procesos=procesos.filter(function(x){return x.id!==id;});
+    persist();nav('procesos');
+  });
 }
 // ══════════════════════════════════════════════════════
 //  PEDIDOS
@@ -1837,10 +1870,11 @@ function imprimirComprobantePago(p,abono){
 }
 
 function elimP(id){
-  if(!confirm('¿Eliminar este pedido?'))return;
   var p=pedidos.find(function(x){return x.id===id;});
-  if(p)audit('Eliminó pedido','Pedidos',(p.numPedido||'#'+p.id)+' · '+p.prov+' · '+money(p.total||0));
-  pedidos=pedidos.filter(function(x){return x.id!==id;});persist();nav('pedidos');
+  confirmarEliminar('¿Eliminar este pedido?',function(){
+    if(p)audit('Eliminó pedido','Pedidos',(p.numPedido||'#'+p.id)+' · '+p.prov+' · '+money(p.total||0));
+    pedidos=pedidos.filter(function(x){return x.id!==id;});persist();nav('pedidos');
+  },{detalle:p?(p.numPedido||'#'+p.id)+' · '+p.prov+' · '+money(p.total||0):''});
 }
 
 function mPedido(){
@@ -2124,11 +2158,12 @@ function gAbonarNota(id){
 }
 
 function elimNota(id){
-  if(!confirm('¿Eliminar esta nota de remisión? Esta acción no se puede deshacer.'))return;
   var n=notas.find(function(x){return x.id===id;});
-  if(n)audit('Eliminó nota','Notas','Nota #'+n.folio+' · '+n.cliente+' · '+money(n.total));
-  notas=notas.filter(function(x){return x.id!==id;});
-  persist();nav('notas');
+  confirmarEliminar('¿Eliminar esta nota de remisión? Esta acción no se puede deshacer.',function(){
+    if(n)audit('Eliminó nota','Notas','Nota #'+n.folio+' · '+n.cliente+' · '+money(n.total));
+    notas=notas.filter(function(x){return x.id!==id;});
+    persist();nav('notas');
+  },{palabra:'ELIMINAR',detalle:n?'Nota #'+n.folio+' · '+n.cliente+' · '+money(n.total):''});
 }
 
 function impReporte(){
@@ -2671,10 +2706,11 @@ function gEditBodega(id){
   persist();cm();nav('bodega');
 }
 function bajaBodega(id){
-  if(!confirm('¿Dar de baja este producto de bodega?'))return;
   var l=bodega.find(function(x){return x.id===id;});
-  if(l)audit('Baja de bodega','Bodega',l.esp+' · Lote '+l.lote+' · '+l.kg+' '+l.unidad);
-  bodega=bodega.filter(function(x){return x.id!==id;});persist();nav('bodega');
+  confirmarEliminar('¿Dar de baja este producto de bodega?',function(){
+    if(l)audit('Baja de bodega','Bodega',l.esp+' · Lote '+l.lote+' · '+l.kg+' '+l.unidad);
+    bodega=bodega.filter(function(x){return x.id!==id;});persist();nav('bodega');
+  },{detalle:l?l.esp+' · Lote '+l.lote+' · '+l.kg+' '+l.unidad:''});
 }
 
 // ══════════════════════════════════════════════════════
@@ -2771,6 +2807,10 @@ function rCaja(){
     var abonado=p.montoPagado||0; return a+Math.max(0,(p.total||p.costo||0)-abonado);},0);
   var totalVales=vales.filter(function(v){return v.est==='pendiente';}).reduce(function(a,v){return a+v.monto;},0);
   var totalFondo=efectivoDeclarado+valInv+porCobrar+totalVales;
+  var totalGastos=gastos.reduce(function(a,gto){return a+gto.monto;},0);
+  // Los gastos pagados en efectivo ya restaron de "Efectivo en caja" al registrarse;
+  // sólo los pagados por transferencia aún no están reflejados en ningún activo de arriba.
+  var gastosNoCaja=gastos.filter(function(gto){return gto.forma!=='efectivo';}).reduce(function(a,gto){return a+gto.monto;},0);
   // Deuda de sucursales propias (notas pendientes de cobro a Florida/Puebla/Petromex)
   var deudaSucursales=SUCURSALES_PROPIAS.map(function(s){
     var pendiente=notas.filter(function(n){return n.cliente===s&&!n.pagada&&n.est==='entregada';})
@@ -2779,8 +2819,8 @@ function rCaja(){
     return {nombre:s,pendiente:pendiente,compPagadas:compPagadas};
   });
 
-  var patrimonioTotal=efectivoDeclarado+valInv+totalVales;
-  var utilidadTotal=patrimonioTotal-metaPatrimonio;
+  var capitalNeto=totalFondo-deudaProv-gastosNoCaja;
+  var utilidadTotal=capitalNeto-metaPatrimonio;
 
   // Tabs de caja
   var CAJA_TAB=window._CAJA_TAB||'resumen';
@@ -2800,6 +2840,7 @@ function rCaja(){
         '<div class="stat"><div class="stat-lbl">Valor inventario</div><div class="stat-val c-ok">'+money(valInv)+'</div><div class="stat-sub">Cámara '+money(valCamara)+' · Bodega '+money(valBodega)+'</div></div>'+
         '<div class="stat"><div class="stat-lbl">Por cobrar (clientes)</div><div class="stat-val c-warn">'+money(porCobrar)+'</div><div class="stat-sub">Notas entregadas sin cobrar</div></div>'+
         '<div class="stat" style="cursor:pointer" onclick="setCajaTab(\'vales\')"><div class="stat-lbl">Vales por cobrar</div><div class="stat-val c-warn">'+money(totalVales)+'</div><div class="stat-sub">'+vales.filter(function(v){return v.est==='pendiente';}).length+' vales pendientes</div></div>'+
+        '<div class="stat" style="cursor:pointer" onclick="setCajaTab(\'gastos\')"><div class="stat-lbl">Gastos</div><div class="stat-val c-danger">'+money(totalGastos)+'</div><div class="stat-sub">'+gastos.length+' gastos registrados</div></div>'+
         '<div class="stat"><div class="stat-lbl">FONDO TOTAL</div><div class="stat-val" style="font-size:20px;color:var(--accent)">'+money(totalFondo)+'</div></div>'+
         '<div class="stat"><div class="stat-lbl">Deuda proveedores</div><div class="stat-val c-danger">'+money(deudaProv)+'</div><div class="stat-sub">Saldo pendiente real</div></div>'+
         '<div class="stat"><div class="stat-lbl">Capital neto</div><div class="stat-val" style="color:'+(totalFondo-deudaProv>=0?'var(--accent)':'var(--danger)')+'">'+money(totalFondo-deudaProv)+'</div></div>'+
@@ -2828,12 +2869,11 @@ function rCaja(){
         '<div class="card-hdr"><div class="card-title">💰 Utilidad de la procesadora</div>'+
         (isAdmin?'<button class="btn btn-xs" onclick="mMetaPatrimonio()">Editar meta</button>':'')+
         '</div><div class="card-body">'+
-        '<div style="font-size:13px;color:var(--text3);margin-bottom:14px">Efectivo + inventario (cámara+bodega) + vales por cobrar pendientes (incluye lo de Janet) debe sumar la meta fija. Lo que exceda esa meta es utilidad.</div>'+
+        '<div style="font-size:13px;color:var(--text3);margin-bottom:14px">Capital neto = efectivo + inventario + por cobrar + vales por cobrar − deuda proveedores − gastos pagados por transferencia. La utilidad es lo que exceda la meta (capital base); si no la alcanza, se muestra como pérdida acumulada mientras cobras a clientes.</div>'+
         '<div class="stat-grid">'+
+          '<div class="stat"><div class="stat-lbl">Capital neto</div><div class="stat-val" style="color:'+(capitalNeto>=0?'var(--accent)':'var(--danger)')+'">'+money(capitalNeto)+'</div><div class="stat-sub">Efectivo + inventario + por cobrar + vales − deuda prov. − gastos</div></div>'+
           '<div class="stat"><div class="stat-lbl">Meta (capital base)</div><div class="stat-val">'+money(metaPatrimonio)+'</div></div>'+
-          '<div class="stat"><div class="stat-lbl">Vales por cobrar pendientes</div><div class="stat-val c-warn">'+money(totalVales)+'</div><div class="stat-sub" style="cursor:pointer;color:var(--info)" onclick="setCajaTab(\'vales\')">Ver detalle</div></div>'+
-          '<div class="stat"><div class="stat-lbl">Patrimonio actual</div><div class="stat-val">'+money(patrimonioTotal)+'</div><div class="stat-sub">Efectivo + inventario + vales por cobrar</div></div>'+
-          '<div class="stat" style="border-color:'+(utilidadTotal>=0?'rgba(46,204,113,.4)':'rgba(192,57,43,.4)')+'"><div class="stat-lbl">UTILIDAD ACUMULADA</div><div class="stat-val" style="font-size:20px;color:'+(utilidadTotal>=0?'var(--accent)':'var(--danger)')+'">'+money(utilidadTotal)+'</div><div class="stat-sub">Antes de descontar gastos del mes</div></div>'+
+          '<div class="stat" style="border-color:'+(utilidadTotal>=0?'rgba(46,204,113,.4)':'rgba(192,57,43,.4)')+'"><div class="stat-lbl">'+(utilidadTotal>=0?'UTILIDAD ACUMULADA':'PÉRDIDA ACUMULADA')+'</div><div class="stat-val" style="font-size:20px;color:'+(utilidadTotal>=0?'var(--accent)':'var(--danger)')+'">'+money(utilidadTotal)+'</div><div class="stat-sub">'+(utilidadTotal>=0?'Por encima del capital base':'Por debajo del capital base — pendiente hasta que cobren los clientes')+'</div></div>'+
         '</div>'+
       '</div></div>';
   } else if(CAJA_TAB==='vales'){
@@ -3026,9 +3066,13 @@ function rCaja(){
     '<div class="card"><div class="card-hdr"><div class="card-title">Patrimonio y utilidad acumulada (a hoy, no depende del periodo)</div></div><div class="card-body">'+
       '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Efectivo en caja</span><span style="font-weight:700">'+money(efectivoDeclarado)+'</span></div>'+
       '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Valor de inventario (cámara + bodega)</span><span style="font-weight:700">'+money(valInv)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Por cobrar (clientes)</span><span style="font-weight:700;color:var(--warn)">'+money(porCobrar)+'</span></div>'+
       '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Vales por cobrar pendientes</span><span style="font-weight:700;color:var(--warn)">'+money(totalVales)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>− Deuda proveedores</span><span style="font-weight:700;color:var(--danger)">'+money(deudaProv)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>− Gastos pagados por transferencia</span><span style="font-weight:700;color:var(--danger)">'+money(gastosNoCaja)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span style="font-weight:700">Capital neto</span><span style="font-weight:700;color:'+(capitalNeto>=0?'var(--accent)':'var(--danger)')+'">'+money(capitalNeto)+'</span></div>'+
       '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Meta (capital base)</span><span style="font-weight:700">'+money(metaPatrimonio)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding:10px 0;font-size:17px"><span style="font-weight:700">Utilidad acumulada total</span><span style="font-weight:700;color:'+(utilidadTotal>=0?'var(--accent)':'var(--danger)')+'">'+money(utilidadTotal)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:10px 0;font-size:17px"><span style="font-weight:700">'+(utilidadTotal>=0?'Utilidad acumulada total':'Pérdida acumulada total')+'</span><span style="font-weight:700;color:'+(utilidadTotal>=0?'var(--accent)':'var(--danger)')+'">'+money(utilidadTotal)+'</span></div>'+
     '</div></div>';
   }
   return tabBar+content;
@@ -3091,16 +3135,17 @@ function revertirVale(id){
   persist();nav('caja');
 }
 function delVale(id){
-  if(!confirm('¿Eliminar este vale?'))return;
   var v=vales.find(function(x){return x.id===id;});
-  if(v&&v.est==='pendiente'&&v.efectivoRestado){
-    efectivoDeclarado+=v.monto;
-    audit('Eliminó vale — devuelto al efectivo','Caja',v.negocio+' · '+money(v.monto));
-  }else if(v){
-    audit('Eliminó vale','Caja',v.negocio+' · '+money(v.monto));
-  }
-  vales=vales.filter(function(x){return x.id!==id;});
-  persist();nav('caja');
+  confirmarEliminar('¿Eliminar este vale?',function(){
+    if(v&&v.est==='pendiente'&&v.efectivoRestado){
+      efectivoDeclarado+=v.monto;
+      audit('Eliminó vale — devuelto al efectivo','Caja',v.negocio+' · '+money(v.monto));
+    }else if(v){
+      audit('Eliminó vale','Caja',v.negocio+' · '+money(v.monto));
+    }
+    vales=vales.filter(function(x){return x.id!==id;});
+    persist();nav('caja');
+  },{detalle:v?v.negocio+' · '+money(v.monto):''});
 }
 
 function mSetEfectivo(){
@@ -3176,22 +3221,29 @@ function gAddGasto(){
   persist();cm();nav('caja');
 }
 function delGasto(id){
-  if(!confirm('¿Eliminar este gasto?'))return;
   var gto=gastos.find(function(x){return x.id===id;});
   if(!gto)return;
-  if(gto.forma==='efectivo')efectivoDeclarado+=gto.monto;
-  audit('Eliminó gasto','Caja',gto.concepto+' · '+money(gto.monto));
-  gastos=gastos.filter(function(x){return x.id!==id;});
-  persist();nav('caja');
+  confirmarEliminar('¿Eliminar este gasto?',function(){
+    if(gto.forma==='efectivo')efectivoDeclarado+=gto.monto;
+    audit('Eliminó gasto','Caja',gto.concepto+' · '+money(gto.monto));
+    gastos=gastos.filter(function(x){return x.id!==id;});
+    persist();nav('caja');
+  },{detalle:gto.concepto+' · '+money(gto.monto)});
 }
 
 function imprimirCorte(desde,hasta){
   var valCamara=camara.reduce(function(a,i){return a+i.kg*(i.costo||0);},0);
   var valBodega=bodega.reduce(function(a,i){return a+i.kg*(i.costo||0);},0);
   var valInv=valCamara+valBodega;
+  var porCobrar=notas.filter(function(n){return !n.pagada&&(n.est==='entregada');}).reduce(function(a,n){
+    var ab=n.abonos?n.abonos.reduce(function(x,b){return x+b.monto;},0):0;
+    return a+Math.max(0,n.total-ab);},0);
+  var deudaProv=pedidos.filter(function(p){return p.est==='recibido'&&!p.pagado;}).reduce(function(a,p){
+    var abonado=p.montoPagado||0; return a+Math.max(0,(p.total||p.costo||0)-abonado);},0);
   var totalVales=vales.filter(function(v){return v.est==='pendiente';}).reduce(function(a,v){return a+v.monto;},0);
-  var patrimonioTotal=efectivoDeclarado+valInv+totalVales;
-  var utilidadTotal=patrimonioTotal-metaPatrimonio;
+  var gastosNoCaja=gastos.filter(function(gto){return gto.forma!=='efectivo';}).reduce(function(a,gto){return a+gto.monto;},0);
+  var capitalNeto=efectivoDeclarado+valInv+porCobrar+totalVales-deudaProv-gastosNoCaja;
+  var utilidadTotal=capitalNeto-metaPatrimonio;
   var ventasPeriodo=notas.filter(function(n){return n.fecha>=desde&&n.fecha<=hasta;}).reduce(function(a,n){return a+(n.total||0);},0);
   var comprasPeriodo=pedidos.filter(function(p){return p.est==='recibido'&&p.fecha>=desde&&p.fecha<=hasta;}).reduce(function(a,p){return a+(p.total||0);},0);
   var pagosProvPeriodo=0;
@@ -3232,9 +3284,13 @@ function imprimirCorte(desde,hasta){
     '<table>'+
       fila('Efectivo en caja',efectivoDeclarado)+
       fila('Valor de inventario (cámara + bodega)',valInv)+
+      fila('Por cobrar (clientes)',porCobrar)+
       fila('Vales por cobrar pendientes',totalVales)+
+      fila('Deuda proveedores',deudaProv,'#b8342e')+
+      fila('Gastos pagados por transferencia',gastosNoCaja,'#b8342e')+
+      fila('Capital neto',capitalNeto)+
       fila('Meta (capital base)',metaPatrimonio)+
-      '<tr class="tot"><td style="padding:10px">UTILIDAD ACUMULADA TOTAL</td><td style="padding:10px;text-align:right">'+money(utilidadTotal)+'</td></tr>'+
+      '<tr class="tot"><td style="padding:10px">'+(utilidadTotal>=0?'UTILIDAD ACUMULADA TOTAL':'PÉRDIDA ACUMULADA TOTAL')+'</td><td style="padding:10px;text-align:right">'+money(utilidadTotal)+'</td></tr>'+
     '</table>'+
     '</body></html>';
   var win=window.open('','_blank');
@@ -3256,9 +3312,10 @@ function gCompensacion(){
 function updCompNotas(){}
 
 function elimComp(id){
-  if(!confirm('¿Eliminar este registro de pago? Los abonos ya aplicados en notas NO se revierten.'))return;
-  compensaciones=compensaciones.filter(function(x){return x.id!==id;});
-  persist();nav('caja');
+  confirmarEliminar('¿Eliminar este registro de pago? Los abonos ya aplicados en notas NO se revierten.',function(){
+    compensaciones=compensaciones.filter(function(x){return x.id!==id;});
+    persist();nav('caja');
+  },{palabra:'ELIMINAR'});
 }
 
 function mMovTransferencias(){
@@ -3461,7 +3518,7 @@ function rConfig(){
           '<option value="todos"'+(auFiltU==='todos'?' selected':'')+'>Todos</option>'+
           usuarios_unicos.map(function(u){return '<option value="'+u+'"'+(auFiltU===u?' selected':'')+'>'+u+'</option>';}).join('')+
         '</select>'+
-        '<button class="btn btn-xs btn-d" onclick="if(confirm(\'¿Limpiar todo el registro de auditoría?\')){auditLog=[];persist();nav(\'config\');}">Limpiar</button>'+
+        '<button class="btn btn-xs btn-d" onclick="confirmarEliminar(\'¿Limpiar todo el registro de auditoría? Se perderá el historial de acciones.\',function(){auditLog=[];persist();nav(\'config\');},{palabra:\'BORRAR\'})">Limpiar</button>'+
       '</div>'+
     '</div>'+
     (logFilt.length===0?'<div style="padding:30px;text-align:center;color:var(--text3)">Sin registros de auditoría</div>':
@@ -3545,16 +3602,17 @@ function resetModulo(mod){
   var msgs={notas:'todas las notas de entrega',pedidos:'todos los pedidos a proveedores',
     procesos:'todos los registros de procesos',camara:'todo el inventario de cámara',
     bodega:'todo el inventario de bodega',todo:'TODOS LOS DATOS del sistema'};
-  if(!confirm('⚠ ¿Estás seguro de que quieres borrar '+msgs[mod]+'?\n\nEsta acción NO se puede deshacer.'))return;
-  if(mod==='todo'&&!confirm('Esta es tu última oportunidad. ¿Borrar TODO?'))return;
-  if(mod==='notas'||mod==='todo')notas=[];
-  if(mod==='pedidos'||mod==='todo')pedidos=[];
-  if(mod==='procesos'||mod==='todo')procesos=[];
-  if(mod==='camara'||mod==='todo')camara=[];
-  if(mod==='bodega'||mod==='todo')bodega=[];
-  if(mod==='todo'){compensaciones=[];movTransferencias=[];tempLogs=[];efectivoDeclarado=0;gastos=[];}
-  persist();nav('config');
-  alert('✅ Datos borrados correctamente.');
+  var palabra=mod==='todo'?'BORRAR TODO':'BORRAR';
+  confirmarEliminar('⚠ ¿Estás seguro de que quieres borrar '+msgs[mod]+'? Esta acción NO se puede deshacer.',function(){
+    if(mod==='notas'||mod==='todo')notas=[];
+    if(mod==='pedidos'||mod==='todo')pedidos=[];
+    if(mod==='procesos'||mod==='todo')procesos=[];
+    if(mod==='camara'||mod==='todo')camara=[];
+    if(mod==='bodega'||mod==='todo')bodega=[];
+    if(mod==='todo'){compensaciones=[];movTransferencias=[];tempLogs=[];efectivoDeclarado=0;gastos=[];}
+    persist();nav('config');
+    alert('✅ Datos borrados correctamente.');
+  },{palabra:palabra});
 }
 
 function mEditItem(idx){
@@ -3625,14 +3683,15 @@ function saveItem(tipo){
 }
 
 function delItem(tipo,idx){
-  if(!confirm('¿Eliminar este registro?'))return;
   var nom=tipo==='producto'?(PRODUCTOS[idx]?PRODUCTOS[idx].n:''):tipo==='proveedor'?(PROVEEDORES[idx]||''):tipo==='cliente'?(CLIENTES[idx]||''):'';
-  audit('Eliminó de catálogo','Configuración',tipo+': '+nom);
-  if(tipo==='producto') PRODUCTOS.splice(idx,1);
-  else if(tipo==='proveedor') PROVEEDORES.splice(idx,1);
-  else if(tipo==='cliente') CLIENTES.splice(idx,1);
-  else if(tipo==='proc_tipo') PROC_TIPOS.splice(idx,1);
-  persist();nav('config');
+  confirmarEliminar('¿Eliminar este registro del catálogo?',function(){
+    audit('Eliminó de catálogo','Configuración',tipo+': '+nom);
+    if(tipo==='producto') PRODUCTOS.splice(idx,1);
+    else if(tipo==='proveedor') PROVEEDORES.splice(idx,1);
+    else if(tipo==='cliente') CLIENTES.splice(idx,1);
+    else if(tipo==='proc_tipo') PROC_TIPOS.splice(idx,1);
+    persist();nav('config');
+  },{detalle:nom});
 }
 
 function mAddUsuario(){
@@ -3672,11 +3731,12 @@ async function gPass(id){
   save('users',USERS);cm();nav('config');
 }
 function delUser(id){
-  if(!confirm('¿Eliminar este usuario?'))return;
   var u=USERS.find(function(x){return x.id===id;});
-  if(u)audit('Eliminó usuario','Usuarios',u.nombre+' ('+u.user+') · '+u.rol);
-  USERS=USERS.filter(function(x){return x.id!==id;});
-  save('users',USERS);nav('config');
+  confirmarEliminar('¿Eliminar este usuario?',function(){
+    if(u)audit('Eliminó usuario','Usuarios',u.nombre+' ('+u.user+') · '+u.rol);
+    USERS=USERS.filter(function(x){return x.id!==id;});
+    save('users',USERS);nav('config');
+  },{detalle:u?u.nombre+' ('+u.user+') · '+u.rol:''});
 }
 
 // ══════════════════════════════════════════════════════
@@ -3702,7 +3762,12 @@ function exportarDatos(){
 
 function importarDatos(input){
   var file=input.files[0];if(!file)return;
-  if(!confirm('¿Importar estos datos? Se reemplazará todo lo actual en esta computadora.'))return;
+  confirmarEliminar('¿Importar estos datos? Se reemplazará TODO lo actual en esta computadora.',function(){
+    _importarDatosArchivo(file);
+  },{palabra:'REEMPLAZAR'});
+  input.value='';
+}
+function _importarDatosArchivo(file){
   var reader=new FileReader();
   reader.onload=function(e){
     try{
@@ -3733,7 +3798,6 @@ function importarDatos(input){
     }catch(err){alert('Error al leer el archivo: '+err.message);}
   };
   reader.readAsText(file);
-  input.value='';
 }
 
 // ══════════════════════════════════════════════════════
