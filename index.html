@@ -135,25 +135,28 @@ td.mn{font-family:var(--mono);font-size:13px}
 .modal-body{padding:22px;overflow-y:auto;flex:1}
 .modal-footer{display:flex;gap:10px;justify-content:flex-end;padding:16px 22px;border-top:2px solid var(--border);flex-shrink:0;background:var(--bg3);border-radius:0 0 16px 16px}
 /* ── NOTA PREVIEW (misma estructura que se imprime en hoja carta) ── */
-.nota-wrap{background:#fff;color:#111;border-radius:4px;padding:16px 18px;font-family:Arial,sans-serif;max-width:720px;margin:0 auto;font-size:11px}
+/* Sin grises: los grises claros se pierden en impresoras B/N, todo en negro sólido + el azul de marca */
+.nota-wrap{background:#fff;color:#000;border-radius:4px;padding:16px 18px;font-family:Arial,sans-serif;max-width:720px;margin:0 auto;font-size:11px}
 .nota-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;border-bottom:2px solid #1a3a6b;padding-bottom:8px}
 .nota-brand-name{font-size:17px;font-weight:700;color:#1a3a6b;line-height:1.3}
-.nota-brand-sub{font-size:10px;color:#888;margin-top:2px}
+.nota-brand-sub{font-size:10px;color:#000;margin-top:2px}
 .nota-folio-box{background:#1a3a6b;color:#fff;padding:6px 16px;border-radius:4px;text-align:center;min-width:110px}
 .nota-folio-lbl{font-size:9px;font-weight:700;letter-spacing:.05em}
 .nota-folio-n{font-size:22px;font-weight:700}
-.nota-grid{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #ddd;border-radius:4px;overflow:hidden;margin:8px 0}
-.nota-field{padding:4px 8px;border-bottom:1px solid #eee;border-right:1px solid #eee;display:flex;gap:5px;font-size:10.5px}
-.nota-field b{color:#555;flex-shrink:0}
+.nota-grid{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #999;border-radius:4px;overflow:hidden;margin:8px 0}
+.nota-field{padding:4px 8px;border-bottom:1px solid #bbb;border-right:1px solid #bbb;display:flex;gap:5px;font-size:10.5px}
+.nota-field b{color:#000;flex-shrink:0}
+.nota-cols{display:flex;gap:12px}
+.nota-col{flex:1;min-width:0}
+.nota-col+.nota-col{border-left:1px solid #999;padding-left:12px}
 .nota-tbl{width:100%;border-collapse:collapse;margin:6px 0;table-layout:fixed}
 .nota-tbl th{background:#1a3a6b;color:#fff;text-align:center}
-.nota-tbl td{border-bottom:1px solid #eee;text-align:right;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.nota-tbl td{border-bottom:1px solid #bbb;text-align:right;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#000}
 .nota-tbl td.left{text-align:left}
-.nota-tbl tr:nth-child(even) td{background:#f8f9fa}
-.nota-tot-row td{background:#1a3a6b!important;color:#fff!important;font-weight:700}
+.nota-total-bar{background:#1a3a6b;color:#fff;font-weight:700;display:flex;justify-content:space-between;padding:7px 12px;border-radius:3px;margin-top:6px;font-size:13px}
 .nota-firmas{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:22px}
-.nota-firma{text-align:center;font-size:10px;font-weight:700;color:#555}
-.nota-firma-line{border-top:1px solid #333;padding-top:4px}
+.nota-firma{text-align:center;font-size:10px;font-weight:700;color:#000}
+.nota-firma-line{border-top:1px solid #000;padding-top:4px}
 /* ── CONFIG TABS ── */
 .config-tabs{display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:20px}
 .cfg-tab{padding:11px 20px;font-size:14px;font-weight:500;color:var(--text3);cursor:pointer;border-bottom:3px solid transparent;transition:all .15s;margin-bottom:-2px}
@@ -2321,28 +2324,53 @@ function imprimirRelacionVenta(desde,hasta){
   setTimeout(function(){win.print();},350);
 }
 
-// Todo cabe en UNA sola hoja carta: el tamaño de fila/letra de la tabla de
-// partidas se escala según cuántas traiga la nota (encabezado y pie son de
-// tamaño fijo). Calibrado para que quepan hasta ~100 partidas en una hoja.
-function buildNotaHTML(n){
-  var partidas=n.partidas||[];
-  var count=Math.max(partidas.length,1);
-  var bodyPx=740; // alto aprox. disponible para la tabla en una hoja carta, tras encabezado/pie
-  var rowH=Math.max(7.6,Math.min(24,bodyPx/count))-1; // -1px reservado para el borde de la fila
-  var fs=Math.max(6.3,Math.min(11,rowH*0.58));
-  var padV=Math.max(0.3,Math.min(4,(rowH-fs*1.15)/2));
-  var thFs=Math.max(8,Math.min(10,fs+1.8));
+// Todo cabe en UNA sola hoja carta. Con pocas partidas se usa una sola columna
+// de productos con letra cómoda; pasado cierto número se reparte en DOS
+// columnas lado a lado (en vez de encoger tanto la letra que ya no se lea).
+// Solo si aun así hay demasiadas partidas se reduce un poco más la letra.
+var NOTA_FILAS_POR_COLUMNA=25;
+function buildNotaFilas(items,offset,fs,padV){
   var cellStyle='font-size:'+fs.toFixed(1)+'px;padding:'+padV.toFixed(1)+'px 5px';
-  var rows=partidas.map(function(p,i){
-    return '<tr style="'+(i%2===1?'background:#f8f9fa;':'')+'">'+
-      '<td style="'+cellStyle+';text-align:center;color:#999">'+(i+1)+'</td>'+
+  return items.map(function(p,i){
+    return '<tr>'+
+      '<td style="'+cellStyle+';text-align:center">'+(offset+i+1)+'</td>'+
       '<td style="'+cellStyle+';text-align:center">'+p.cant+' '+(p.unidad||'kg')+'</td>'+
-      '<td class="left" style="'+cellStyle+'">'+p.concepto+'</td>'+
-      '<td style="'+cellStyle+';text-align:center;color:#888">'+(p.lote||'—')+'</td>'+
+      '<td class="left" style="'+cellStyle+'">'+p.concepto+(p.lote?' <span style="font-size:.85em">(Lote '+p.lote+')</span>':'')+'</td>'+
       '<td style="'+cellStyle+'">$'+parseFloat(p.precio||0).toLocaleString('es-MX')+'</td>'+
       '<td style="'+cellStyle+'">$'+parseFloat(p.importe||0).toLocaleString('es-MX')+'</td>'+
     '</tr>';
   }).join('');
+}
+function buildNotaTabla(items,offset,fs,padV,thFs){
+  return '<table class="nota-tbl"><colgroup><col style="width:8%"><col style="width:17%"><col><col style="width:18%"><col style="width:19%"></colgroup>'+
+    '<thead><tr>'+
+      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:4px 3px">#</th>'+
+      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:4px 3px">Cantidad</th>'+
+      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:4px 3px;text-align:left">Concepto</th>'+
+      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:4px 3px">Precio</th>'+
+      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:4px 3px">Importe</th>'+
+    '</tr></thead><tbody>'+buildNotaFilas(items,offset,fs,padV)+'</tbody></table>';
+}
+function buildNotaHTML(n){
+  var partidas=n.partidas||[];
+  var cols=partidas.length>NOTA_FILAS_POR_COLUMNA?2:1;
+  var perCol=Math.max(Math.ceil(partidas.length/cols),1);
+  var fs,padV;
+  if(perCol<=NOTA_FILAS_POR_COLUMNA){fs=10;padV=2.6;}
+  else{
+    var exceso=perCol-NOTA_FILAS_POR_COLUMNA;
+    fs=Math.max(7.5,10-exceso*0.08);
+    padV=Math.max(0.8,2.6-exceso*0.03);
+  }
+  var thFs=Math.max(8.5,Math.min(10,fs+0.5));
+  var col1=partidas.slice(0,perCol);
+  var col2=cols===2?partidas.slice(perCol):[];
+  var tablasHTML=cols===2
+    ? '<div class="nota-cols">'+
+        '<div class="nota-col">'+buildNotaTabla(col1,0,fs,padV,thFs)+'</div>'+
+        '<div class="nota-col">'+buildNotaTabla(col2,perCol,fs,padV,thFs)+'</div>'+
+      '</div>'
+    : buildNotaTabla(col1,0,fs,padV,thFs);
   var campos=[
     {l:'Cliente',v:n.cliente},{l:'Fecha',v:fmtFecha(n.fecha)},{l:'Condiciones',v:n.condiciones},
     {l:'Domicilio',v:n.domicilio},{l:'Ciudad',v:n.ciudad},{l:'Tel',v:n.tel}
@@ -2355,17 +2383,8 @@ function buildNotaHTML(n){
     '<div class="nota-grid">'+
       campos.map(function(c){return '<div class="nota-field"><b>'+c.l+':</b><span>'+c.v+'</span></div>';}).join('')+
     '</div>'+
-    '<table class="nota-tbl"><colgroup><col style="width:5%"><col style="width:12%"><col style="width:42%"><col style="width:12%"><col style="width:14%"><col style="width:15%"></colgroup>'+
-    '<thead><tr>'+
-      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:5px 4px">#</th>'+
-      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:5px 4px">Cantidad</th>'+
-      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:5px 4px;text-align:left">Concepto</th>'+
-      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:5px 4px">Lote</th>'+
-      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:5px 4px">Precio</th>'+
-      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:5px 4px">Importe</th>'+
-    '</tr></thead><tbody>'+rows+'</tbody>'+
-    '<tfoot><tr class="nota-tot-row"><td colspan="5" style="text-align:right;padding:6px 8px;font-size:'+Math.max(fs,10).toFixed(1)+'px">TOTAL</td><td style="padding:6px 8px;font-size:'+Math.max(fs,10).toFixed(1)+'px">'+money(n.total)+'</td></tr></tfoot>'+
-    '</table>'+
+    tablasHTML+
+    '<div class="nota-total-bar"><span>TOTAL</span><span>'+money(n.total)+'</span></div>'+
     '<div class="nota-firmas">'+
       '<div class="nota-firma"><div class="nota-firma-line">FORMULÓ</div></div>'+
       '<div class="nota-firma"><div class="nota-firma-line">CONDUCTO</div></div>'+
@@ -2388,27 +2407,29 @@ function printNota(id){
   var html=buildNotaHTML(n);
   var win=window.open('','_blank');
   win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Nota #'+n.folio+'</title><style>'+
-    '@page{size:215.9mm 279.4mm;margin:10mm}'+
-    'body{font-family:Arial,sans-serif;margin:0;padding:0;background:#fff;color:#111}'+
+    '@page{size:215.9mm 279.4mm;margin:8mm}'+
+    'body{font-family:Arial,sans-serif;margin:0;padding:0;background:#fff;color:#000}'+
     '.nota-wrap{width:100%;font-size:11px}'+
     '.nota-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;border-bottom:2px solid #1a3a6b;padding-bottom:8px}'+
     '.nota-brand-name{font-size:17px;font-weight:700;color:#1a3a6b;line-height:1.3}'+
-    '.nota-brand-sub{font-size:10px;color:#888;margin-top:2px}'+
+    '.nota-brand-sub{font-size:10px;color:#000;margin-top:2px}'+
     '.nota-folio-box{background:#1a3a6b;color:#fff;padding:6px 16px;border-radius:4px;text-align:center;min-width:110px}'+
     '.nota-folio-lbl{font-size:9px;font-weight:700;letter-spacing:.05em}'+
     '.nota-folio-n{font-size:22px;font-weight:700}'+
-    '.nota-grid{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #ddd;border-radius:4px;overflow:hidden;margin:8px 0}'+
-    '.nota-field{padding:4px 8px;border-bottom:1px solid #eee;border-right:1px solid #eee;display:flex;gap:5px;font-size:10.5px}'+
-    '.nota-field b{color:#555;flex-shrink:0}'+
+    '.nota-grid{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #999;border-radius:4px;overflow:hidden;margin:8px 0}'+
+    '.nota-field{padding:4px 8px;border-bottom:1px solid #bbb;border-right:1px solid #bbb;display:flex;gap:5px;font-size:10.5px}'+
+    '.nota-field b{color:#000;flex-shrink:0}'+
+    '.nota-cols{display:flex;gap:12px}'+
+    '.nota-col{flex:1;min-width:0}'+
+    '.nota-col+.nota-col{border-left:1px solid #999;padding-left:12px}'+
     '.nota-tbl{width:100%;border-collapse:collapse;margin:6px 0;table-layout:fixed}'+
     '.nota-tbl th{background:#1a3a6b;color:#fff;text-align:center}'+
-    '.nota-tbl td{border-bottom:1px solid #eee;text-align:right;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}'+
+    '.nota-tbl td{border-bottom:1px solid #bbb;text-align:right;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#000}'+
     '.nota-tbl td.left{text-align:left}'+
-    '.nota-tbl tr:nth-child(even) td{background:#f8f9fa}'+
-    '.nota-tot-row td{background:#1a3a6b!important;color:#fff!important;font-weight:700}'+
+    '.nota-total-bar{background:#1a3a6b;color:#fff;font-weight:700;display:flex;justify-content:space-between;padding:7px 12px;border-radius:3px;margin-top:6px;font-size:13px}'+
     '.nota-firmas{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:22px}'+
-    '.nota-firma{text-align:center;font-size:10px;font-weight:700;color:#555}'+
-    '.nota-firma-line{border-top:1px solid #333;padding-top:4px}'+
+    '.nota-firma{text-align:center;font-size:10px;font-weight:700;color:#000}'+
+    '.nota-firma-line{border-top:1px solid #000;padding-top:4px}'+
     '@media print{body{padding:0}}'+
   '</style></head><body>'+html+'</body></html>');
   win.document.close();
