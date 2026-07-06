@@ -2977,12 +2977,14 @@ function rCaja(){
       (canOp?'<button class="btn btn-p" onclick="mAddVale()">+ Agregar vale</button>':'')+
       '</div>'+
       (valesPend.length===0?'<div class="card-body" style="text-align:center;padding:30px;color:var(--text3)">Sin vales pendientes</div>':
-      '<div class="tw"><table><thead><tr><th>Negocio / Cliente</th><th>Concepto</th><th>Fecha</th><th>Monto</th><th>Acciones</th></tr></thead><tbody>'+
+      '<div class="tw"><table><thead><tr><th>Negocio / Cliente</th><th>Concepto</th><th>Fecha</th><th>Saldo</th><th>Acciones</th></tr></thead><tbody>'+
       valesPend.sort(function(a,b){return b.fecha.localeCompare(a.fecha);}).map(function(v){
         return '<tr><td class="pr">'+v.negocio+'</td><td style="color:var(--text2)">'+v.concepto+'</td><td class="mn">'+fmtFecha(v.fecha)+'</td>'+
           '<td class="pr c-warn">'+money(v.monto)+'</td>'+
-          '<td><div style="display:flex;gap:4px">'+
-            (canOp?'<button class="btn btn-xs btn-p" onclick="cobrarVale('+v.id+')">✓ Cobrado</button>':'')+
+          '<td><div style="display:flex;gap:4px;flex-wrap:wrap">'+
+            (canOp?'<button class="btn btn-xs" onclick="mVerHistorialVale('+v.id+')" title="Ver movimientos">🕘 Mov.</button>':'')+
+            (canOp?'<button class="btn btn-xs btn-w" onclick="mAumentarVale('+v.id+')">+ Aumentar</button>':'')+
+            (canOp?'<button class="btn btn-xs btn-p" onclick="mAbonarVale('+v.id+')">Abonar</button>':'')+
             (ROL==='admin'?'<button class="btn btn-xs btn-d" onclick="delVale('+v.id+')">Eliminar</button>':'')+
           '</div></td></tr>';
       }).join('')+
@@ -2992,14 +2994,15 @@ function rCaja(){
     '</div>'+
     (valesCob.length>0?
     '<div class="card"><div class="card-hdr"><div class="card-title" style="color:var(--text3)">Vales cobrados</div></div>'+
-    '<div class="tw"><table><thead><tr><th>Negocio / Cliente</th><th>Concepto</th><th>Fecha</th><th>Monto</th><th>Cobrado</th>'+
+    '<div class="tw"><table><thead><tr><th>Negocio / Cliente</th><th>Concepto</th><th>Fecha</th><th>Monto</th><th>Cobrado</th><th></th>'+
       (ROL==='admin'?'<th>Efectivo</th><th>Acciones</th>':'')+
     '</tr></thead><tbody>'+
     valesCob.sort(function(a,b){return b.fechaCobro.localeCompare(a.fechaCobro);}).map(function(v){
       var sumado=v.efectivoSumado;
       return '<tr><td>'+v.negocio+'</td><td style="color:var(--text3)">'+v.concepto+'</td><td class="mn">'+fmtFecha(v.fecha)+'</td>'+
-        '<td class="mn" style="color:var(--text3)">'+money(v.monto)+'</td>'+
+        '<td class="mn" style="color:var(--text3)">'+money(v.montoTotal!==undefined?v.montoTotal:v.monto)+'</td>'+
         '<td class="mn" style="color:var(--accent)">'+fmtFecha(v.fechaCobro)+'</td>'+
+        '<td><button class="btn btn-xs" onclick="mVerHistorialVale('+v.id+')" title="Ver movimientos">🕘</button></td>'+
         (ROL==='admin'?
           '<td>'+(sumado?'<span class="pill p-ok">Sumado</span>':'<span class="pill p-warn">Pendiente acreditar</span>')+'</td>'+
           '<td><div style="display:flex;gap:4px;flex-wrap:wrap">'+
@@ -3194,19 +3197,87 @@ function gVale(){
   var n=g('vn').value.trim(),c=g('vc').value.trim(),m=parseFloat(g('vm').value)||0,f=g('vf').value;
   if(!n||!m){alert('Completa negocio y monto');return;}
   if(m>efectivoDeclarado){alert('Efectivo disponible: '+money(efectivoDeclarado)+'\nNo puedes registrar un vale de '+money(m)+' en efectivo.');return;}
-  vales.push({id:uid(),negocio:n,concepto:c,monto:m,fecha:f,est:'pendiente',fechaCobro:null,efectivoRestado:true});
+  vales.push({id:uid(),negocio:n,concepto:c,monto:m,montoTotal:m,fecha:f,est:'pendiente',fechaCobro:null,efectivoRestado:true,
+    historial:[{tipo:'creacion',monto:m,fecha:f,concepto:c}]});
   efectivoDeclarado=Math.max(0,efectivoDeclarado-m);
   audit('Creó vale por cobrar — descontado del efectivo','Caja',n+' · '+money(m)+(c?' · '+c:''));
   persist();cm();nav('caja');
 }
-function cobrarVale(id){
+function ensureHistorialVale(v){
+  if(!v.historial)v.historial=[{tipo:'creacion',monto:v.monto,fecha:v.fecha,concepto:v.concepto||''}];
+  if(v.montoTotal===undefined)v.montoTotal=v.monto;
+}
+function mAumentarVale(id){
   var v=vales.find(function(x){return x.id===id;});
   if(!v)return;
-  if(!confirm('¿Marcar como cobrado el vale de '+v.negocio+' por '+money(v.monto)+'?'))return;
-  v.est='cobrado';v.fechaCobro=today();v.efectivoSumado=true;
-  efectivoDeclarado+=v.monto;
-  audit('Cobró vale — sumado al efectivo','Caja',v.negocio+' · '+money(v.monto));
-  persist();nav('caja');
+  modal('<div class="modal" style="max-width:400px"><div class="modal-hdr"><div class="modal-title">Aumentar vale — '+v.negocio+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div style="margin-bottom:12px;color:var(--text3)">Saldo actual: <b style="color:var(--warn)">'+money(v.monto)+'</b><br>Efectivo disponible: <b>'+money(efectivoDeclarado)+'</b></div>'+
+      '<div class="field" style="margin-bottom:10px"><label>Monto a aumentar ($)</label><input id="vau_m" type="number" min="0" placeholder="0.00"></div>'+
+      '<div class="field" style="margin-bottom:10px"><label>Concepto (opcional)</label><input id="vau_c" type="text" placeholder="Ej: Nueva mercancía a crédito"></div>'+
+      '<div class="field"><label>Fecha</label><input id="vau_f" type="date" value="'+today()+'"></div>'+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-w" onclick="gAumentarVale('+id+')">Aumentar vale</button></div>'+
+  '</div>');
+}
+function gAumentarVale(id){
+  var v=vales.find(function(x){return x.id===id;});
+  if(!v)return;
+  var m=parseFloat(g('vau_m').value)||0,c=g('vau_c').value.trim(),f=g('vau_f').value||today();
+  if(m<=0){alert('Ingresa un monto válido');return;}
+  if(m>efectivoDeclarado){alert('Efectivo disponible: '+money(efectivoDeclarado)+'\nNo puedes aumentar el vale en '+money(m)+' en efectivo.');return;}
+  ensureHistorialVale(v);
+  v.monto+=m;v.montoTotal+=m;
+  v.historial.push({tipo:'aumento',monto:m,fecha:f,concepto:c});
+  efectivoDeclarado=Math.max(0,efectivoDeclarado-m);
+  audit('Aumentó vale por cobrar — descontado del efectivo','Caja',v.negocio+' · +'+money(m)+' · nuevo saldo '+money(v.monto));
+  persist();cm();nav('caja');
+}
+function mAbonarVale(id){
+  var v=vales.find(function(x){return x.id===id;});
+  if(!v)return;
+  modal('<div class="modal" style="max-width:400px"><div class="modal-hdr"><div class="modal-title">Abonar vale — '+v.negocio+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div style="margin-bottom:12px;color:var(--text3)">Saldo pendiente: <b style="color:var(--warn)">'+money(v.monto)+'</b></div>'+
+      '<div class="field" style="margin-bottom:10px"><label>Monto a abonar ($)</label><input id="vab_m" type="number" min="0" max="'+v.monto+'" value="'+v.monto+'"></div>'+
+      '<div class="field"><label>Fecha</label><input id="vab_f" type="date" value="'+today()+'"></div>'+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gAbonarVale('+id+')">Registrar abono</button></div>'+
+  '</div>');
+}
+function gAbonarVale(id){
+  var v=vales.find(function(x){return x.id===id;});
+  if(!v)return;
+  var m=parseFloat(g('vab_m').value)||0,f=g('vab_f').value||today();
+  if(m<=0){alert('Ingresa un monto válido');return;}
+  if(m>v.monto+0.01){alert('El abono no puede ser mayor al saldo pendiente ('+money(v.monto)+')');return;}
+  ensureHistorialVale(v);
+  v.historial.push({tipo:'abono',monto:m,fecha:f});
+  v.monto=Math.round((v.monto-m)*100)/100;
+  efectivoDeclarado+=m;
+  if(v.monto<=0.01){v.monto=0;v.est='cobrado';v.fechaCobro=f;v.efectivoSumado=true;}
+  audit(v.est==='cobrado'?'Cobró vale (saldado) — sumado al efectivo':'Abonó a vale por cobrar — sumado al efectivo','Caja',v.negocio+' · '+money(m)+' · saldo restante '+money(v.monto));
+  persist();cm();nav('caja');
+}
+function mVerHistorialVale(id){
+  var v=vales.find(function(x){return x.id===id;});
+  if(!v)return;
+  var h=(v.historial&&v.historial.length?v.historial:[{tipo:'creacion',monto:v.monto,fecha:v.fecha,concepto:v.concepto||''}]);
+  var lbl={creacion:'Vale creado',aumento:'Aumento',abono:'Abono',reversion:'Revertido a pendiente'};
+  var color={creacion:'var(--text2)',aumento:'var(--warn)',abono:'var(--accent)',reversion:'var(--danger)'};
+  var sign={creacion:'',aumento:'+',abono:'-',reversion:''};
+  modal('<div class="modal" style="max-width:440px"><div class="modal-hdr"><div class="modal-title">Movimientos — '+v.negocio+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div class="tw"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Monto</th></tr></thead><tbody>'+
+      h.slice().sort(function(a,b){return b.fecha.localeCompare(a.fecha);}).map(function(x){
+        return '<tr><td class="mn">'+fmtFecha(x.fecha)+'</td><td>'+(lbl[x.tipo]||x.tipo)+(x.concepto?' — '+x.concepto:'')+'</td>'+
+          '<td class="mn" style="color:'+(color[x.tipo]||'')+'">'+sign[x.tipo]+money(x.monto)+'</td></tr>';
+      }).join('')+
+      '</tbody></table></div>'+
+      '<div style="margin-top:12px;color:var(--text3)">Saldo actual: <b style="color:var(--warn)">'+money(v.monto)+'</b>'+(v.est==='cobrado'?' · <span style="color:var(--accent)">Saldado</span>':'')+'</div>'+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cerrar</button></div>'+
+  '</div>');
 }
 function acreditarValeEfectivo(id){
   var v=vales.find(function(x){return x.id===id;});
@@ -3220,11 +3291,15 @@ function acreditarValeEfectivo(id){
 function revertirVale(id){
   var v=vales.find(function(x){return x.id===id;});
   if(!v)return;
-  var msg='¿Revertir este vale a PENDIENTE?\n'+v.negocio+' · '+money(v.monto);
-  if(v.efectivoSumado)msg+='\n\nATENCIÓN: Se restará '+money(v.monto)+' del efectivo en caja.';
+  var montoRevertir=(v.montoTotal!==undefined?v.montoTotal:v.monto);
+  var msg='¿Revertir este vale a PENDIENTE?\n'+v.negocio+' · '+money(montoRevertir);
+  if(v.efectivoSumado)msg+='\n\nATENCIÓN: Se restará '+money(montoRevertir)+' del efectivo en caja.';
   if(!confirm(msg))return;
-  if(v.efectivoSumado)efectivoDeclarado=Math.max(0,efectivoDeclarado-v.monto);
-  audit('Revirtió vale a pendiente','Caja',v.negocio+' · '+money(v.monto)+(v.efectivoSumado?' — descontado del efectivo':' — sin cargo al efectivo'));
+  if(v.efectivoSumado)efectivoDeclarado=Math.max(0,efectivoDeclarado-montoRevertir);
+  audit('Revirtió vale a pendiente','Caja',v.negocio+' · '+money(montoRevertir)+(v.efectivoSumado?' — descontado del efectivo':' — sin cargo al efectivo'));
+  ensureHistorialVale(v);
+  v.historial.push({tipo:'reversion',monto:montoRevertir,fecha:today()});
+  v.monto=montoRevertir;
   v.est='pendiente';v.fechaCobro=null;v.efectivoSumado=false;
   persist();nav('caja');
 }
