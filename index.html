@@ -2108,16 +2108,19 @@ function rNotas(){
       '<button class="btn" onclick="mRelacionVenta()">📊 Relación de venta</button>'+
       '<button class="btn btn-p" onclick="nav(\'nueva-nota\')">+ Nueva nota de entrega</button>'+
     '</div>'+
-  '</div><div class="tw"><table><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Partidas</th><th>Total</th><th>Condición</th><th>Estado</th><th>Pago</th><th>Acciones</th></tr></thead><tbody>'+
-  (notasFilt.length===0?'<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--text3)">Sin notas registradas</td></tr>':
+  '</div><div class="tw"><table><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Partidas</th><th>Total</th><th>Condición</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>'+
+  (notasFilt.length===0?'<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text3)">Sin notas registradas</td></tr>':
   notasFilt.slice().reverse().map(function(n){
     var esCredito=n.condiciones==='Crédito';
     var abonado=n.abonos?n.abonos.reduce(function(a,b){return a+b.monto;},0):0;
     var pendiente=n.total-abonado;
-    var pillPago;
-    if(n.pagada){pillPago=pill('pagada');}
-    else if(abonado>0){pillPago='<span class="pill p-warn">Abonado '+money(abonado)+'</span>';}
-    else{pillPago=pill('por cobrar');}
+    // Una sola columna de estado: cubre envío + cobro en un solo vistazo, en vez de
+    // repetir "pagada" en dos columnas con el mismo color que "entregada".
+    var pillEstado;
+    if(n.est==='pendiente'){pillEstado='<span class="pill p-info">Pendiente de envío</span>';}
+    else if(n.pagada){pillEstado='<span class="pill p-ok">Pagada</span>';}
+    else if(abonado>0){pillEstado='<span class="pill p-warn">Abonado '+money(abonado)+'</span>';}
+    else{pillEstado='<span class="pill p-warn">Por cobrar</span>';}
     var accionesExtraNota=
       (esCredito&&(n.est==='entregada'||n.est==='pagada')&&!n.pagada&&puedeCobrar()?'<button class="btn btn-xs" style="border-color:var(--accent-glow);color:var(--accent)" onclick="mAbonarNota('+n.id+')">Registrar cobro</button>':'')+
       (isAdmin?'<button class="btn btn-xs btn-d" onclick="elimNota('+n.id+')">Eliminar</button>':'');
@@ -2128,11 +2131,9 @@ function rNotas(){
       '<td style="color:var(--text3)">'+n.partidas.length+' prod.</td>'+
       '<td class="mn" style="font-weight:500">'+money(n.total)+'</td>'+
       '<td><span style="font-size:11px;color:var(--text3)">'+(n.condiciones||'—')+'</span></td>'+
-      '<td>'+pill(n.est)+'</td>'+
-      '<td>'+(esCredito?pillPago:'<span style="font-size:11px;color:var(--text3)">Contado</span>')+'</td>'+
+      '<td>'+pillEstado+'</td>'+
       '<td onclick="event.stopPropagation()"><div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center">'+
         (n.est==='pendiente'?'<button class="btn btn-xs" style="border-color:var(--info);color:var(--info)" onclick="mEnviarNota('+n.id+')">📦 Marcar enviada</button>':'')+
-        (esCredito&&n.est==='pagada'&&n.pagada?'<span style="font-size:10px;color:var(--accent);font-family:var(--mono)">✓ Cobrada</span>':'')+
         (accionesExtraNota?accMenu('nota-'+n.id,accionesExtraNota):'')+
       '</div></td>'+
     '</tr>';
