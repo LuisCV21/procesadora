@@ -12,6 +12,7 @@
   --text:#2c1810;--text2:#5c4033;--text3:#8c6e5e;
   --accent:#c0522a;--accent2:#a03d1a;--accent-dim:rgba(192,82,42,.1);--accent-glow:rgba(192,82,42,.3);
   --warn:#b87a00;--warn-dim:rgba(184,122,0,.1);
+  --success:#2e7d4f;--success-dim:rgba(46,125,79,.1);--success-glow:rgba(46,125,79,.3);
   --danger:#c0392b;--danger-dim:rgba(192,57,43,.1);
   --info:#1a5c9e;--info-dim:rgba(26,92,158,.1);
   --sidebar-bg:#1a3a5c;--sidebar-text:rgba(255,255,255,.85);--sidebar-active:rgba(192,82,42,.2);
@@ -117,6 +118,7 @@ td.mn{font-family:var(--mono);font-size:13px}
 /* ── PILLS ── */
 .pill{display:inline-flex;align-items:center;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;border:1px solid}
 .p-ok{background:var(--accent-dim);color:var(--accent);border-color:var(--accent-glow)}
+.p-success{background:var(--success-dim);color:var(--success);border-color:var(--success-glow)}
 .p-warn{background:var(--warn-dim);color:var(--warn);border-color:rgba(184,122,0,.3)}
 .p-danger{background:var(--danger-dim);color:var(--danger);border-color:rgba(192,57,43,.3)}
 .p-info{background:var(--info-dim);color:var(--info);border-color:rgba(26,110,181,.3)}
@@ -2118,7 +2120,7 @@ function rNotas(){
     // repetir "pagada" en dos columnas con el mismo color que "entregada".
     var pillEstado;
     if(n.est==='pendiente'){pillEstado='<span class="pill p-info">Pendiente de envío</span>';}
-    else if(n.pagada){pillEstado='<span class="pill p-ok">Pagada</span>';}
+    else if(n.pagada){pillEstado='<span class="pill p-success">Pagada</span>';}
     else if(abonado>0){pillEstado='<span class="pill p-warn">Abonado '+money(abonado)+'</span>';}
     else{pillEstado='<span class="pill p-warn">Por cobrar</span>';}
     var accionesExtraNota=
