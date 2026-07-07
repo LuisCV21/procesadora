@@ -1394,14 +1394,15 @@ function mProceso(){
 var _procSalidas=1;
 function buildProcSalida(i,po){
   if(!po)po=PRODUCTOS.map(function(p){return '<option value="'+p.n+'" data-u="'+p.u+'">'+p.n+'</option>';}).join('');
-  return '<div id="ps-row-'+i+'" style="display:grid;grid-template-columns:1fr 100px 28px;gap:8px;align-items:end;margin-bottom:8px">'+
+  return '<div id="ps-row-'+i+'" style="display:grid;grid-template-columns:1fr 90px 130px 28px;gap:8px;align-items:end;margin-bottom:8px">'+
     '<div class="field"><label>Producto de salida</label><select id="psp'+i+'" onchange="calcProcMerma()"><option value="">Seleccionar...</option>'+po+'</select></div>'+
     '<div class="field"><label>Kg / unidades</label><input id="psk'+i+'" type="number" placeholder="0" min="0" oninput="calcProcMerma()"></div>'+
+    '<div class="field"><label>Precio venta</label><input id="pspv'+i+'" type="number" placeholder="Opcional" min="0"></div>'+
     (i>0?'<button class="btn btn-icon btn-d" style="margin-top:18px" onclick="remProcSalida('+i+')">✕</button>':'<div></div>')+
   '</div>';
 }
 function addProcSalida(){
-  var po=PRODUCTOS.map(function(p){return '<option value="'+p.n+'">'+p.n+'</option>';}).join('');
+  var po=PRODUCTOS.map(function(p){return '<option value="'+p.n+'" data-u="'+p.u+'">'+p.n+'</option>';}).join('');
   var cont=g('proc-salidas');if(!cont)return;
   var div=document.createElement('div');
   div.innerHTML=buildProcSalida(_procSalidas,po);
@@ -1409,16 +1410,31 @@ function addProcSalida(){
   _procSalidas++;
 }
 function remProcSalida(i){var el=g('ps-row-'+i);if(el)el.remove();calcProcMerma();}
+function procSalidaUnidad(i){
+  var sel=g('psp'+i);
+  if(!sel||!sel.value)return null;
+  var opt=sel.options[sel.selectedIndex];
+  return opt?opt.getAttribute('data-u'):null;
+}
 function calcProcMerma(){
   var kgE=parseFloat(g('p3')?g('p3').value:0)||0;
   var kgSal=0;
+  var hayNoKg=false;
   for(var i=0;i<_procSalidas;i++){
+    if(!g('psp'+i))continue;
+    var u=procSalidaUnidad(i);
+    if(u&&u!=='kg')hayNoKg=true;
     kgSal+=parseFloat(g('psk'+i)?g('psk'+i).value:0)||0;
   }
   var merma=kgE-kgSal;
   var el=g('proc-merma-info');
   var vm=g('proc-merma-val');
-  if(el&&vm){el.style.display=kgE>0?'':'none';vm.textContent=merma.toFixed(2)+' kg'+(merma<0?' (⚠ las salidas superan la entrada)':'');}
+  if(!el||!vm)return;
+  if(kgE<=0){el.style.display='none';return;}
+  el.style.display='';
+  // Cuando la salida se mide por pieza (no por kg), restarla de los kg de entrada
+  // no da un número real de merma — se avisa distinto en vez de mostrar la alerta.
+  vm.textContent=hayNoKg?'no aplica (hay productos por pieza)':(merma.toFixed(2)+' kg'+(merma<0?' (⚠ las salidas superan la entrada)':''));
 }
 
 function gProceso(){
@@ -1438,11 +1454,19 @@ function gProceso(){
   for(var i=0;i<_procSalidas;i++){
     var esp=g('psp'+i)?g('psp'+i).value:'';
     var kg=parseFloat(g('psk'+i)?g('psk'+i).value:0)||0;
-    if(esp&&kg>0)salidas.push({esp:esp,kg:kg});
+    var precio=parseFloat(g('pspv'+i)?g('pspv'+i).value:0)||0;
+    if(esp&&kg>0)salidas.push({esp:esp,kg:kg,precio:precio});
   }
   if(salidas.length===0){alert('Agrega al menos un producto de salida');return;}
   var kgSal=salidas.reduce(function(a,s){return a+s.kg;},0);
   var merma=parseFloat((kgE-kgSal).toFixed(3));
+
+  // Costo por unidad de salida: se reparte el costo total del insumo usado entre
+  // lo que realmente salió, en vez de copiar el costo/kg original — así un producto
+  // que rinde menos (por merma, o porque se vende por pieza y no por kg) queda con
+  // su costo real por unidad.
+  var costoTotalEntrada=kgE*(loteOrig.costo||0);
+  var costoPorUnidadSalida=kgSal>0?costoTotalEntrada/kgSal:(loteOrig.costo||0);
 
   // Descontar del lote original
   loteOrig.kg=Math.max(0,parseFloat((loteOrig.kg-kgE).toFixed(3)));
@@ -1453,9 +1477,10 @@ function gProceso(){
     var existing=camara.find(function(x){return x.esp===s.esp&&x.lote===loteOrig.lote;});
     if(existing){
       existing.kg=parseFloat((existing.kg+s.kg).toFixed(3));
+      if(!existing.precio&&s.precio)existing.precio=s.precio;
     } else {
       camara.push({id:uid(),esp:s.esp,lote:loteOrig.lote,kg:s.kg,
-        ent:f,cad:loteOrig.cad,est:'ok',costo:loteOrig.costo,precio:0});
+        ent:f,cad:loteOrig.cad,est:'ok',costo:costoPorUnidadSalida,precio:s.precio});
     }
   });
 
