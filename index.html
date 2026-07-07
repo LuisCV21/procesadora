@@ -960,8 +960,12 @@ function preciosPendientesInfo(){
   var listaInv=[];
   Object.keys(inv).forEach(function(k){listaInv.push(inv[k]);});
 
+  // Solo pedidos SIN recibir: en cuanto se reciben, el producto ya vive en
+  // Cámara/Bodega con su propio precio — mostrarlo aquí también duplicaría
+  // el mismo producto en las dos secciones.
   var listaPed=[];
   pedidos.forEach(function(p){
+    if(p.est!=='pendiente')return;
     (p.partidas||[]).forEach(function(pt,i){
       if(partidaFaltaPrecio(pt)){
         listaPed.push({pedidoId:p.id,numPedido:p.numPedido,prov:p.prov,idx:i,esp:pt.esp,kg:pt.kgReal||pt.kg,costo:pt.costoAjust||pt.costo||0});
