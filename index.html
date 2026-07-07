@@ -1163,7 +1163,7 @@ function rCam(){
     var filtEst=FILTRO_CAM==='todos'||i.est===FILTRO_CAM;
     var filtQ=!q||(i.esp.toLowerCase().includes(q)||i.lote.toLowerCase().includes(q));
     if(!filtEst||!filtQ)return;
-    if(!grupos[i.esp])grupos[i.esp]={lotes:[],totalKg:0};
+    if(!grupos[i.esp])grupos[i.esp]={lotes:[],totalKg:0,unidad:i.unidad||'kg'};
     grupos[i.esp].lotes.push(i);
     grupos[i.esp].totalKg+=i.kg;
   });
@@ -1211,7 +1211,7 @@ function rCam(){
         esp+(lotes.length===1?'<span style="color:var(--text3);font-size:12px;font-weight:normal;margin-left:8px">· Lote '+lotes[0].lote+'</span>':'')+
         (bajMin?'<span style="color:var(--danger);font-size:11px;margin-left:8px">⚠ Stock bajo</span>':'')+
       '</td>'+
-      '<td class="mn" style="font-weight:700;color:var(--accent)">'+g.totalKg.toFixed(1)+' kg</td>'+
+      '<td class="mn" style="font-weight:700;color:var(--accent)">'+g.totalKg.toFixed(1)+' '+g.unidad+'</td>'+
       '<td class="mn">'+costoStr+'</td>'+
       '<td class="mn" style="color:var(--info)">'+precioStr+'</td>'+
       '<td>'+pill(estGrupo)+'</td>'+
@@ -1230,7 +1230,7 @@ function rCam(){
       filasLote=lotes.map(function(l){
         return '<tr style="background:var(--bg3)">'+
           '<td style="padding-left:32px;font-size:13px;color:var(--text3)">Lote <strong>'+l.lote+'</strong></td>'+
-          '<td class="mn">'+l.kg.toFixed(1)+' kg</td>'+
+          '<td class="mn">'+l.kg.toFixed(1)+' '+(l.unidad||'kg')+'</td>'+
           '<td class="mn">'+money(l.costo||0)+'</td>'+
           '<td class="mn" style="color:var(--info)">'+money(l.precio||0)+'</td>'+
           '<td>'+pill(l.est)+'</td>'+
@@ -1314,8 +1314,9 @@ function mEditLote(id){
     '<div class="modal-body"><div class="fg2" style="display:grid;gap:10px">'+
       '<div class="field"><label>Especie / producto</label><select id="el1">'+po+'</select></div>'+
       '<div class="field"><label>Número de lote</label><input id="el2" type="text" value="'+l.lote+'"></div>'+
-      '<div class="field"><label>Kg disponibles</label><input id="el3" type="number" value="'+l.kg+'" min="0"></div>'+
-      '<div class="field"><label>Costo por kg ($)</label><input id="el4" type="number" value="'+(l.costo||0)+'" min="0"></div>'+
+      '<div class="field"><label>Cantidad disponible</label><input id="el3" type="number" value="'+l.kg+'" min="0"></div>'+
+      '<div class="field"><label>Unidad</label><select id="el8"><option value="kg"'+((l.unidad||'kg')==='kg'?' selected':'')+'>kg</option><option value="pz"'+(l.unidad==='pz'?' selected':'')+'>pz</option><option value="lt"'+(l.unidad==='lt'?' selected':'')+'>lt</option><option value="u"'+(l.unidad==='u'?' selected':'')+'>u</option></select></div>'+
+      '<div class="field"><label>Costo por unidad ($)</label><input id="el4" type="number" value="'+(l.costo||0)+'" min="0"></div>'+
       '<div class="field"><label>Precio venta ($)</label><input id="el5" type="number" value="'+(l.precio||0)+'" min="0"></div>'+
       '<div class="field"><label>Fecha entrada</label><input id="el6" type="date" value="'+l.ent+'"></div>'+
       '<div class="field"><label>Fecha caducidad</label><input id="el7" type="date" value="'+l.cad+'"></div>'+
@@ -1326,7 +1327,8 @@ function mEditLote(id){
 function saveEditLote(id){
   var l=camara.find(function(x){return x.id===id;});if(!l)return;
   l.esp=g('el1').value; l.lote=g('el2').value.trim();
-  l.kg=parseFloat(g('el3').value)||0; l.costo=parseFloat(g('el4').value)||0;
+  l.kg=parseFloat(g('el3').value)||0; l.unidad=g('el8').value;
+  l.costo=parseFloat(g('el4').value)||0;
   l.precio=parseFloat(g('el5').value)||0;
   l.ent=g('el6').value; l.cad=g('el7').value;
   ACC_OPEN['cam-'+id]=false;
@@ -1463,12 +1465,12 @@ function rProc(){
   '</tr></thead><tbody>'+
   (procesos.length===0?'<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text3)">Sin registros</td></tr>':
   procesos.slice().reverse().map(function(p){
-    var salidasStr=p.salidas&&p.salidas.length>0?p.salidas.map(function(s){return s.kg.toFixed(1)+' kg '+s.esp;}).join(', '):p.kgS+' kg (salida)';
+    var salidasStr=p.salidas&&p.salidas.length>0?p.salidas.map(function(s){return s.kg.toFixed(1)+' '+(s.unidad||'kg')+' '+s.esp;}).join(', '):p.kgS+' kg (salida)';
     return '<tr><td class="mn">'+fmtFecha(p.fecha)+'</td><td class="pr">'+p.tipo+'</td>'+
       '<td style="font-size:14px">'+p.esp+'<div style="font-size:12px;color:var(--text3)">Lote '+p.lote+'</div></td>'+
       '<td class="mn">'+p.kgE+' kg</td>'+
       '<td style="font-size:13px;color:var(--info)">'+salidasStr+'</td>'+
-      '<td class="mn" style="color:'+(p.merma>3?'var(--danger)':p.merma>1?'var(--warn)':'inherit')+'">'+p.merma.toFixed(2)+' kg</td>'+
+      '<td class="mn" style="color:'+(p.mermaNA?'var(--text3)':p.merma>3?'var(--danger)':p.merma>1?'var(--warn)':'inherit')+'">'+(p.mermaNA?'N/A (salida por pieza)':p.merma.toFixed(2)+' kg')+'</td>'+
       '<td style="color:var(--text3);font-size:13px">'+p.op+(p.notas?'<div style="font-size:12px;color:var(--text3)">'+p.notas+'</div>':'')+'</td>'+
       (canDelete?'<td><button class="btn btn-xs btn-d" onclick="elimProc('+p.id+')">Eliminar</button></td>':'')+
       '</tr>';
@@ -1525,8 +1527,8 @@ function buildProcSalida(i,po){
   if(!po)po=PRODUCTOS.map(function(p){return '<option value="'+p.n+'" data-u="'+p.u+'">'+p.n+'</option>';}).join('');
   var isAdmin=ROL==='admin';
   return '<div id="ps-row-'+i+'" style="display:grid;grid-template-columns:1fr 90px 130px 28px;gap:8px;align-items:end;margin-bottom:8px">'+
-    '<div class="field"><label>Producto de salida</label><select id="psp'+i+'" onchange="calcProcMerma()"><option value="">Seleccionar...</option>'+po+'</select></div>'+
-    '<div class="field"><label>Kg / unidades</label><input id="psk'+i+'" type="number" placeholder="0" min="0" oninput="calcProcMerma()"></div>'+
+    '<div class="field"><label>Producto de salida</label><select id="psp'+i+'" onchange="updProcSalidaUnidad('+i+')"><option value="">Seleccionar...</option>'+po+'</select></div>'+
+    '<div class="field"><label id="pskl'+i+'">Cantidad</label><input id="psk'+i+'" type="number" placeholder="0" min="0" oninput="calcProcMerma()"></div>'+
     (isAdmin?'<div class="field"><label>Precio venta</label><input id="pspv'+i+'" type="number" placeholder="Opcional" min="0"></div>':
       '<div class="field"><label>Precio venta</label><input type="text" value="Lo asigna el admin" disabled style="background:var(--bg4);color:var(--text3);font-size:12px"></div>')+
     (i>0?'<button class="btn btn-icon btn-d" style="margin-top:18px" onclick="remProcSalida('+i+')">✕</button>':'<div></div>')+
@@ -1546,6 +1548,12 @@ function procSalidaUnidad(i){
   if(!sel||!sel.value)return null;
   var opt=sel.options[sel.selectedIndex];
   return opt?opt.getAttribute('data-u'):null;
+}
+function updProcSalidaUnidad(i){
+  var u=procSalidaUnidad(i)||'kg';
+  var lbl=g('pskl'+i);
+  if(lbl)lbl.textContent='Cantidad ('+u+')';
+  calcProcMerma();
 }
 function calcProcMerma(){
   var kgE=parseFloat(g('p3')?g('p3').value:0)||0;
@@ -1580,17 +1588,25 @@ function gProceso(){
   if(!loteOrig){alert('Lote no encontrado');return;}
   if(kgE>loteOrig.kg){alert('Los kg de entrada ('+kgE+') superan el stock disponible del lote ('+loteOrig.kg.toFixed(1)+' kg)');return;}
 
-  // Recopilar productos de salida
+  // Recopilar productos de salida — cada uno lleva la unidad real del producto
+  // (Configuración > Productos), no siempre kg (ej. milanesas se cuentan por pieza).
   var salidas=[];
+  var hayNoKg=false;
   for(var i=0;i<_procSalidas;i++){
     var esp=g('psp'+i)?g('psp'+i).value:'';
     var kg=parseFloat(g('psk'+i)?g('psk'+i).value:0)||0;
     var precio=parseFloat(g('pspv'+i)?g('pspv'+i).value:0)||0;
-    if(esp&&kg>0)salidas.push({esp:esp,kg:kg,precio:precio});
+    var prodSal=PRODUCTOS.find(function(pr){return pr.n===esp;});
+    var unidadSal=prodSal?prodSal.u:'kg';
+    if(unidadSal!=='kg')hayNoKg=true;
+    if(esp&&kg>0)salidas.push({esp:esp,kg:kg,precio:precio,unidad:unidadSal});
   }
   if(salidas.length===0){alert('Agrega al menos un producto de salida');return;}
   var kgSal=salidas.reduce(function(a,s){return a+s.kg;},0);
-  var merma=parseFloat((kgE-kgSal).toFixed(3));
+  // Si algún producto de salida se mide por pieza y no por kg, restarlo de los kg
+  // de entrada no da una merma real (unidades distintas) — se marca "no aplica"
+  // en vez de guardar un número (ej. negativo) sin sentido.
+  var merma=hayNoKg?0:parseFloat((kgE-kgSal).toFixed(3));
 
   // Costo por unidad de salida: se reparte el costo total del insumo usado entre
   // lo que realmente salió, en vez de copiar el costo/kg original — así un producto
@@ -1609,14 +1625,15 @@ function gProceso(){
     if(existing){
       existing.kg=parseFloat((existing.kg+s.kg).toFixed(3));
       if(!existing.precio&&s.precio)existing.precio=s.precio;
+      if(!existing.unidad&&s.unidad)existing.unidad=s.unidad;
     } else {
-      camara.push({id:uid(),esp:s.esp,lote:loteOrig.lote,kg:s.kg,
+      camara.push({id:uid(),esp:s.esp,lote:loteOrig.lote,kg:s.kg,unidad:s.unidad,
         ent:f,cad:loteOrig.cad,est:'ok',costo:costoPorUnidadSalida,precio:s.precio});
     }
   });
 
   procesos.push({id:uid(),fecha:f,tipo:t,esp:loteOrig.esp,lote:loteOrig.lote,
-    kgE:kgE,kgS:kgSal,merma:merma,op:op,notas:notas_,est:'completado',
+    kgE:kgE,kgS:kgSal,merma:merma,mermaNA:hayNoKg,op:op,notas:notas_,est:'completado',
     salidas:salidas});
   _procSalidas=1;
   persist();cm();nav('procesos');
