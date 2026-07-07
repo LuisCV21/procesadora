@@ -1492,7 +1492,7 @@ function rPed(){
   (sinPrecio>0&&isAdmin?'<div class="alert al-w"><div class="al-dot"></div>Hay <strong>'+sinPrecio+' pedido(s)</strong> sin precio de venta definido. Da clic en el pedido para asignarlos.</div>':'')+
   '<div class="card"><div class="card-hdr" style="flex-wrap:wrap;gap:8px"><div class="card-title">Órdenes de compra a proveedores</div>'+
     selectorMes('pedidos')+
-    (isAdmin?'<button class="btn" onclick="mEditarPedido()">✏ Editar</button>':'')+
+    (isAdmin?'<button class="btn" onclick="mAccionesPedido()">🗑 Eliminar / Corregir</button>':'')+
     (canEdit?'<button class="btn btn-p" onclick="mPedido()">+ Nuevo pedido</button>':'<span style="font-size:13px;color:var(--text3)">Solo lectura</span>')+
   '</div><div class="tw"><table><thead><tr><th>Folio</th><th>Proveedor</th><th>Productos</th><th>Total</th><th>Entrega</th><th>Cond.</th><th>Estado</th><th>Pago</th><th>Acciones</th></tr></thead><tbody>'+
   (pedidosFilt.length===0?'<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--text3)">Sin pedidos en este mes</td></tr>':
@@ -1518,22 +1518,22 @@ function rPed(){
   '</tbody></table></div></div>';
 }
 
-function mEditarPedido(){
+function mAccionesPedido(){
   var opts='<option value="">— Elegir pedido —</option>'+
     pedidos.slice().reverse().map(function(p){
       return '<option value="'+p.id+'">'+(p.numPedido||'#'+p.id)+' · '+p.prov+' · '+money(p.total||p.costo||0)+'</option>';
     }).join('');
-  modal('<div class="modal" style="max-width:420px"><div class="modal-hdr"><div class="modal-title">Editar pedido</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+  modal('<div class="modal" style="max-width:420px"><div class="modal-hdr"><div class="modal-title">Eliminar / corregir pedido</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
     '<div class="modal-body">'+
-      '<div class="field"><label>Selecciona un pedido</label><select id="edp-sel" onchange="renderEdpInfo()">'+opts+'</select></div>'+
-      '<div id="edp-info" style="margin-top:14px"></div>'+
+      '<div class="field"><label>Selecciona un pedido</label><select id="apd-sel" onchange="renderAccPedInfo()">'+opts+'</select></div>'+
+      '<div id="apd-info" style="margin-top:14px"></div>'+
     '</div>'+
     '<div class="modal-footer"><button class="btn" onclick="cm()">Cerrar</button></div>'+
   '</div>');
 }
-function renderEdpInfo(){
-  var box=g('edp-info');
-  var id=parseInt(g('edp-sel').value);
+function renderAccPedInfo(){
+  var box=g('apd-info');
+  var id=parseInt(g('apd-sel').value);
   if(!id){box.innerHTML='';return;}
   var p=pedidos.find(function(x){return x.id===id;});
   if(!p)return;
