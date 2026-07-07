@@ -747,6 +747,9 @@ var saldoInicialCaja=load('saldo_inicial_caja',{monto:0,fecha:today()});
 // Por defecto solo Gerente recibe pedidos de proveedores; activable desde Configuración
 var ADMIN_RECIBE=load('admin_puede_recibir',false);
 function puedeRecibir(){return ROL==='gerente'||(ROL==='admin'&&ADMIN_RECIBE);}
+// Por defecto solo Gerente registra cobros de notas de entrega; activable desde Configuración
+var ADMIN_COBRA=load('admin_puede_cobrar',false);
+function puedeCobrar(){return ROL==='gerente'||(ROL==='admin'&&ADMIN_COBRA);}
 
 function persist(){
   save('camara',camara);save('procesos',procesos);save('pedidos',pedidos);save('notas',notas);
@@ -758,6 +761,7 @@ function persist(){
   save('next_pedido_num',nextPedidoNum);save('vales',vales);persistAuditLog();
   save('meta_patrimonio',metaPatrimonio);save('gastos',gastos);save('saldo_inicial_caja',saldoInicialCaja);
   save('admin_puede_recibir',ADMIN_RECIBE);
+  save('admin_puede_cobrar',ADMIN_COBRA);
 }
 
 // ══════════════════════════════════════════════════════
@@ -2069,7 +2073,6 @@ function gPedido(){
 // ══════════════════════════════════════════════════════
 function rNotas(){
   var isAdmin=ROL==='admin';
-  var canPagar=ROL==='admin'||ROL==='gerente';
   var ymNotas=MES_SEL.notas;
   // Se muestra el mes seleccionado + cualquier nota pendiente de otros meses (para no perderla de vista)
   var notasFilt=notas.filter(function(n){return (n.fecha&&n.fecha.slice(0,7)===ymNotas)||n.est==='pendiente';});
@@ -2115,7 +2118,10 @@ function rNotas(){
     if(n.pagada){pillPago=pill('pagada');}
     else if(abonado>0){pillPago='<span class="pill p-warn">Abonado '+money(abonado)+'</span>';}
     else{pillPago=pill('por cobrar');}
-    return '<tr>'+
+    var accionesExtraNota=
+      (esCredito&&(n.est==='entregada'||n.est==='pagada')&&!n.pagada&&puedeCobrar()?'<button class="btn btn-xs" style="border-color:var(--accent-glow);color:var(--accent)" onclick="mAbonarNota('+n.id+')">Registrar cobro</button>':'')+
+      (isAdmin?'<button class="btn btn-xs btn-d" onclick="elimNota('+n.id+')">Eliminar</button>':'');
+    return '<tr style="cursor:pointer" onclick="verNota('+n.id+')">'+
       '<td class="mn" style="font-weight:500">#'+n.folio+'</td>'+
       '<td class="mn">'+fmtFecha(n.fecha)+'</td>'+
       '<td class="pr">'+n.cliente+'</td>'+
@@ -2124,12 +2130,10 @@ function rNotas(){
       '<td><span style="font-size:11px;color:var(--text3)">'+(n.condiciones||'—')+'</span></td>'+
       '<td>'+pill(n.est)+'</td>'+
       '<td>'+(esCredito?pillPago:'<span style="font-size:11px;color:var(--text3)">Contado</span>')+'</td>'+
-      '<td><div style="display:flex;gap:3px;flex-wrap:wrap">'+
-        '<button class="btn btn-xs" onclick="verNota('+n.id+')">Ver / Imprimir</button>'+
+      '<td onclick="event.stopPropagation()"><div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center">'+
         (n.est==='pendiente'?'<button class="btn btn-xs" style="border-color:var(--info);color:var(--info)" onclick="mEnviarNota('+n.id+')">📦 Marcar enviada</button>':'')+
-        (esCredito&&(n.est==='entregada'||n.est==='pagada')&&!n.pagada&&canPagar?'<button class="btn btn-xs" style="border-color:var(--accent-glow);color:var(--accent)" onclick="mAbonarNota('+n.id+')">Registrar cobro</button>':'')+
         (esCredito&&n.est==='pagada'&&n.pagada?'<span style="font-size:10px;color:var(--accent);font-family:var(--mono)">✓ Cobrada</span>':'')+
-        (isAdmin?'<button class="btn btn-xs btn-d" onclick="elimNota('+n.id+')">Eliminar</button>':'')+
+        (accionesExtraNota?accMenu('nota-'+n.id,accionesExtraNota):'')+
       '</div></td>'+
     '</tr>';
   }).join(''))+
@@ -2188,6 +2192,7 @@ function saldoCompSucursal(sucursal){
 }
 
 function mAbonarNota(id){
+  if(!puedeCobrar())return;
   var n=notas.find(function(x){return x.id===id;});if(!n)return;
   var abonado=n.abonos?n.abonos.reduce(function(a,b){return a+b.monto;},0):0;
   var pendiente=Math.max(0,n.total-abonado);
@@ -3759,7 +3764,12 @@ function rConfig(){
         '<input type="checkbox" '+(ADMIN_RECIBE?'checked':'')+' onchange="toggleAdminRecibe(this.checked)" style="width:18px;height:18px">'+
         '<span>Permitir que los administradores puedan recibir pedidos de proveedores</span>'+
       '</label>'+
-      '<div style="font-size:13px;color:var(--text3);margin-top:8px">Por defecto, solo el rol <strong>Gerente</strong> puede marcar un pedido como recibido. Actívalo si algún administrador necesita hacerlo también.</div>'+
+      '<div style="font-size:13px;color:var(--text3);margin-top:8px;margin-bottom:14px">Por defecto, solo el rol <strong>Gerente</strong> puede marcar un pedido como recibido. Actívalo si algún administrador necesita hacerlo también.</div>'+
+      '<label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer">'+
+        '<input type="checkbox" '+(ADMIN_COBRA?'checked':'')+' onchange="toggleAdminCobra(this.checked)" style="width:18px;height:18px">'+
+        '<span>Permitir que los administradores puedan registrar cobros de notas de entrega</span>'+
+      '</label>'+
+      '<div style="font-size:13px;color:var(--text3);margin-top:8px">Por defecto, solo el rol <strong>Gerente</strong> puede registrar cobros. Actívalo si algún administrador necesita hacerlo también.</div>'+
     '</div></div>'+
     '<div class="card" style="margin-top:18px"><div class="card-hdr"><div class="card-title">📦 Exportar / Importar datos</div></div><div class="card-body">'+
       '<p style="font-size:14px;color:var(--text2);margin-bottom:16px">Usa esto para mover los datos entre computadoras. Exporta en una máquina e importa en la otra.</p>'+
@@ -3811,6 +3821,12 @@ function toggleAdminRecibe(v){
   ADMIN_RECIBE=v;
   save('admin_puede_recibir',v);
   audit('Cambió permiso de recepción de pedidos','Configuracion',v?'Administradores SÍ pueden recibir':'Administradores NO pueden recibir');
+  nav('config');
+}
+function toggleAdminCobra(v){
+  ADMIN_COBRA=v;
+  save('admin_puede_cobrar',v);
+  audit('Cambió permiso de cobro de notas','Configuracion',v?'Administradores SÍ pueden registrar cobros':'Administradores NO pueden registrar cobros');
   nav('config');
 }
 
@@ -4058,6 +4074,7 @@ function aplicarDatos(data){
   if(data.gastos)gastos=data.gastos;
   if(data.saldo_inicial_caja)saldoInicialCaja=data.saldo_inicial_caja;
   if(data.admin_puede_recibir!==undefined&&data.admin_puede_recibir!==null)ADMIN_RECIBE=data.admin_puede_recibir;
+  if(data.admin_puede_cobrar!==undefined&&data.admin_puede_cobrar!==null)ADMIN_COBRA=data.admin_puede_cobrar;
   // Actualizar caché local con datos de Supabase
   Object.keys(data).forEach(function(k){saveLocal(k,data[k]);});
 }
