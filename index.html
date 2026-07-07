@@ -1712,8 +1712,6 @@ function verPedido(id){
   var total=p.total||parts.reduce(function(a,pt){return a+parseFloat(pt.kg||0)*parseFloat(pt.costo||0);},0);
   var isAdmin=ROL==='admin';
   var canEdit=p.est==='pendiente'&&(ROL==='admin'||ROL==='gerente');
-  var faltaPrecio=parts.some(partidaFaltaPrecio);
-  var editandoPrecios=isAdmin&&PED_EDITANDO_PRECIO===id;
 
   var abonosHTML='';
   if(p.abonos&&p.abonos.length>0){
@@ -1732,7 +1730,9 @@ function verPedido(id){
     '</div>';
   }
 
-  // Tabla con precio de venta — admin puede activar el modo edición y guardar los cambios juntos
+  // El precio de venta ya no se edita aquí — se asigna desde Precios pendientes
+  // (antes de recibir) o Cámara/Bodega > Editar lote (después de recibir), para
+  // no tener dos lugares donde el mismo precio se pudiera desincronizar.
   var tablaPartidas='<div class="tw"><table><thead><tr><th>Producto</th><th>Cantidad</th><th>Costo/u</th><th>Subtotal</th>'+
     (isAdmin?'<th>Precio venta</th>':'')+
     '<th>Destino</th></tr></thead><tbody>'+
@@ -1742,29 +1742,18 @@ function verPedido(id){
         '<td class="mn">'+(pt.kgReal||pt.kg)+' '+(pt.unidad||'kg')+'</td>'+
         '<td class="mn">'+money(pt.costoAjust||pt.costo||0)+'</td>'+
         '<td class="mn" style="color:var(--accent)">'+money(sub)+'</td>'+
-        (isAdmin?'<td>'+(editandoPrecios?
-          '<input type="number" value="'+(pt.precioVenta||'')+'" min="0" placeholder="$0" id="vpv'+i+'" style="width:90px;padding:4px 8px;border:2px solid var(--border);border-radius:var(--r);font-size:14px;color:var(--info)">'
-          :(pt.precioVenta?'<span style="color:var(--info);font-weight:600">'+money(pt.precioVenta)+'</span>':(esSoloProceso(pt.esp)?'<span style="color:var(--text3);font-size:12px">No se vende — va a proceso</span>':'<span style="color:var(--warn);font-size:12px">Sin precio</span>'))
-        )+'</td>':'')+
+        (isAdmin?'<td>'+(pt.precioVenta?'<span style="color:var(--info);font-weight:600">'+money(pt.precioVenta)+'</span>':(esSoloProceso(pt.esp)?'<span style="color:var(--text3);font-size:12px">No se vende — va a proceso</span>':'<span style="color:var(--warn);font-size:12px">Sin precio — ver Precios pendientes</span>'))+'</td>':'')+
         '<td><span class="pill '+(pt.destino==='bodega'?'p-warn':'p-info')+'">'+(pt.destino==='bodega'?'Bodega':'Cámara')+'</span></td></tr>';
     }).join('')+
     '<tr style="background:var(--accent-dim)"><td colspan="'+(isAdmin?'3':'3')+'" style="text-align:right;font-weight:700;padding:12px 14px">TOTAL</td>'+
     '<td style="font-weight:700;font-size:16px;color:var(--accent);padding:12px 14px">'+money(total)+'</td>'+
     (isAdmin?'<td></td>':'')+
     '<td></td></tr>'+
-    '</tbody></table></div>'+
-    (isAdmin?(editandoPrecios?
-      '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">'+
-        '<button class="btn" onclick="togglePrecioEdit('+id+',false)">Cancelar</button>'+
-        '<button class="btn btn-p" onclick="guardarPreciosPedido('+id+')">💾 Guardar cambios</button>'+
-      '</div>'
-      :'<div style="margin-top:10px;text-align:right"><button class="btn btn-success" onclick="togglePrecioEdit('+id+',true)">💲 '+(faltaPrecio?'Poner precios':'Editar precios')+'</button></div>'
-    ):'');
+    '</tbody></table></div>';
 
   modal('<div class="modal modal-wide"><div class="modal-hdr">'+
     '<div>'+
       '<div class="modal-title">'+( p.numPedido||'Pedido')+' — '+p.prov+'</div>'+
-      (faltaPrecio&&isAdmin?'<div style="font-size:12px;color:var(--warn);margin-top:2px">⚠ Asigna el precio de venta en la tabla de abajo</div>':'')+
     '</div>'+
     '<button class="btn btn-icon" onclick="cm()">✕</button></div>'+
     '<div class="modal-body">'+
@@ -1786,31 +1775,6 @@ function verPedido(id){
       '<button class="btn btn-p" onclick="imprimirPedido('+id+')">🖨 Imprimir</button>'+
     '</div>'+
   '</div>');
-}
-
-var PED_EDITANDO_PRECIO=null;
-function togglePrecioEdit(id,on){
-  PED_EDITANDO_PRECIO=on?id:null;
-  verPedido(id);
-}
-function guardarPreciosPedido(id){
-  var p=pedidos.find(function(x){return x.id===id;});
-  if(!p||!p.partidas)return;
-  p.partidas.forEach(function(pt,i){
-    var el=g('vpv'+i);
-    if(!el)return;
-    pt.precioVenta=parseFloat(el.value)||0;
-    // También actualizar en cámara/bodega si ya fue recibido
-    if(p.est==='recibido'&&pt.lote){
-      var lote=camara.find(function(l){return l.lote===pt.lote&&l.esp===pt.esp;});
-      if(lote)lote.precio=pt.precioVenta;
-      var loteBod=bodega.find(function(l){return l.lote===pt.lote&&l.esp===pt.esp;});
-      if(loteBod)loteBod.precio=pt.precioVenta;
-    }
-  });
-  persist();
-  PED_EDITANDO_PRECIO=null;
-  verPedido(id);
 }
 
 function imprimirPedido(id){
@@ -1913,7 +1877,6 @@ function recibirPedido(id){
   var p=pedidos.find(function(x){return x.id===id;});if(!p)return;
   var loteAuto=p.numPedido||numPedido(nextPedidoNum);
   var parts=p.partidas||[{esp:p.esp,kg:p.kg,costo:p.costo,destino:'camara'}];
-  var isAdmin=ROL==='admin';
 
   var rows=parts.map(function(pt,i){
     return '<div style="border:1px solid var(--border);border-radius:var(--r);padding:14px;margin-bottom:10px;background:var(--bg3)">'+
@@ -1922,9 +1885,6 @@ function recibirPedido(id){
         '<div class="field"><label>Kg pedidos</label><input type="number" value="'+pt.kg+'" disabled style="background:var(--bg4);color:var(--text3)"></div>'+
         '<div class="field"><label>Kg reales recibidos</label><input id="rkr'+i+'" type="number" value="'+pt.kg+'" min="0" oninput="recalcCosto('+i+','+parseFloat(pt.kg||0)+','+parseFloat(pt.costo||0)+')"></div>'+
         '<div class="field"><label>Costo/kg ajustado</label><input id="rca'+i+'" type="number" value="'+parseFloat(pt.costo||0).toFixed(2)+'" min="0" style="color:var(--info);font-weight:600"></div>'+
-        (esSoloProceso(pt.esp)?'<div class="field"><label>Precio de venta</label><input type="text" value="No se vende — va a proceso" disabled style="background:var(--bg4);color:var(--text3)"></div>':
-          (isAdmin?'<div class="field"><label>Precio de venta ($)</label><input id="rpv'+i+'" type="number" value="'+(pt.precioVenta||'')+'" min="0" placeholder="Asignar precio"></div>':
-          '<div class="field"><label>Precio de venta</label><input type="text" value="'+(pt.precioVenta?money(pt.precioVenta):'Pendiente de admin')+'" disabled style="background:var(--bg4);color:var(--text3)"></div>'))+
       '</div>'+
     '</div>';
   }).join('');
@@ -1934,7 +1894,6 @@ function recibirPedido(id){
       '<div style="display:flex;gap:10px;align-items:center;padding:10px 14px;background:var(--accent-dim);border:1px solid var(--accent-glow);border-radius:var(--r);margin-bottom:14px">'+
         '<div style="font-size:14px;color:var(--accent)">🏷 Número de lote automático: <strong>'+loteAuto+'</strong> — todos los productos de este pedido llevarán este lote</div>'+
       '</div>'+
-      (isAdmin?'':'<div style="padding:8px 14px;background:var(--warn-dim);border:1px solid rgba(184,122,0,.3);border-radius:var(--r);margin-bottom:14px;font-size:13px;color:var(--warn)">El precio de venta solo puede asignarlo el administrador. Puedes recibir ahora y el admin lo asigna después.</div>')+
       rows+
     '</div>'+
     '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gRecibirPedido('+id+')">✓ Confirmar recepción</button></div>'+
@@ -1953,18 +1912,18 @@ function gRecibirPedido(id){
   var p=pedidos.find(function(x){return x.id===id;});if(!p)return;
   var loteAuto=p.numPedido||numPedido(nextPedidoNum);
   var parts=p.partidas||[{esp:p.esp,kg:p.kg,costo:p.costo,destino:'camara'}];
-  var isAdmin=ROL==='admin';
   parts.forEach(function(pt,i){
     var kgReal=g('rkr'+i)?parseFloat(g('rkr'+i).value)||parseFloat(pt.kg)||0:parseFloat(pt.kg)||0;
     var costoAjust=g('rca'+i)?parseFloat(g('rca'+i).value)||parseFloat(pt.costo)||0:parseFloat(pt.costo)||0;
-    var precioVenta=isAdmin&&g('rpv'+i)?parseFloat(g('rpv'+i).value)||pt.precioVenta||0:pt.precioVenta||0;
     var dest=pt.destino||'camara';
     var newId=uid();
+    // El precio de venta ya no se pide aquí — si se asignó antes desde Precios
+    // pendientes (pt.precioVenta) se conserva; si no, queda en 0 hasta que el
+    // admin lo asigne desde Precios pendientes o Cámara/Bodega > Editar lote.
     var item={id:newId,esp:pt.esp,lote:loteAuto,kg:kgReal,
       ent:today(),cad:fechaMas3Meses(),est:'ok',
-      costo:costoAjust,precio:precioVenta};
-    // Actualizar precio en la partida del pedido
-    pt.kgReal=kgReal;pt.costoAjust=costoAjust;pt.precioVenta=precioVenta;pt.lote=loteAuto;
+      costo:costoAjust,precio:pt.precioVenta||0};
+    pt.kgReal=kgReal;pt.costoAjust=costoAjust;pt.lote=loteAuto;
     if(dest==='bodega'){bodega.push(item);}else{camara.push(item);}
   });
   // Recalcular total con kilos reales
