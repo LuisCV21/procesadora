@@ -773,6 +773,20 @@ function cm(){g('mr').innerHTML='';}
 function uid(){return ++NEXT_ID;}
 function money(v){return '$'+parseFloat(v||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function pcomma(v){return parseFloat(v||0).toLocaleString('es-MX');}
+// Productos marcados "solo se procesa" (ej. bistec que siempre se convierte en
+// milanesa) nunca se venden tal cual, así que no deben pedir/marcar precio de venta.
+function esSoloProceso(esp){
+  var p=PRODUCTOS.find(function(x){return x.n===esp;});
+  return !!(p&&p.soloProceso);
+}
+function partidaFaltaPrecio(pt){
+  return !pt.precioVenta&&!esSoloProceso(pt.esp);
+}
+function categoriasUnicas(){
+  var cats=[];
+  PRODUCTOS.forEach(function(p){if(p.cat&&cats.indexOf(p.cat)<0)cats.push(p.cat);});
+  return cats.sort(function(a,b){return a.localeCompare(b,'es');});
+}
 function today(){return new Date().toISOString().slice(0,10);}
 function fechaMas3Meses(){var d=new Date();d.setMonth(d.getMonth()+3);return d.toISOString().slice(0,10);}
 // Fechas se guardan internamente como YYYY-MM-DD (orden/comparación/inputs de fecha);
@@ -930,7 +944,7 @@ function rDash(){
     return stockTotal(pr.n,camara)+stockTotal(pr.n,bodega)<=pr.minStock;
   });
   var sinPrecio=isAdmin?pedidos.filter(function(p){
-    return p.partidas&&p.partidas.some(function(pt){return !pt.precioVenta;});
+    return p.partidas&&p.partidas.some(partidaFaltaPrecio);
   }):[];
   var ultTemp=tempLogs.length>0?tempLogs[tempLogs.length-1]:null;
   var eventos=[];
@@ -1361,12 +1375,15 @@ function rProc(){
 }
 
 function mProceso(){
-  var lotesDisp=camara.filter(function(i){return i.kg>0;});
+  // Solo se ofrecen como entrada los lotes de productos marcados "siempre se va a
+  // procesar" (Configuración > Productos) — son los que realmente se transforman.
+  var lotesDisp=camara.filter(function(i){return i.kg>0&&esSoloProceso(i.esp);});
   var lo=lotesDisp.map(function(i){return '<option value="'+i.id+'">'+i.esp+' — Lote '+i.lote+' ('+i.kg.toFixed(1)+' kg)</option>';}).join('');
   var to=PROC_TIPOS.map(function(t){return '<option>'+t+'</option>';}).join('');
   var po=PRODUCTOS.map(function(p){return '<option value="'+p.n+'" data-u="'+p.u+'">'+p.n+'</option>';}).join('');
   modal('<div class="modal modal-wide"><div class="modal-hdr"><div class="modal-title">Registrar proceso de planta</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
     '<div class="modal-body">'+
+      (lotesDisp.length===0?'<div style="padding:10px 14px;background:var(--warn-dim);border:1px solid rgba(184,122,0,.3);border-radius:var(--r);font-size:13px;color:var(--warn);margin-bottom:14px">No hay lotes disponibles de productos marcados "siempre se va a procesar". Actívalo en Configuración → Productos → Editar (ej. Bistec de res).</div>':'')+
       '<div class="fg2" style="display:grid;gap:12px;margin-bottom:16px">'+
         '<div class="field"><label>Tipo de proceso</label><select id="p1"><option value="">Seleccionar...</option>'+to+'</select></div>'+
         '<div class="field"><label>Lote de entrada (producto original)</label><select id="p2" onchange="calcProcMerma()"><option value="">Seleccionar lote...</option>'+lo+'</select></div>'+
@@ -1506,7 +1523,7 @@ function rPed(){
   var porRecibir=pedidos.filter(function(p){return p.est==='pendiente';}).length;
   var porPagar=pedidos.filter(function(p){return p.est==='recibido'&&!p.pagado;}).reduce(function(a,p){
     var ab=p.montoPagado||0;return a+Math.max(0,(p.total||p.costo||0)-ab);},0);
-  var sinPrecio=pedidos.filter(function(p){return p.est!=='pagado'&&p.partidas&&p.partidas.some(function(pt){return !pt.precioVenta;});}).length;
+  var sinPrecio=pedidos.filter(function(p){return p.est!=='pagado'&&p.partidas&&p.partidas.some(partidaFaltaPrecio);}).length;
   var ymPed=MES_SEL.pedidos;
   // Se muestra el mes seleccionado + cualquier pedido pendiente de otros meses (para no perderlo de vista)
   var pedidosFilt=pedidos.filter(function(p){return (p.fecha&&p.fecha.slice(0,7)===ymPed)||p.est==='pendiente';});
@@ -1526,7 +1543,7 @@ function rPed(){
   pedidosFilt.slice().reverse().map(function(p){
     var partStr=(p.partidas&&p.partidas.length>0)?p.partidas.map(function(pt){return pt.esp;}).join(', '):'—';
     if(partStr.length>40)partStr=partStr.slice(0,40)+'…';
-    var faltaPrecio=p.partidas&&p.partidas.some(function(pt){return !pt.precioVenta;});
+    var faltaPrecio=p.partidas&&p.partidas.some(partidaFaltaPrecio);
     return '<tr'+(faltaPrecio?' style="background:rgba(184,122,0,.04)"':'')+' style="cursor:pointer" onclick="verPedido('+p.id+')">'+
       '<td class="mn" style="font-weight:700;color:var(--accent)">'+(p.numPedido||'—')+'</td>'+
       '<td class="pr">'+p.prov+'</td>'+
@@ -1581,7 +1598,7 @@ function verPedido(id){
   var total=p.total||parts.reduce(function(a,pt){return a+parseFloat(pt.kg||0)*parseFloat(pt.costo||0);},0);
   var isAdmin=ROL==='admin';
   var canEdit=p.est==='pendiente'&&(ROL==='admin'||ROL==='gerente');
-  var faltaPrecio=parts.some(function(pt){return !pt.precioVenta;});
+  var faltaPrecio=parts.some(partidaFaltaPrecio);
   var editandoPrecios=isAdmin&&PED_EDITANDO_PRECIO===id;
 
   var abonosHTML='';
@@ -1613,7 +1630,7 @@ function verPedido(id){
         '<td class="mn" style="color:var(--accent)">'+money(sub)+'</td>'+
         (isAdmin?'<td>'+(editandoPrecios?
           '<input type="number" value="'+(pt.precioVenta||'')+'" min="0" placeholder="$0" id="vpv'+i+'" style="width:90px;padding:4px 8px;border:2px solid var(--border);border-radius:var(--r);font-size:14px;color:var(--info)">'
-          :(pt.precioVenta?'<span style="color:var(--info);font-weight:600">'+money(pt.precioVenta)+'</span>':'<span style="color:var(--warn);font-size:12px">Sin precio</span>')
+          :(pt.precioVenta?'<span style="color:var(--info);font-weight:600">'+money(pt.precioVenta)+'</span>':(esSoloProceso(pt.esp)?'<span style="color:var(--text3);font-size:12px">No se vende — va a proceso</span>':'<span style="color:var(--warn);font-size:12px">Sin precio</span>'))
         )+'</td>':'')+
         '<td><span class="pill '+(pt.destino==='bodega'?'p-warn':'p-info')+'">'+(pt.destino==='bodega'?'Bodega':'Cámara')+'</span></td></tr>';
     }).join('')+
@@ -1791,8 +1808,9 @@ function recibirPedido(id){
         '<div class="field"><label>Kg pedidos</label><input type="number" value="'+pt.kg+'" disabled style="background:var(--bg4);color:var(--text3)"></div>'+
         '<div class="field"><label>Kg reales recibidos</label><input id="rkr'+i+'" type="number" value="'+pt.kg+'" min="0" oninput="recalcCosto('+i+','+parseFloat(pt.kg||0)+','+parseFloat(pt.costo||0)+')"></div>'+
         '<div class="field"><label>Costo/kg ajustado</label><input id="rca'+i+'" type="number" value="'+parseFloat(pt.costo||0).toFixed(2)+'" min="0" style="color:var(--info);font-weight:600"></div>'+
-        (isAdmin?'<div class="field"><label>Precio de venta ($)</label><input id="rpv'+i+'" type="number" value="'+(pt.precioVenta||'')+'" min="0" placeholder="Asignar precio"></div>':
-          '<div class="field"><label>Precio de venta</label><input type="text" value="'+(pt.precioVenta?money(pt.precioVenta):'Pendiente de admin')+'" disabled style="background:var(--bg4);color:var(--text3)"></div>')+
+        (esSoloProceso(pt.esp)?'<div class="field"><label>Precio de venta</label><input type="text" value="No se vende — va a proceso" disabled style="background:var(--bg4);color:var(--text3)"></div>':
+          (isAdmin?'<div class="field"><label>Precio de venta ($)</label><input id="rpv'+i+'" type="number" value="'+(pt.precioVenta||'')+'" min="0" placeholder="Asignar precio"></div>':
+          '<div class="field"><label>Precio de venta</label><input type="text" value="'+(pt.precioVenta?money(pt.precioVenta):'Pendiente de admin')+'" disabled style="background:var(--bg4);color:var(--text3)"></div>'))+
       '</div>'+
     '</div>';
   }).join('');
@@ -3931,6 +3949,22 @@ function resetModulo(mod){
   },{palabra:palabra});
 }
 
+function catSelectHtml(selected){
+  var cats=categoriasUnicas();
+  var esNueva=!!(selected&&cats.indexOf(selected)<0);
+  var opts=cats.map(function(c){return '<option value="'+c+'"'+(c===selected?' selected':'')+'>'+c+'</option>';}).join('');
+  return '<div class="field" style="margin-top:10px"><label>Categoría</label><select id="ai-c" onchange="toggleNuevaCat(this.value)"><option value="">Seleccionar...</option>'+opts+'<option value="__nueva__"'+(esNueva?' selected':'')+'>+ Nueva categoría...</option></select></div>'+
+    '<div class="field" id="ai-c-nueva-wrap" style="margin-top:10px;'+(esNueva?'':'display:none')+'"><label>Nueva categoría</label><input id="ai-c-nueva" type="text" placeholder="Ej: camaron" value="'+(esNueva?selected:'')+'"></div>';
+}
+function toggleNuevaCat(v){
+  var wrap=g('ai-c-nueva-wrap');
+  if(wrap)wrap.style.display=v==='__nueva__'?'':'none';
+}
+function readCatSelect(){
+  var sel=g('ai-c')?g('ai-c').value:'';
+  if(sel==='__nueva__')return (g('ai-c-nueva')?g('ai-c-nueva').value:'').trim()||'otro';
+  return (sel||'otro').trim();
+}
 function mEditItem(idx){
   var p=PRODUCTOS[idx];
   if(!p)return;
@@ -3938,8 +3972,12 @@ function mEditItem(idx){
     '<div class="modal-body">'+
       '<div class="field" style="margin-bottom:12px"><label>Nombre</label><input id="ai-n" type="text" value="'+p.n+'"></div>'+
       '<div class="field" style="margin-bottom:12px"><label>Unidad</label><select id="ai-u"><option value="kg"'+(p.u==='kg'?' selected':'')+'>kg</option><option value="pz"'+(p.u==='pz'?' selected':'')+'>pz</option><option value="u"'+(p.u==='u'?' selected':'')+'>u</option><option value="lt"'+(p.u==='lt'?' selected':'')+'>lt</option></select></div>'+
-      '<div class="field" style="margin-bottom:12px"><label>Categoría</label><input id="ai-c" type="text" value="'+p.cat+'"></div>'+
-      '<div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">'+
+      catSelectHtml(p.cat)+
+      '<label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:14px;cursor:pointer">'+
+        '<input type="checkbox" id="ai-sp" '+(p.soloProceso?'checked':'')+' style="width:16px;height:16px">'+
+        '<span>Este producto siempre se va a procesar (no se vende directo, no pide precio en Pedidos)</span>'+
+      '</label>'+
+      '<div style="border-top:1px solid var(--border);padding-top:12px;margin-top:14px">'+
         '<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px">Alertas de stock</div>'+
         '<div class="fg2" style="display:grid;gap:10px">'+
           '<div class="field"><label>Stock mínimo ('+( p.u||'kg')+')</label><input id="ai-min" type="number" value="'+(p.minStock||'')+'" min="0" placeholder="Ej: 20"></div>'+
@@ -3955,9 +3993,10 @@ function mEditItem(idx){
 function saveEditItem(idx){
   var n=(g('ai-n')?g('ai-n').value:'').trim();
   var u=g('ai-u')?g('ai-u').value:'kg';
-  var c=(g('ai-c')?g('ai-c').value:'otro').trim();
+  var c=readCatSelect();
   if(!n){alert('Escribe un nombre');return;}
   PRODUCTOS[idx].n=n;PRODUCTOS[idx].u=u;PRODUCTOS[idx].cat=c;
+  PRODUCTOS[idx].soloProceso=!!(g('ai-sp')&&g('ai-sp').checked);
   var minV=g('ai-min')?parseFloat(g('ai-min').value):null;
   var maxV=g('ai-max')?parseFloat(g('ai-max').value):null;
   if(minV&&minV>0)PRODUCTOS[idx].minStock=minV;else delete PRODUCTOS[idx].minStock;
@@ -3970,7 +4009,11 @@ function mAddItem(tipo){
   var campos=tipo==='producto'?
     '<div class="field"><label>Nombre</label><input id="ai-n" type="text" placeholder="Ej: Camarón manchado"></div>'+
     '<div class="field" style="margin-top:10px"><label>Unidad</label><select id="ai-u"><option value="kg">kg</option><option value="pz">pz</option><option value="u">u</option><option value="lt">lt</option></select></div>'+
-    '<div class="field" style="margin-top:10px"><label>Categoría</label><input id="ai-c" type="text" placeholder="camaron, pescado, bebida..."></div>':
+    catSelectHtml('')+
+    '<label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:14px;cursor:pointer">'+
+      '<input type="checkbox" id="ai-sp" style="width:16px;height:16px">'+
+      '<span>Este producto siempre se va a procesar (no se vende directo, no pide precio en Pedidos)</span>'+
+    '</label>':
     '<div class="field"><label>Nombre</label><input id="ai-n" type="text" placeholder="'+titulo+'..."></div>';
   modal('<div class="modal" style="max-width:380px"><div class="modal-hdr"><div class="modal-title">'+titulo+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
     '<div class="modal-body">'+campos+'</div>'+
@@ -3982,9 +4025,10 @@ function saveItem(tipo){
   var n=(g('ai-n')?.value||'').trim();
   if(!n){alert('Escribe un nombre');return;}
   if(tipo==='producto'){
-    var u=g('ai-u')?.value||'kg',c=(g('ai-c')?.value||'otro').trim();
-    PRODUCTOS.push({n:n,u:u,cat:c});
-    audit('Agregó producto','Configuracion',n+' · '+u+' · cat:'+c);
+    var u=g('ai-u')?.value||'kg',c=readCatSelect();
+    var soloProceso=!!(g('ai-sp')&&g('ai-sp').checked);
+    PRODUCTOS.push({n:n,u:u,cat:c,soloProceso:soloProceso});
+    audit('Agregó producto','Configuracion',n+' · '+u+' · cat:'+c+(soloProceso?' · solo proceso':''));
   } else if(tipo==='proveedor'){
     PROVEEDORES.push(n);
     audit('Agregó proveedor','Configuracion',n);
