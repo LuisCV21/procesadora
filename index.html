@@ -949,7 +949,7 @@ function preciosPendientesInfo(){
   [['camara',camara],['bodega',bodega]].forEach(function(par){
     var origen=par[0],arr=par[1];
     arr.forEach(function(l){
-      if(l.kg>0&&!l.precio){
+      if(l.kg>0&&!l.precio&&!esSoloProceso(l.esp)){
         if(!inv[l.esp])inv[l.esp]={esp:l.esp,kgTotal:0,costoMax:0,lotes:[]};
         inv[l.esp].kgTotal+=l.kg;
         inv[l.esp].costoMax=Math.max(inv[l.esp].costoMax,l.costo||0);
@@ -2688,8 +2688,10 @@ function initNN(){
 }
 
 function lotesVentaDisp(){
-  return camara.filter(function(l){return l.kg>0;}).map(function(l){return {ref:l,origen:'Cámara'};})
-    .concat(bodega.filter(function(l){return l.kg>0;}).map(function(l){return {ref:l,origen:'Bodega'};}));
+  // Los productos marcados "siempre se va a procesar" (ej. Bistec de res) no se
+  // venden tal cual — no deben aparecer como opción al armar una nota de venta.
+  return camara.filter(function(l){return l.kg>0&&!esSoloProceso(l.esp);}).map(function(l){return {ref:l,origen:'Cámara'};})
+    .concat(bodega.filter(function(l){return l.kg>0&&!esSoloProceso(l.esp);}).map(function(l){return {ref:l,origen:'Bodega'};}));
 }
 function buscarLoteVenta(id){
   return camara.find(function(x){return x.id===id;})||bodega.find(function(x){return x.id===id;});
