@@ -2899,7 +2899,21 @@ function getMovsCaja(){
     // Se reconstruye a partir del historial (montos y fechas de cada evento), no de v.monto,
     // porque v.monto es el SALDO PENDIENTE y se muta con cada abono (llega a 0 al saldarse),
     // lo que hacía desaparecer el cargo original y el abono final del estado de cuenta.
-    var hist=(v.historial&&v.historial.length)?v.historial:[{tipo:'creacion',monto:(v.montoTotal!==undefined?v.montoTotal:v.monto),fecha:v.fecha,concepto:v.concepto||''}];
+    var hist;
+    if(v.historial&&v.historial.length){
+      hist=v.historial;
+    } else if(v.est==='cobrado'){
+      // Vale saldado con una versión anterior del sistema, sin historial de abonos guardado.
+      // Se asume un solo abono que lo saldó por completo, para que el cargo original quede
+      // compensado (neto 0) en vez de restar de más sin ningún abono que lo compense.
+      var montoOriginal=(v.montoTotal!==undefined?v.montoTotal:v.monto);
+      hist=[{tipo:'creacion',monto:montoOriginal,fecha:v.fecha,concepto:v.concepto||''},
+            {tipo:'abono',monto:montoOriginal,fecha:v.fechaCobro||v.fecha}];
+    } else {
+      // Vale pendiente sin historial: v.monto ya es el saldo neto real (creación − abonos
+      // no rastreados), así que es el único monto confiable que queda.
+      hist=[{tipo:'creacion',monto:v.monto,fecha:v.fecha,concepto:v.concepto||''}];
+    }
     hist.forEach(function(h){
       if((h.tipo==='creacion'||h.tipo==='aumento')&&v.efectivoRestado){
         movs.push({fecha:h.fecha,hora:'00:00',cat:CAT_CAJA.valeNuevo,tipo:'cargo',concepto:(h.tipo==='aumento'?'Aumento de vale a ':'Vale a ')+v.negocio+(h.concepto?' — '+h.concepto:''),monto:h.monto,ref:'Vale #'+v.id});
