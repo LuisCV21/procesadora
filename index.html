@@ -749,9 +749,7 @@ var saldoInicialCaja=load('saldo_inicial_caja',{monto:0,fecha:today()});
 // Por defecto solo Gerente recibe pedidos de proveedores; activable desde Configuración
 var ADMIN_RECIBE=load('admin_puede_recibir',false);
 function puedeRecibir(){return ROL==='gerente'||(ROL==='admin'&&ADMIN_RECIBE);}
-// Por defecto solo Gerente registra cobros de notas de entrega; activable desde Configuración
-var ADMIN_COBRA=load('admin_puede_cobrar',false);
-function puedeCobrar(){return ROL==='gerente'||(ROL==='admin'&&ADMIN_COBRA);}
+function puedeCobrar(){return ROL==='gerente'||ROL==='admin';}
 
 function persist(){
   save('camara',camara);save('procesos',procesos);save('pedidos',pedidos);save('notas',notas);
@@ -763,7 +761,6 @@ function persist(){
   save('next_pedido_num',nextPedidoNum);save('vales',vales);persistAuditLog();
   save('meta_patrimonio',metaPatrimonio);save('gastos',gastos);save('saldo_inicial_caja',saldoInicialCaja);
   save('admin_puede_recibir',ADMIN_RECIBE);
-  save('admin_puede_cobrar',ADMIN_COBRA);
 }
 
 // ══════════════════════════════════════════════════════
@@ -2108,6 +2105,7 @@ function rNotas(){
       '<select style="background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:7px 10px;border-radius:var(--r);font-size:14px" onchange="setFNC(this.value)">'+cliOpts+'</select>'+
       '<button class="btn" onclick="impReporte()">⎙ Imprimir reporte</button>'+
       '<button class="btn" onclick="mRelacionVenta()">📊 Relación de venta</button>'+
+      (isAdmin?'<button class="btn" onclick="mEditarNota()">✏ Editar</button>':'')+
       '<button class="btn btn-p" onclick="nav(\'nueva-nota\')">+ Nueva nota de entrega</button>'+
     '</div>'+
   '</div><div class="tw"><table><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Partidas</th><th>Total</th><th>Condición</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>'+
@@ -2123,9 +2121,6 @@ function rNotas(){
     else if(n.pagada){pillEstado='<span class="pill p-success">Pagada</span>';}
     else if(abonado>0){pillEstado='<span class="pill p-warn">Abonado '+money(abonado)+'</span>';}
     else{pillEstado='<span class="pill p-warn">Por cobrar</span>';}
-    var accionesExtraNota=
-      (esCredito&&(n.est==='entregada'||n.est==='pagada')&&!n.pagada&&puedeCobrar()?'<button class="btn btn-xs" style="border-color:var(--accent-glow);color:var(--accent)" onclick="mAbonarNota('+n.id+')">Registrar cobro</button>':'')+
-      (isAdmin?'<button class="btn btn-xs btn-d" onclick="elimNota('+n.id+')">Eliminar</button>':'');
     return '<tr style="cursor:pointer" onclick="verNota('+n.id+')">'+
       '<td class="mn" style="font-weight:500">#'+n.folio+'</td>'+
       '<td class="mn">'+fmtFecha(n.fecha)+'</td>'+
@@ -2136,7 +2131,7 @@ function rNotas(){
       '<td>'+pillEstado+'</td>'+
       '<td onclick="event.stopPropagation()"><div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center">'+
         (n.est==='pendiente'?'<button class="btn btn-xs" style="border-color:var(--info);color:var(--info)" onclick="mEnviarNota('+n.id+')">📦 Marcar enviada</button>':'')+
-        (accionesExtraNota?accMenu('nota-'+n.id,accionesExtraNota):'')+
+        (esCredito&&(n.est==='entregada'||n.est==='pagada')&&!n.pagada&&puedeCobrar()?'<button class="btn btn-xs" style="border-color:var(--accent-glow);color:var(--accent)" onclick="mAbonarNota('+n.id+')">Registrar cobro</button>':'')+
       '</div></td>'+
     '</tr>';
   }).join(''))+
@@ -2144,6 +2139,32 @@ function rNotas(){
 }
 
 function setFNC(v){FILTRO_NOTA_CLI=v;nav('notas');}
+
+function mEditarNota(){
+  var opts='<option value="">— Elegir nota —</option>'+
+    notas.slice().sort(function(a,b){return b.folio-a.folio;}).map(function(n){
+      return '<option value="'+n.id+'">#'+n.folio+' · '+n.cliente+' · '+money(n.total)+'</option>';
+    }).join('');
+  modal('<div class="modal" style="max-width:420px"><div class="modal-hdr"><div class="modal-title">Editar nota de remisión</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div class="field"><label>Selecciona una nota</label><select id="edn-sel" onchange="renderEdnInfo()">'+opts+'</select></div>'+
+      '<div id="edn-info" style="margin-top:14px"></div>'+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cerrar</button></div>'+
+  '</div>');
+}
+function renderEdnInfo(){
+  var box=g('edn-info');
+  var id=parseInt(g('edn-sel').value);
+  if(!id){box.innerHTML='';return;}
+  var n=notas.find(function(x){return x.id===id;});
+  if(!n){box.innerHTML='';return;}
+  box.innerHTML='<div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;margin-bottom:12px">'+
+      '<div style="font-weight:700">Nota #'+n.folio+' — '+n.cliente+'</div>'+
+      '<div style="color:var(--text3);font-size:13px;margin-top:2px">'+money(n.total)+' · '+(n.condiciones||'—')+' · '+fmtFecha(n.fecha)+'</div>'+
+    '</div>'+
+    '<button class="btn btn-d" onclick="cm();elimNota('+n.id+')">Eliminar esta nota</button>';
+}
 
 function estN(id,e){
   var n=notas.find(function(x){return x.id===id;});
@@ -3774,12 +3795,7 @@ function rConfig(){
         '<input type="checkbox" '+(ADMIN_RECIBE?'checked':'')+' onchange="toggleAdminRecibe(this.checked)" style="width:18px;height:18px">'+
         '<span>Permitir que los administradores puedan recibir pedidos de proveedores</span>'+
       '</label>'+
-      '<div style="font-size:13px;color:var(--text3);margin-top:8px;margin-bottom:14px">Por defecto, solo el rol <strong>Gerente</strong> puede marcar un pedido como recibido. Actívalo si algún administrador necesita hacerlo también.</div>'+
-      '<label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer">'+
-        '<input type="checkbox" '+(ADMIN_COBRA?'checked':'')+' onchange="toggleAdminCobra(this.checked)" style="width:18px;height:18px">'+
-        '<span>Permitir que los administradores puedan registrar cobros de notas de entrega</span>'+
-      '</label>'+
-      '<div style="font-size:13px;color:var(--text3);margin-top:8px">Por defecto, solo el rol <strong>Gerente</strong> puede registrar cobros. Actívalo si algún administrador necesita hacerlo también.</div>'+
+      '<div style="font-size:13px;color:var(--text3);margin-top:8px">Por defecto, solo el rol <strong>Gerente</strong> puede marcar un pedido como recibido. Actívalo si algún administrador necesita hacerlo también.</div>'+
     '</div></div>'+
     '<div class="card" style="margin-top:18px"><div class="card-hdr"><div class="card-title">📦 Exportar / Importar datos</div></div><div class="card-body">'+
       '<p style="font-size:14px;color:var(--text2);margin-bottom:16px">Usa esto para mover los datos entre computadoras. Exporta en una máquina e importa en la otra.</p>'+
@@ -3833,13 +3849,6 @@ function toggleAdminRecibe(v){
   audit('Cambió permiso de recepción de pedidos','Configuracion',v?'Administradores SÍ pueden recibir':'Administradores NO pueden recibir');
   nav('config');
 }
-function toggleAdminCobra(v){
-  ADMIN_COBRA=v;
-  save('admin_puede_cobrar',v);
-  audit('Cambió permiso de cobro de notas','Configuracion',v?'Administradores SÍ pueden registrar cobros':'Administradores NO pueden registrar cobros');
-  nav('config');
-}
-
 function reiniciarFolios(){
   var n=parseInt(g('nuevo-folio')?g('nuevo-folio').value:nextFolio)||nextFolio;
   if(!confirm('¿Cambiar el próximo folio a '+n+'?'))return;
@@ -4098,7 +4107,6 @@ function aplicarDatos(data){
   if(data.gastos)gastos=data.gastos;
   if(data.saldo_inicial_caja)saldoInicialCaja=data.saldo_inicial_caja;
   if(data.admin_puede_recibir!==undefined&&data.admin_puede_recibir!==null)ADMIN_RECIBE=data.admin_puede_recibir;
-  if(data.admin_puede_cobrar!==undefined&&data.admin_puede_cobrar!==null)ADMIN_COBRA=data.admin_puede_cobrar;
   // Actualizar caché local con datos de Supabase
   Object.keys(data).forEach(function(k){saveLocal(k,data[k]);});
 }
