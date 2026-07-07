@@ -2214,7 +2214,7 @@ function mAbonarNota(id){
         '<div style="font-size:13px;color:var(--text3)">Generado por pagos de sucursal registrados</div></div>'+
         '<div style="font-size:20px;font-weight:700;color:'+(saldoComp>0?'var(--accent)':'var(--text3)')+'">'+money(saldoComp)+'</div>'+
       '</div>'+
-      (saldoComp>0?'<button class="btn btn-xs btn-p" style="margin-top:8px" onclick="aplicarSaldoComp('+id+','+saldoComp+','+pendiente+')">Aplicar saldo disponible</button>':
+      (saldoComp>0?'<div style="font-size:12px;color:var(--text3);margin-top:4px">Para usarlo, selecciona "Saldo de sucursal" en Forma de cobro abajo</div>':
         '<div style="font-size:12px;color:var(--text3);margin-top:4px">Sin saldo disponible — registra un pago de sucursal en Caja / Fondos</div>')+
     '</div>':'';
   modal('<div class="modal" style="max-width:460px"><div class="modal-hdr"><div class="modal-title">Registrar cobro — Nota #'+n.folio+' · '+n.cliente+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
@@ -2238,19 +2238,6 @@ function mAbonarNota(id){
     '</div>'+
     '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gAbonarNota('+id+')">Registrar cobro</button></div>'+
   '</div>');
-}
-
-function aplicarSaldoComp(notaId,saldoDisp,pendiente){
-  var n=notas.find(function(x){return x.id===notaId;});if(!n)return;
-  // Recalcular saldo real en el momento de aplicar
-  var saldoReal=saldoCompSucursal(n.cliente);
-  if(saldoReal<=0){alert('Sin saldo disponible para '+n.cliente);return;}
-  var aplicar=Math.min(saldoReal,pendiente);
-  if(!n.abonos)n.abonos=[];
-  n.abonos.push({monto:aplicar,forma:'compensacion',fecha:today(),hora:new Date().toTimeString().slice(0,5),nota:'Saldo de sucursal aplicado'});
-  var totalAb=n.abonos.reduce(function(a,b){return a+b.monto;},0);
-  if(totalAb>=n.total){n.pagada=true;n.est='pagada';}
-  persist();cm();nav('notas');
 }
 
 function gAbonarNota(id){
