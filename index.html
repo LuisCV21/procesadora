@@ -72,6 +72,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 .btn-d:hover{background:var(--danger-dim)}
 .btn-w{border-color:rgba(184,122,0,.4);color:var(--warn);background:var(--bg2)}
 .btn-w:hover{background:var(--warn-dim)}
+.btn-success{border-color:var(--success-glow);color:var(--success);background:var(--bg2)}
+.btn-success:hover{background:var(--success-dim)}
 .btn-sm{padding:6px 13px;font-size:13px}
 .btn-xs{padding:4px 10px;font-size:12px;font-weight:500}
 .btn-icon{width:36px;height:36px;padding:0;justify-content:center;font-size:16px;border-radius:var(--r)}
@@ -1600,7 +1602,7 @@ function verPedido(id){
         '<button class="btn" onclick="togglePrecioEdit('+id+',false)">Cancelar</button>'+
         '<button class="btn btn-p" onclick="guardarPreciosPedido('+id+')">💾 Guardar cambios</button>'+
       '</div>'
-      :'<div style="margin-top:10px;text-align:right"><button class="btn btn-w" onclick="togglePrecioEdit('+id+',true)">✏ '+(faltaPrecio?'Poner precios':'Editar precios')+'</button></div>'
+      :'<div style="margin-top:10px;text-align:right"><button class="btn btn-success" onclick="togglePrecioEdit('+id+',true)">💲 '+(faltaPrecio?'Poner precios':'Editar precios')+'</button></div>'
     ):'');
 
   modal('<div class="modal modal-wide"><div class="modal-hdr">'+
@@ -1621,7 +1623,7 @@ function verPedido(id){
     '</div>'+
     '<div class="modal-footer">'+
       '<button class="btn" onclick="cm()">Cerrar</button>'+
-      (canEdit?'<button class="btn btn-w" onclick="cm();mEditarPedido('+id+')">✏ Editar</button>':'')+
+      (canEdit?'<button class="btn" style="border-color:var(--border2);color:var(--text2)" onclick="cm();mEditarPedido('+id+')">📝 Editar pedido</button>':'')+
       (p.est==='pendiente'&&puedeRecibir()?'<button class="btn" style="border-color:var(--info);color:var(--info)" onclick="cm();recibirPedido('+id+')">📦 Recibir</button>':'')+
       (p.est==='recibido'&&!p.pagado&&(ROL==='admin'||ROL==='gerente')?'<button class="btn btn-p" onclick="cm();pagarPedido('+id+')">💰 Registrar pago</button>':'')+
       (ROL==='admin'&&(p.est==='recibido'||p.pagado)?'<button class="btn btn-d" onclick="cm();mRevertirPedido('+id+')">↩ Corregir</button>':'')+
