@@ -2896,12 +2896,17 @@ function getMovsCaja(){
   });
   vales.forEach(function(v){
     if(v.excluirEstadoCuenta)return;
-    if(v.efectivoRestado){
-      movs.push({fecha:v.fecha,hora:'00:00',cat:CAT_CAJA.valeNuevo,tipo:'cargo',concepto:'Vale a '+v.negocio+(v.concepto?' — '+v.concepto:''),monto:v.monto,ref:'Vale #'+v.id});
-    }
-    if(v.est==='cobrado'){
-      movs.push({fecha:v.fechaCobro,hora:'00:00',cat:CAT_CAJA.valeCobro,tipo:'abono',concepto:'Cobro de vale — '+v.negocio,monto:v.monto,ref:'Vale #'+v.id});
-    }
+    // Se reconstruye a partir del historial (montos y fechas de cada evento), no de v.monto,
+    // porque v.monto es el SALDO PENDIENTE y se muta con cada abono (llega a 0 al saldarse),
+    // lo que hacía desaparecer el cargo original y el abono final del estado de cuenta.
+    var hist=(v.historial&&v.historial.length)?v.historial:[{tipo:'creacion',monto:(v.montoTotal!==undefined?v.montoTotal:v.monto),fecha:v.fecha,concepto:v.concepto||''}];
+    hist.forEach(function(h){
+      if((h.tipo==='creacion'||h.tipo==='aumento')&&v.efectivoRestado){
+        movs.push({fecha:h.fecha,hora:'00:00',cat:CAT_CAJA.valeNuevo,tipo:'cargo',concepto:(h.tipo==='aumento'?'Aumento de vale a ':'Vale a ')+v.negocio+(h.concepto?' — '+h.concepto:''),monto:h.monto,ref:'Vale #'+v.id});
+      } else if(h.tipo==='abono'){
+        movs.push({fecha:h.fecha,hora:'00:00',cat:CAT_CAJA.valeCobro,tipo:'abono',concepto:'Cobro de vale — '+v.negocio,monto:h.monto,ref:'Vale #'+v.id});
+      }
+    });
   });
   gastos.forEach(function(gto){
     if(gto.forma==='efectivo'){
