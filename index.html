@@ -1929,6 +1929,9 @@ function gRecibirPedido(id){
   // Recalcular total con kilos reales
   p.total=parts.reduce(function(a,pt){return a+(pt.kgReal||pt.kg)*(pt.costoAjust||pt.costo||0);},0);
   p.est='recibido';
+  // Si nunca se puso fecha de entrega estimada, usar la de recepción — si no,
+  // el pedido queda sin fecha para siempre y desaparece del filtro por mes.
+  if(!p.fecha)p.fecha=today();
   audit('Recibió pedido','Pedidos',(p.numPedido||'#'+p.id)+' · '+p.prov+' · '+money(p.total||0));
   if(p.condiciones==='Contado'){
     p.pagado=true;p.montoPagado=p.total;
