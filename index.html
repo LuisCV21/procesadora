@@ -744,6 +744,9 @@ var metaPatrimonio=load('meta_patrimonio',1000000);
 var gastos=load('gastos',[]);
 // Punto de partida del estado de cuenta de caja: el efectivo que había el día que se empezó a usar el sistema
 var saldoInicialCaja=load('saldo_inicial_caja',{monto:0,fecha:today()});
+// Por defecto solo Gerente recibe pedidos de proveedores; activable desde Configuración
+var ADMIN_RECIBE=load('admin_puede_recibir',false);
+function puedeRecibir(){return ROL==='gerente'||(ROL==='admin'&&ADMIN_RECIBE);}
 
 function persist(){
   save('camara',camara);save('procesos',procesos);save('pedidos',pedidos);save('notas',notas);
@@ -754,6 +757,7 @@ function persist(){
   save('compensaciones',compensaciones);save('temp_logs',tempLogs);
   save('next_pedido_num',nextPedidoNum);save('vales',vales);persistAuditLog();
   save('meta_patrimonio',metaPatrimonio);save('gastos',gastos);save('saldo_inicial_caja',saldoInicialCaja);
+  save('admin_puede_recibir',ADMIN_RECIBE);
 }
 
 // ══════════════════════════════════════════════════════
@@ -1482,7 +1486,7 @@ function rPed(){
     '<div class="stat"><div class="stat-lbl">Por pagar</div><div class="stat-val c-danger">'+money(porPagar)+'</div><div class="stat-sub">Recibidos sin liquidar</div></div>'+
     (sinPrecio>0?'<div class="stat" style="border-color:rgba(184,122,0,.4)"><div class="stat-lbl" style="color:var(--warn)">⚠ Sin precio de venta</div><div class="stat-val c-warn">'+sinPrecio+'</div><div class="stat-sub">Requieren autorización</div></div>':'')+
   '</div>'+
-  (sinPrecio>0&&isAdmin?'<div class="alert al-w"><div class="al-dot"></div>Hay <strong>'+sinPrecio+' pedido(s)</strong> sin precio de venta definido. Da clic en "Ver" para asignarlos.</div>':'')+
+  (sinPrecio>0&&isAdmin?'<div class="alert al-w"><div class="al-dot"></div>Hay <strong>'+sinPrecio+' pedido(s)</strong> sin precio de venta definido. Da clic en el pedido para asignarlos.</div>':'')+
   '<div class="card"><div class="card-hdr" style="flex-wrap:wrap;gap:8px"><div class="card-title">Órdenes de compra a proveedores</div>'+
     selectorMes('pedidos')+
     (canEdit?'<button class="btn btn-p" onclick="mPedido()">+ Nuevo pedido</button>':'<span style="font-size:13px;color:var(--text3)">Solo lectura</span>')+
@@ -1492,7 +1496,10 @@ function rPed(){
     var partStr=(p.partidas&&p.partidas.length>0)?p.partidas.map(function(pt){return pt.esp;}).join(', '):'—';
     if(partStr.length>40)partStr=partStr.slice(0,40)+'…';
     var faltaPrecio=p.partidas&&p.partidas.some(function(pt){return !pt.precioVenta;});
-    return '<tr'+(faltaPrecio?' style="background:rgba(184,122,0,.04)"':'')+'>'+
+    var accionesExtraPed=
+      (isAdmin?'<button class="btn btn-xs btn-d" onclick="elimP('+p.id+')">Eliminar</button>':'')+
+      (isAdmin&&(p.est==='recibido'||p.pagado)?'<button class="btn btn-xs btn-d" onclick="mRevertirPedido('+p.id+')">Corregir</button>':'');
+    return '<tr'+(faltaPrecio?' style="background:rgba(184,122,0,.04)"':'')+' style="cursor:pointer" onclick="verPedido('+p.id+')">'+
       '<td class="mn" style="font-weight:700;color:var(--accent)">'+(p.numPedido||'—')+'</td>'+
       '<td class="pr">'+p.prov+'</td>'+
       '<td style="font-size:13px;color:var(--text2)">'+partStr+(faltaPrecio?' <span style="color:var(--warn);font-size:11px">⚠ sin precio</span>':'')+'</td>'+
@@ -1501,11 +1508,10 @@ function rPed(){
       '<td style="font-size:13px;color:var(--text3)">'+(p.condiciones||'—')+'</td>'+
       '<td>'+pill(p.est)+'</td>'+
       '<td>'+(p.pagado?pill('pagada'):'<span style="font-size:13px;color:var(--warn)">'+(p.montoPagado&&p.montoPagado>0?money(p.montoPagado)+' / '+money(p.total||p.costo||0):'Sin abonos')+'</span>')+'</td>'+
-      '<td><div style="display:flex;gap:3px;flex-wrap:wrap">'+
-        '<button class="btn btn-xs" onclick="verPedido('+p.id+')">Ver</button>'+
-        (p.est==='pendiente'&&canEdit?'<button class="btn btn-xs btn-p" onclick="recibirPedido('+p.id+')">Recibir</button>':'')+
+      '<td onclick="event.stopPropagation()"><div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center">'+
+        (p.est==='pendiente'&&puedeRecibir()?'<button class="btn btn-xs btn-p" onclick="recibirPedido('+p.id+')">Recibir</button>':'')+
         (p.est==='recibido'&&!p.pagado&&canEdit?'<button class="btn btn-xs" style="border-color:var(--accent-glow);color:var(--accent)" onclick="pagarPedido('+p.id+')">Registrar pago</button>':'')+
-        (isAdmin?'<button class="btn btn-xs btn-d" onclick="elimP('+p.id+')">Eliminar</button>':'')+
+        (accionesExtraPed?accMenu('ped-'+p.id,accionesExtraPed):'')+
       '</div></td>'+
     '</tr>';
   }).join(''))+
@@ -1519,6 +1525,7 @@ function verPedido(id){
   var isAdmin=ROL==='admin';
   var canEdit=p.est==='pendiente'&&(ROL==='admin'||ROL==='gerente');
   var faltaPrecio=parts.some(function(pt){return !pt.precioVenta;});
+  var editandoPrecios=isAdmin&&PED_EDITANDO_PRECIO===id;
 
   var abonosHTML='';
   if(p.abonos&&p.abonos.length>0){
@@ -1537,7 +1544,7 @@ function verPedido(id){
     '</div>';
   }
 
-  // Tabla con precio de venta — admin puede editarlos inline
+  // Tabla con precio de venta — admin puede activar el modo edición y guardar los cambios juntos
   var tablaPartidas='<div class="tw"><table><thead><tr><th>Producto</th><th>Cantidad</th><th>Costo/u</th><th>Subtotal</th>'+
     (isAdmin?'<th>Precio venta</th>':'')+
     '<th>Destino</th></tr></thead><tbody>'+
@@ -1547,14 +1554,24 @@ function verPedido(id){
         '<td class="mn">'+(pt.kgReal||pt.kg)+' '+(pt.unidad||'kg')+'</td>'+
         '<td class="mn">'+money(pt.costoAjust||pt.costo||0)+'</td>'+
         '<td class="mn" style="color:var(--accent)">'+money(sub)+'</td>'+
-        (isAdmin?'<td><input type="number" value="'+(pt.precioVenta||'')+'" min="0" placeholder="$0" id="vpv'+i+'" oninput="actualizarPrecioVenta('+id+','+i+',this.value)" style="width:90px;padding:4px 8px;border:2px solid var(--border);border-radius:var(--r);font-size:14px;color:var(--info)"></td>':'')+
+        (isAdmin?'<td>'+(editandoPrecios?
+          '<input type="number" value="'+(pt.precioVenta||'')+'" min="0" placeholder="$0" id="vpv'+i+'" style="width:90px;padding:4px 8px;border:2px solid var(--border);border-radius:var(--r);font-size:14px;color:var(--info)">'
+          :(pt.precioVenta?'<span style="color:var(--info);font-weight:600">'+money(pt.precioVenta)+'</span>':'<span style="color:var(--warn);font-size:12px">Sin precio</span>')
+        )+'</td>':'')+
         '<td><span class="pill '+(pt.destino==='bodega'?'p-warn':'p-info')+'">'+(pt.destino==='bodega'?'Bodega':'Cámara')+'</span></td></tr>';
     }).join('')+
     '<tr style="background:var(--accent-dim)"><td colspan="'+(isAdmin?'3':'3')+'" style="text-align:right;font-weight:700;padding:12px 14px">TOTAL</td>'+
     '<td style="font-weight:700;font-size:16px;color:var(--accent);padding:12px 14px">'+money(total)+'</td>'+
     (isAdmin?'<td></td>':'')+
     '<td></td></tr>'+
-    '</tbody></table></div>';
+    '</tbody></table></div>'+
+    (isAdmin?(editandoPrecios?
+      '<div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">'+
+        '<button class="btn" onclick="togglePrecioEdit('+id+',false)">Cancelar</button>'+
+        '<button class="btn btn-p" onclick="guardarPreciosPedido('+id+')">💾 Guardar cambios</button>'+
+      '</div>'
+      :'<div style="margin-top:10px;text-align:right"><button class="btn btn-w" onclick="togglePrecioEdit('+id+',true)">✏ '+(faltaPrecio?'Poner precios':'Editar precios')+'</button></div>'
+    ):'');
 
   modal('<div class="modal modal-wide"><div class="modal-hdr">'+
     '<div>'+
@@ -1575,7 +1592,7 @@ function verPedido(id){
     '<div class="modal-footer">'+
       '<button class="btn" onclick="cm()">Cerrar</button>'+
       (canEdit?'<button class="btn btn-w" onclick="cm();mEditarPedido('+id+')">✏ Editar</button>':'')+
-      (p.est==='pendiente'&&(ROL==='admin'||ROL==='gerente')?'<button class="btn" style="border-color:var(--info);color:var(--info)" onclick="cm();recibirPedido('+id+')">📦 Recibir</button>':'')+
+      (p.est==='pendiente'&&puedeRecibir()?'<button class="btn" style="border-color:var(--info);color:var(--info)" onclick="cm();recibirPedido('+id+')">📦 Recibir</button>':'')+
       (p.est==='recibido'&&!p.pagado&&(ROL==='admin'||ROL==='gerente')?'<button class="btn btn-p" onclick="cm();pagarPedido('+id+')">💰 Registrar pago</button>':'')+
       (ROL==='admin'&&(p.est==='recibido'||p.pagado)?'<button class="btn btn-d" onclick="cm();mRevertirPedido('+id+')">↩ Corregir</button>':'')+
       '<button class="btn btn-p" onclick="imprimirPedido('+id+')">🖨 Imprimir</button>'+
@@ -1583,18 +1600,29 @@ function verPedido(id){
   '</div>');
 }
 
-function actualizarPrecioVenta(pedidoId,idx,val){
-  var p=pedidos.find(function(x){return x.id===pedidoId;});
-  if(!p||!p.partidas||!p.partidas[idx])return;
-  p.partidas[idx].precioVenta=parseFloat(val)||0;
-  // También actualizar en cámara/bodega si ya fue recibido
-  if(p.est==='recibido'&&p.partidas[idx].lote){
-    var lote=camara.find(function(l){return l.lote===p.partidas[idx].lote&&l.esp===p.partidas[idx].esp;});
-    if(lote)lote.precio=parseFloat(val)||0;
-    var loteBod=bodega.find(function(l){return l.lote===p.partidas[idx].lote&&l.esp===p.partidas[idx].esp;});
-    if(loteBod)loteBod.precio=parseFloat(val)||0;
-  }
+var PED_EDITANDO_PRECIO=null;
+function togglePrecioEdit(id,on){
+  PED_EDITANDO_PRECIO=on?id:null;
+  verPedido(id);
+}
+function guardarPreciosPedido(id){
+  var p=pedidos.find(function(x){return x.id===id;});
+  if(!p||!p.partidas)return;
+  p.partidas.forEach(function(pt,i){
+    var el=g('vpv'+i);
+    if(!el)return;
+    pt.precioVenta=parseFloat(el.value)||0;
+    // También actualizar en cámara/bodega si ya fue recibido
+    if(p.est==='recibido'&&pt.lote){
+      var lote=camara.find(function(l){return l.lote===pt.lote&&l.esp===pt.esp;});
+      if(lote)lote.precio=pt.precioVenta;
+      var loteBod=bodega.find(function(l){return l.lote===pt.lote&&l.esp===pt.esp;});
+      if(loteBod)loteBod.precio=pt.precioVenta;
+    }
+  });
   persist();
+  PED_EDITANDO_PRECIO=null;
+  verPedido(id);
 }
 
 function imprimirPedido(id){
@@ -1693,6 +1721,7 @@ function gEditarPedido(id){
 }
 
 function recibirPedido(id){
+  if(!puedeRecibir())return;
   var p=pedidos.find(function(x){return x.id===id;});if(!p)return;
   var loteAuto=p.numPedido||numPedido(nextPedidoNum);
   var parts=p.partidas||[{esp:p.esp,kg:p.kg,costo:p.costo,destino:'camara'}];
@@ -3725,6 +3754,13 @@ function rConfig(){
   return tabBar+'<div class="card" style="overflow:hidden">'+body+'</div>'+
     '<div style="margin-top:14px;font-size:13px;color:var(--text3);text-align:center">Los cambios se guardan automáticamente.'+(isAdmin?' Solo el administrador puede acceder al resto de esta sección.':'')+'</div>'+
     (!isAdmin?'':
+    '<div class="card" style="margin-top:18px"><div class="card-hdr"><div class="card-title">🔐 Permisos</div></div><div class="card-body">'+
+      '<label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer">'+
+        '<input type="checkbox" '+(ADMIN_RECIBE?'checked':'')+' onchange="toggleAdminRecibe(this.checked)" style="width:18px;height:18px">'+
+        '<span>Permitir que los administradores puedan recibir pedidos de proveedores</span>'+
+      '</label>'+
+      '<div style="font-size:13px;color:var(--text3);margin-top:8px">Por defecto, solo el rol <strong>Gerente</strong> puede marcar un pedido como recibido. Actívalo si algún administrador necesita hacerlo también.</div>'+
+    '</div></div>'+
     '<div class="card" style="margin-top:18px"><div class="card-hdr"><div class="card-title">📦 Exportar / Importar datos</div></div><div class="card-body">'+
       '<p style="font-size:14px;color:var(--text2);margin-bottom:16px">Usa esto para mover los datos entre computadoras. Exporta en una máquina e importa en la otra.</p>'+
       '<div style="display:flex;gap:12px;flex-wrap:wrap">'+
@@ -3771,6 +3807,12 @@ function rConfig(){
 }
 
 function setCfgTab(t){CFG_TAB=t;nav('config');}
+function toggleAdminRecibe(v){
+  ADMIN_RECIBE=v;
+  save('admin_puede_recibir',v);
+  audit('Cambió permiso de recepción de pedidos','Configuracion',v?'Administradores SÍ pueden recibir':'Administradores NO pueden recibir');
+  nav('config');
+}
 
 function reiniciarFolios(){
   var n=parseInt(g('nuevo-folio')?g('nuevo-folio').value:nextFolio)||nextFolio;
@@ -4015,6 +4057,7 @@ function aplicarDatos(data){
   if(data.meta_patrimonio!==undefined&&data.meta_patrimonio!==null)metaPatrimonio=data.meta_patrimonio;
   if(data.gastos)gastos=data.gastos;
   if(data.saldo_inicial_caja)saldoInicialCaja=data.saldo_inicial_caja;
+  if(data.admin_puede_recibir!==undefined&&data.admin_puede_recibir!==null)ADMIN_RECIBE=data.admin_puede_recibir;
   // Actualizar caché local con datos de Supabase
   Object.keys(data).forEach(function(k){saveLocal(k,data[k]);});
 }
