@@ -2398,7 +2398,7 @@ function buildNotaTabla(items,offset,fs,padV,thFs){
       '<th style="font-size:'+thFs.toFixed(1)+'px;padding:4px 3px">Importe</th>'+
     '</tr></thead><tbody>'+buildNotaFilas(items,offset,fs,padV)+'</tbody></table>';
 }
-function buildNotaHTML(n){
+function buildNotaHTML(n,marca){
   var partidas=n.partidas||[];
   var cols=partidas.length>NOTA_FILAS_POR_COLUMNA?2:1;
   var perCol=Math.max(Math.ceil(partidas.length/cols),1);
@@ -2425,6 +2425,7 @@ function buildNotaHTML(n){
   return '<div class="nota-wrap">'+
     '<div class="nota-top">'+
       '<div><div class="nota-brand-name">BODEGA DE MARISCOS Y PRODUCTOS</div><div class="nota-brand-sub">Nota de remisión</div></div>'+
+      (marca?'<div style="background:'+(marca==='ORIGINAL'?'#1a3a6b':'#6b7280')+';color:#fff;padding:6px 18px;border-radius:4px;font-weight:700;font-size:13px;letter-spacing:.08em;align-self:center">'+marca+'</div>':'')+
       '<div class="nota-folio-box"><div class="nota-folio-lbl">FOLIO</div><div class="nota-folio-n">'+n.folio+'</div></div>'+
     '</div>'+
     '<div class="nota-grid">'+
@@ -2451,7 +2452,7 @@ function verNota(id){
 
 function printNota(id){
   var n=notas.find(function(x){return x.id===id;});if(!n)return;
-  var html=buildNotaHTML(n);
+  var html='<div style="page-break-after:always">'+buildNotaHTML(n,'ORIGINAL')+'</div>'+buildNotaHTML(n,'COPIA');
   var win=window.open('','_blank');
   win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Nota #'+n.folio+'</title><style>'+
     '@page{size:215.9mm 279.4mm;margin:8mm}'+
