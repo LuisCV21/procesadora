@@ -276,6 +276,13 @@ hr.div{border:none;border-top:1px solid var(--border);margin:14px 0}
     <svg viewBox="0 0 16 16" fill="currentColor"><path d="M0 1.5A1.5 1.5 0 0 1 1.5 0h3A1.5 1.5 0 0 1 6 1.5v3A1.5 1.5 0 0 1 4.5 6h-3A1.5 1.5 0 0 1 0 4.5zm8 0A1.5 1.5 0 0 1 9.5 0h3A1.5 1.5 0 0 1 14 1.5v3A1.5 1.5 0 0 1 12.5 6h-3A1.5 1.5 0 0 1 8 4.5zM0 9.5A1.5 1.5 0 0 1 1.5 8h3A1.5 1.5 0 0 1 6 9.5v3A1.5 1.5 0 0 1 4.5 14h-3A1.5 1.5 0 0 1 0 12.5zm8 0A1.5 1.5 0 0 1 9.5 8h3A1.5 1.5 0 0 1 14 9.5v3A1.5 1.5 0 0 1 12.5 14h-3A1.5 1.5 0 0 1 8 12.5z"/></svg>
     Resumen del día
   </div>
+  <div id="ni-precios-wrap" style="display:none">
+  <div class="nav-item" id="ni-precios" onclick="nav('precios')">
+    <svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 10.781c.148 1.667 1.513 2.85 3.591 3.003V15h1.043v-1.216c2.27-.179 3.678-1.438 3.678-3.3 0-1.59-.947-2.51-2.956-3.028l-.722-.187V3.467c1.122.11 1.879.714 2.07 1.616h1.47c-.166-1.6-1.54-2.748-3.54-2.875V1H7.591v1.233c-1.939.23-3.27 1.472-3.27 3.156 0 1.454.966 2.483 2.661 2.917l.61.163v4.31c-1.149-.17-1.95-.8-2.131-1.797zm3.391-6.09c-1.11-.279-1.72-.858-1.72-1.68 0-.94.732-1.65 1.87-1.79v3.516l-.15-.045zm1.348 3.301c1.311.317 2.058.916 2.058 1.951 0 1.166-.898 1.98-2.362 2.096V7.986l.304.006z"/></svg>
+    Precios pendientes
+    <span class="nav-badge w" id="badge-precios" style="display:none">!</span>
+  </div>
+  </div>
   <div class="nav-sec">Inventario</div>
   <div class="nav-item" id="ni-camara" onclick="nav('camara')">
     <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 2a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1v7.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5V5a1 1 0 0 1-1-1V2zm2 3v7.5a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5V5H3zm0-3v2h10V2H3z"/></svg>
@@ -523,6 +530,7 @@ async function doLogin(){
   g('app').classList.add('visible');
   updateUserUI();
   if(ROL!=='admin'&&ROL!=='gerente')g('ni-config-wrap').style.display='none';
+  if(ROL==='admin')g('ni-precios-wrap').style.display='';
   nav('dashboard');
 }
 
@@ -872,6 +880,7 @@ function confirmarEliminar(msg,cb,opts){
 // ══════════════════════════════════════════════════════
 var TAB_INFO={
   dashboard:{t:'Resumen del día',s:'Alertas · inventario · actividad'},
+  precios:{t:'Precios pendientes',s:'Asigna precio a lo que aún no tiene'},
   camara:{t:'Cámara frigorífica',s:'Control de inventario y caducidades'},
   bodega:{t:'Bodega',s:'Insumos y productos sin refrigeración'},
   procesos:{t:'Procesos de planta',s:'Corte · filete · empaque · merma'},
@@ -904,7 +913,7 @@ function nav(tab){
   g('page-title').textContent=info.t;
   g('page-sub').textContent=info.s;
   updateBadges();
-  var fns={dashboard:rDash,camara:rCam,bodega:rBodega,procesos:rProc,pedidos:rPed,notas:rNotas,'nueva-nota':rNuevaNota,caja:rCaja,reportes:rRep,config:rConfig};
+  var fns={dashboard:rDash,precios:rPrecios,camara:rCam,bodega:rBodega,procesos:rProc,pedidos:rPed,notas:rNotas,'nueva-nota':rNuevaNota,caja:rCaja,reportes:rRep,config:rConfig};
   g('content').innerHTML=fns[tab]?fns[tab]():'';
   g('topbar-act').innerHTML=tbAct(tab);
 }
@@ -922,6 +931,104 @@ function updateBadges(){
   var a=camara.filter(function(l){return l.est!=='ok';}).length;
   var b=g('badge-cam');
   if(b){b.style.display=a>0?'':'none';b.textContent=a;}
+  if(ROL==='admin'){
+    var pp=preciosPendientesInfo();
+    var c=pp.inv.length+pp.ped.length;
+    var bp=g('badge-precios');
+    if(bp){bp.style.display=c>0?'':'none';bp.textContent=c;}
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//  PRECIOS PENDIENTES — todo lo que aún necesita precio de venta,
+//  junto en un solo lugar para que el admin no tenga que ir a buscarlo
+//  producto por producto en Cámara/Bodega/Pedidos.
+// ══════════════════════════════════════════════════════
+function preciosPendientesInfo(){
+  var inv={};
+  [['camara',camara],['bodega',bodega]].forEach(function(par){
+    var origen=par[0],arr=par[1];
+    arr.forEach(function(l){
+      if(l.kg>0&&!l.precio){
+        if(!inv[l.esp])inv[l.esp]={esp:l.esp,kgTotal:0,costoMax:0,lotes:[]};
+        inv[l.esp].kgTotal+=l.kg;
+        inv[l.esp].costoMax=Math.max(inv[l.esp].costoMax,l.costo||0);
+        inv[l.esp].lotes.push({id:l.id,origen:origen});
+      }
+    });
+  });
+  var listaInv=[];
+  Object.keys(inv).forEach(function(k){listaInv.push(inv[k]);});
+
+  var listaPed=[];
+  pedidos.forEach(function(p){
+    (p.partidas||[]).forEach(function(pt,i){
+      if(partidaFaltaPrecio(pt)){
+        listaPed.push({pedidoId:p.id,numPedido:p.numPedido,prov:p.prov,idx:i,esp:pt.esp,kg:pt.kgReal||pt.kg,costo:pt.costoAjust||pt.costo||0});
+      }
+    });
+  });
+  return {inv:listaInv,ped:listaPed};
+}
+var _PRECIOS_INV=[];
+var _PRECIOS_PED=[];
+function rPrecios(){
+  if(ROL!=='admin')return '<div class="card"><div class="card-body" style="text-align:center;padding:30px;color:var(--text3)">Solo el administrador puede asignar precios.</div></div>';
+  var info=preciosPendientesInfo();
+  _PRECIOS_INV=info.inv;
+  _PRECIOS_PED=info.ped;
+  var total=_PRECIOS_INV.length+_PRECIOS_PED.length;
+  return '<div class="stat-grid" style="margin-bottom:18px">'+
+    '<div class="stat"><div class="stat-lbl">Productos en inventario sin precio</div><div class="stat-val c-warn">'+_PRECIOS_INV.length+'</div></div>'+
+    '<div class="stat"><div class="stat-lbl">Partidas de pedidos sin precio</div><div class="stat-val c-warn">'+_PRECIOS_PED.length+'</div></div>'+
+  '</div>'+
+  (total===0?'<div class="card"><div class="card-body" style="text-align:center;padding:40px;color:var(--text3)">🎉 No hay nada pendiente de precio.</div></div>':'')+
+  (_PRECIOS_INV.length>0?
+  '<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">📦 Inventario (Cámara / Bodega)</div></div>'+
+  '<div class="tw"><table><thead><tr><th>Producto</th><th>Cantidad disponible</th><th>Costo</th><th>Precio de venta</th><th></th></tr></thead><tbody>'+
+  _PRECIOS_INV.map(function(item,i){
+    return '<tr><td class="pr">'+item.esp+'</td>'+
+      '<td class="mn">'+item.kgTotal.toFixed(1)+'</td>'+
+      '<td class="mn">'+money(item.costoMax)+'</td>'+
+      '<td><input id="pp-inv-'+i+'" type="number" min="0" placeholder="$0" style="width:100px;padding:6px 8px;border:2px solid var(--border);border-radius:var(--r);font-size:14px"></td>'+
+      '<td><button class="btn btn-xs btn-p" onclick="guardarPrecioInv('+i+')">Guardar</button></td></tr>';
+  }).join('')+
+  '</tbody></table></div></div>':'')+
+  (_PRECIOS_PED.length>0?
+  '<div class="card"><div class="card-hdr"><div class="card-title">🧾 Pedidos a proveedores</div></div>'+
+  '<div class="tw"><table><thead><tr><th>Pedido</th><th>Proveedor</th><th>Producto</th><th>Cantidad</th><th>Costo</th><th>Precio de venta</th><th></th></tr></thead><tbody>'+
+  _PRECIOS_PED.map(function(item,i){
+    return '<tr><td class="mn" style="color:var(--accent);font-weight:700">'+(item.numPedido||'#'+item.pedidoId)+'</td>'+
+      '<td class="pr">'+item.prov+'</td>'+
+      '<td>'+item.esp+'</td>'+
+      '<td class="mn">'+item.kg+'</td>'+
+      '<td class="mn">'+money(item.costo)+'</td>'+
+      '<td><input id="pp-ped-'+i+'" type="number" min="0" placeholder="$0" style="width:100px;padding:6px 8px;border:2px solid var(--border);border-radius:var(--r);font-size:14px"></td>'+
+      '<td><button class="btn btn-xs btn-p" onclick="guardarPrecioPed('+i+')">Guardar</button></td></tr>';
+  }).join('')+
+  '</tbody></table></div></div>':'');
+}
+function guardarPrecioInv(i){
+  var item=_PRECIOS_INV[i];if(!item)return;
+  var v=parseFloat(g('pp-inv-'+i)?g('pp-inv-'+i).value:0)||0;
+  if(v<=0){alert('Ingresa un precio válido');return;}
+  item.lotes.forEach(function(l){
+    var arr=l.origen==='camara'?camara:bodega;
+    var lote=arr.find(function(x){return x.id===l.id;});
+    if(lote)lote.precio=v;
+  });
+  audit('Asignó precio de venta','Configuracion',item.esp+' · '+money(v)+' · '+item.lotes.length+' lote(s)');
+  persist();nav('precios');
+}
+function guardarPrecioPed(i){
+  var item=_PRECIOS_PED[i];if(!item)return;
+  var v=parseFloat(g('pp-ped-'+i)?g('pp-ped-'+i).value:0)||0;
+  if(v<=0){alert('Ingresa un precio válido');return;}
+  var p=pedidos.find(function(x){return x.id===item.pedidoId;});
+  if(!p||!p.partidas||!p.partidas[item.idx])return;
+  p.partidas[item.idx].precioVenta=v;
+  audit('Asignó precio de venta','Pedidos',(p.numPedido||'#'+p.id)+' · '+item.esp+' · '+money(v));
+  persist();nav('precios');
 }
 
 // ══════════════════════════════════════════════════════
@@ -4239,6 +4346,7 @@ function arrancar(){
       g('app').classList.add('visible');
       updateUserUI();
       if(ROL!=='admin'&&ROL!=='gerente')g('ni-config-wrap').style.display='none';
+      if(ROL==='admin')g('ni-precios-wrap').style.display='';
       nav('dashboard');
     }
   }
