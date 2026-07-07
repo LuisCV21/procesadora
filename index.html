@@ -3963,7 +3963,21 @@ async function gUsuario(){
   var h=await hashPass(p);
   USERS.push({id:uid(),user:u,pass:h,nombre:n,rol:r,avatar:n[0].toUpperCase(),color:cols[r]||'#388bfd'});
   audit('Creó usuario','Usuarios',n+' ('+u+') · '+r);
-  save('users',USERS);cm();nav('config');
+  // uid() avanza NEXT_ID en memoria — hay que guardarlo también, si no la próxima
+  // creación (en otra sesión/dispositivo) reparte el mismo id otra vez.
+  save('users',USERS);save('next_id',NEXT_ID);cm();nav('config');
+}
+// Auto-reparación: si por una carrera entre dispositivos dos usuarios quedaron con el
+// mismo id, USERS.find(id) siempre regresa al primero — así todas las acciones (eliminar,
+// cambiar contraseña) de cualquier usuario terminaban aplicándose al primer usuario duplicado.
+function repararIdsUsuariosDuplicados(){
+  var vistos={};
+  var cambio=false;
+  USERS.forEach(function(u){
+    if(vistos[u.id]){u.id=uid();cambio=true;}
+    vistos[u.id]=true;
+  });
+  if(cambio){save('users',USERS);save('next_id',NEXT_ID);}
 }
 
 function mCambiaPass(id){
@@ -4075,7 +4089,7 @@ function aplicarDatos(data){
   if(data.temp_logs)tempLogs=data.temp_logs;
   if(data.vales)vales=data.vales;
   if(data.auditLog)auditLog=mergeAuditPorId(auditLog,data.auditLog);
-  if(data.users)USERS=data.users;
+  if(data.users){USERS=data.users;repararIdsUsuariosDuplicados();}
   if(data.meta_patrimonio!==undefined&&data.meta_patrimonio!==null)metaPatrimonio=data.meta_patrimonio;
   if(data.gastos)gastos=data.gastos;
   if(data.saldo_inicial_caja)saldoInicialCaja=data.saldo_inicial_caja;
