@@ -1492,6 +1492,7 @@ function rPed(){
   (sinPrecio>0&&isAdmin?'<div class="alert al-w"><div class="al-dot"></div>Hay <strong>'+sinPrecio+' pedido(s)</strong> sin precio de venta definido. Da clic en el pedido para asignarlos.</div>':'')+
   '<div class="card"><div class="card-hdr" style="flex-wrap:wrap;gap:8px"><div class="card-title">Órdenes de compra a proveedores</div>'+
     selectorMes('pedidos')+
+    (isAdmin?'<button class="btn" onclick="mEditarPedido()">✏ Editar</button>':'')+
     (canEdit?'<button class="btn btn-p" onclick="mPedido()">+ Nuevo pedido</button>':'<span style="font-size:13px;color:var(--text3)">Solo lectura</span>')+
   '</div><div class="tw"><table><thead><tr><th>Folio</th><th>Proveedor</th><th>Productos</th><th>Total</th><th>Entrega</th><th>Cond.</th><th>Estado</th><th>Pago</th><th>Acciones</th></tr></thead><tbody>'+
   (pedidosFilt.length===0?'<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--text3)">Sin pedidos en este mes</td></tr>':
@@ -1499,9 +1500,6 @@ function rPed(){
     var partStr=(p.partidas&&p.partidas.length>0)?p.partidas.map(function(pt){return pt.esp;}).join(', '):'—';
     if(partStr.length>40)partStr=partStr.slice(0,40)+'…';
     var faltaPrecio=p.partidas&&p.partidas.some(function(pt){return !pt.precioVenta;});
-    var accionesExtraPed=
-      (isAdmin?'<button class="btn btn-xs btn-d" onclick="elimP('+p.id+')">Eliminar</button>':'')+
-      (isAdmin&&(p.est==='recibido'||p.pagado)?'<button class="btn btn-xs btn-d" onclick="mRevertirPedido('+p.id+')">Corregir</button>':'');
     return '<tr'+(faltaPrecio?' style="background:rgba(184,122,0,.04)"':'')+' style="cursor:pointer" onclick="verPedido('+p.id+')">'+
       '<td class="mn" style="font-weight:700;color:var(--accent)">'+(p.numPedido||'—')+'</td>'+
       '<td class="pr">'+p.prov+'</td>'+
@@ -1514,11 +1512,40 @@ function rPed(){
       '<td onclick="event.stopPropagation()"><div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center">'+
         (p.est==='pendiente'&&puedeRecibir()?'<button class="btn btn-xs btn-p" onclick="recibirPedido('+p.id+')">Recibir</button>':'')+
         (p.est==='recibido'&&!p.pagado&&canEdit?'<button class="btn btn-xs" style="border-color:var(--accent-glow);color:var(--accent)" onclick="pagarPedido('+p.id+')">Registrar pago</button>':'')+
-        (accionesExtraPed?accMenu('ped-'+p.id,accionesExtraPed):'')+
       '</div></td>'+
     '</tr>';
   }).join(''))+
   '</tbody></table></div></div>';
+}
+
+function mEditarPedido(){
+  var opts='<option value="">— Elegir pedido —</option>'+
+    pedidos.slice().reverse().map(function(p){
+      return '<option value="'+p.id+'">'+(p.numPedido||'#'+p.id)+' · '+p.prov+' · '+money(p.total||p.costo||0)+'</option>';
+    }).join('');
+  modal('<div class="modal" style="max-width:420px"><div class="modal-hdr"><div class="modal-title">Editar pedido</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div class="field"><label>Selecciona un pedido</label><select id="edp-sel" onchange="renderEdpInfo()">'+opts+'</select></div>'+
+      '<div id="edp-info" style="margin-top:14px"></div>'+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cerrar</button></div>'+
+  '</div>');
+}
+function renderEdpInfo(){
+  var box=g('edp-info');
+  var id=parseInt(g('edp-sel').value);
+  if(!id){box.innerHTML='';return;}
+  var p=pedidos.find(function(x){return x.id===id;});
+  if(!p)return;
+  var puedeCorregir=(p.est==='recibido'||p.pagado);
+  box.innerHTML='<div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;margin-bottom:12px">'+
+      '<div style="font-weight:700">'+(p.numPedido||'#'+p.id)+' — '+p.prov+'</div>'+
+      '<div style="color:var(--text3);font-size:13px;margin-top:2px">'+money(p.total||p.costo||0)+' · '+(p.condiciones||'—')+' · '+fmtFecha(p.fecha)+'</div>'+
+    '</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+      (puedeCorregir?'<button class="btn btn-d" onclick="cm();mRevertirPedido('+p.id+')">↩ Corregir</button>':'')+
+      '<button class="btn btn-d" onclick="cm();elimP('+p.id+')">Eliminar</button>'+
+    '</div>';
 }
 
 function verPedido(id){
