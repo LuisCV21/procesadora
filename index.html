@@ -1925,7 +1925,8 @@ function mEditarPedido(id){
       '<div class="fg2" style="display:grid;gap:10px;margin-bottom:14px">'+
         '<div class="field"><label>Proveedor</label><select id="d1">'+pv+'</select></div>'+
         '<div class="field"><label>Fecha entrega estimada</label><input id="d5" type="date" value="'+p.fecha+'"></div>'+
-        '<div class="field"><label>Condiciones</label><select id="d6"><option value="Crédito"'+(p.condiciones==='Crédito'?' selected':'')+'>Crédito</option><option value="Contado"'+(p.condiciones==='Contado'?' selected':'')+'>Contado</option></select></div>'+
+        '<div class="field"><label>Condiciones</label><select id="d6" onchange="toggleFormaPagoPed()"><option value="Crédito"'+(p.condiciones==='Crédito'?' selected':'')+'>Crédito</option><option value="Contado"'+(p.condiciones==='Contado'?' selected':'')+'>Contado</option></select></div>'+
+        '<div class="field" id="d7-wrap" style="display:'+(p.condiciones==='Contado'?'':'none')+'"><label>Forma de pago</label><select id="d7"><option value="efectivo"'+((p.formaPago||'efectivo')==='efectivo'?' selected':'')+'>Efectivo</option><option value="transferencia"'+(p.formaPago==='transferencia'?' selected':'')+'>Transferencia (no descuenta de la caja)</option></select></div>'+
       '</div>'+
       '<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">Partidas</div>'+
       '<div id="ped-parts">'+filas+'</div>'+
@@ -1938,6 +1939,7 @@ function mEditarPedido(id){
 function gEditarPedido(id){
   var p=pedidos.find(function(x){return x.id===id;});if(!p)return;
   var prov=g('d1').value,fecha=g('d5').value,cond=g('d6').value;
+  var formaPago=g('d7')?g('d7').value:'efectivo';
   if(!prov){alert('Selecciona un proveedor');return;}
   audit('Editó pedido','Pedidos',(p.numPedido||'#'+p.id)+' · '+p.prov+' → '+prov);
   var parts=[];
@@ -1950,7 +1952,7 @@ function gEditarPedido(id){
     if(esp&&kg>0)parts.push({esp:esp,kg:kg,costo:costo,destino:dest,unidad:prod?prod.u:'kg',lote:''});
   }
   if(parts.length===0){alert('Agrega al menos un producto');return;}
-  p.prov=prov;p.fecha=fecha;p.condiciones=cond;
+  p.prov=prov;p.fecha=fecha;p.condiciones=cond;p.formaPago=formaPago;
   p.partidas=parts;
   p.total=parts.reduce(function(a,pt){return a+pt.kg*pt.costo;},0);
   _pedParts=1;
@@ -2027,10 +2029,19 @@ function gRecibirPedido(id){
   audit('Recibió pedido','Pedidos',(p.numPedido||'#'+p.id)+' · '+p.prov+' · '+money(p.total||0));
   if(p.condiciones==='Contado'){
     p.pagado=true;p.montoPagado=p.total;
-    efectivoDeclarado=Math.max(0,efectivoDeclarado-p.total);
-    // Registrar en historial de movimientos
+    var horaAhora=new Date().toTimeString().slice(0,5);
     if(!p.abonos)p.abonos=[];
-    p.abonos.push({monto:p.total,forma:'efectivo',fecha:today(),hora:new Date().toTimeString().slice(0,5),nota:'Pago de contado al recibir'});
+    // Si se marcó como pagado por transferencia (ej. porque en realidad lo pagó
+    // otra sucursal/cuenta y no la caja de esta procesadora), no se descuenta del
+    // efectivo declarado — antes SIEMPRE se asumía efectivo y no había forma de
+    // marcarlo distinto, así que se descontaba caja aunque no se hubiera pagado así.
+    if(p.formaPago==='transferencia'){
+      movTransferencias.push({id:uid(),tipo:'cargo',concepto:'Pago a '+p.prov,monto:p.total,fecha:today(),hora:horaAhora,ref:(p.numPedido||'Pedido')+' · Contado al recibir'});
+      p.abonos.push({monto:p.total,forma:'transferencia',fecha:today(),hora:horaAhora,nota:'Pago de contado (transferencia) al recibir'});
+    } else {
+      efectivoDeclarado=Math.max(0,efectivoDeclarado-p.total);
+      p.abonos.push({monto:p.total,forma:'efectivo',fecha:today(),hora:horaAhora,nota:'Pago de contado al recibir'});
+    }
   }
   persist();cm();nav('pedidos');
 }
@@ -2303,7 +2314,8 @@ function mPedido(){
       '<div class="fg2" style="display:grid;gap:10px;margin-bottom:14px">'+
         '<div class="field"><label>Proveedor</label><select id="d1"><option value="">Seleccionar...</option>'+pv+'</select></div>'+
         '<div class="field"><label>Fecha entrega estimada</label><input id="d5" type="date"></div>'+
-        '<div class="field"><label>Condiciones</label><select id="d6"><option value="Crédito">Crédito</option><option value="Contado">Contado</option></select></div>'+
+        '<div class="field"><label>Condiciones</label><select id="d6" onchange="toggleFormaPagoPed()"><option value="Crédito">Crédito</option><option value="Contado">Contado</option></select></div>'+
+        '<div class="field" id="d7-wrap" style="display:none"><label>Forma de pago</label><select id="d7"><option value="efectivo">Efectivo</option><option value="transferencia">Transferencia (no descuenta de la caja)</option></select></div>'+
       '</div>'+
       '<div style="font-size:11px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Partidas del pedido</div>'+
       '<div id="ped-parts">'+buildPedPart(0,opciones)+'</div>'+
@@ -2345,9 +2357,18 @@ function addPedPart(){
   _pedParts++;
 }
 function remPedPart(i){var el=g('pp-row-'+i);if(el)el.remove();}
+// La forma de pago (efectivo/transferencia) solo importa para pedidos de
+// Contado — de Crédito se paga después, y ahí ya se elige la forma al
+// registrar el pago (pagarPedido).
+function toggleFormaPagoPed(){
+  var cond=g('d6')?g('d6').value:'';
+  var wrap=g('d7-wrap');
+  if(wrap)wrap.style.display=cond==='Contado'?'':'none';
+}
 
 function gPedido(){
   var prov=g('d1').value,fecha=g('d5').value,cond=g('d6').value;
+  var formaPago=g('d7')?g('d7').value:'efectivo';
   if(!prov){alert('Selecciona un proveedor');return;}
   var isAdmin=ROL==='admin';
   var parts=[];
@@ -2364,7 +2385,7 @@ function gPedido(){
   var total=parts.reduce(function(a,pt){return a+pt.kg*pt.costo;},0);
   var num=nextPedidoNum++;
   _pedParts=1;
-  pedidos.push({id:uid(),numPedido:numPedido(num),prov:prov,partidas:parts,fecha:fecha,condiciones:cond,est:'pendiente',total:total,pagado:false});
+  pedidos.push({id:uid(),numPedido:numPedido(num),prov:prov,partidas:parts,fecha:fecha,condiciones:cond,formaPago:formaPago,est:'pendiente',total:total,pagado:false});
   persist();cm();nav('pedidos');
 }
 
