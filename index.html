@@ -1155,7 +1155,6 @@ function rDash(){
 // ══════════════════════════════════════════════════════
 function rCam(){
   var isAdmin=ROL==='admin';
-  var canEdit=ROL==='admin'||ROL==='gerente';
   var q=(FILTRO_CAM_Q||'').toLowerCase();
   var totalKg=camara.reduce(function(a,i){return a+i.kg;},0);
   var pv=camara.filter(function(i){return i.est!=='ok'&&i.kg>0;}).length;
@@ -1220,13 +1219,6 @@ function rCam(){
       '<td class="mn" style="color:var(--info)">'+precioStr+'</td>'+
       '<td>'+pill(estGrupo)+'</td>'+
       (min?'<td class="mn" style="color:'+(bajMin?'var(--danger)':'var(--text3)')+'">'+min+' kg</td>':'<td style="color:var(--text3);font-size:12px">—</td>')+
-      (canEdit?'<td><div style="display:flex;gap:4px;align-items:center">'+
-        (isAdmin?accMenu(lotes.length===1?('cam-'+lotes[0].id):('camg-'+lotes[0].id),
-          lotes.length===1?
-            '<button class="btn btn-xs" onclick="mEditLote('+lotes[0].id+')">Editar</button><button class="btn btn-xs btn-d" onclick="bajaLote('+lotes[0].id+',false)">Baja</button>'
-            :'<button class="btn btn-xs btn-d" onclick="bajaLote(\''+esp.replace(/'/g,"\\'")+'\',true)">Dar de baja todo</button>'
-        ):'')+
-      '</div></td>':'')+
     '</tr>';
 
     var filasLote='';
@@ -1239,9 +1231,6 @@ function rCam(){
           '<td class="mn" style="color:var(--info)">'+money(l.precio||0)+'</td>'+
           '<td>'+pill(l.est)+'</td>'+
           '<td class="mn" style="color:var(--text3)">Cad: '+fmtFecha(l.cad)+'</td>'+
-          (canEdit?'<td><div style="display:flex;gap:4px;align-items:center">'+
-            (isAdmin?accMenu('cam-'+l.id,'<button class="btn btn-xs" onclick="mEditLote('+l.id+')">Editar</button><button class="btn btn-xs btn-d" onclick="bajaLote('+l.id+',false)">Baja</button>'):'')+
-          '</div></td>':'')+
         '</tr>';
       }).join('');
     }
@@ -1263,14 +1252,14 @@ function rCam(){
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
       '<input type="text" placeholder="🔍 Buscar producto o lote..." value="'+FILTRO_CAM_Q+'" oninput="setFCQ(this.value)" style="background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:7px 12px;border-radius:var(--r);font-size:14px;width:220px">'+
       '<div class="chips">'+['todos','ok','warn','danger'].map(function(f){return '<button class="chip'+(FILTRO_CAM===f?' active':'')+'" onclick="setFC(\''+f+'\')">'+(f==='todos'?'Todos':f==='ok'?'OK':f==='warn'?'Por vencer':'Vence hoy')+'</button>';}).join('')+'</div>'+
+      (isAdmin?'<button class="btn" onclick="mAccionesLote(\'camara\')">✏ Corregir / dar de baja</button>':'')+
     '</div>'+
   '</div><div class="tw"><table><thead><tr>'+
     thSort('esp','Producto')+
     thSort('kg','Total kg')+
     '<th>Costo/kg</th><th>Precio/kg</th><th>Estado</th><th>Mínimo</th>'+
-    (canEdit?'<th>Acciones</th>':'')+
   '</tr></thead><tbody>'+
-  (nombresOrdenados.length===0?'<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text3)">Sin resultados</td></tr>':filasGrupo)+
+  (nombresOrdenados.length===0?'<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text3)">Sin resultados</td></tr>':filasGrupo)+
   '</tbody></table></div></div>';
 }
 
@@ -1309,6 +1298,38 @@ function bajaLote(id,esGrupo){
       persist();nav('camara');
     });
   }
+}
+
+// Picker de "Corregir / dar de baja" para Cámara y Bodega — mismo patrón que
+// mAccionesPedido (Pedidos) y mEditarNota (Notas): un botón arriba en vez de
+// un menú de acciones por cada renglón de la tabla.
+function mAccionesLote(origen){
+  var arr=origen==='camara'?camara:bodega;
+  var opciones=arr.map(function(l){return {value:l.id,label:l.esp+' — Lote '+l.lote+' ('+l.kg.toFixed(1)+' '+(l.unidad||'kg')+')'};});
+  var titulo=origen==='camara'?'Corregir / dar de baja — Cámara':'Corregir / dar de baja — Bodega';
+  modal('<div class="modal" style="max-width:420px"><div class="modal-hdr"><div class="modal-title">'+titulo+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div class="field"><label>Busca un producto o lote</label>'+buscableHTML('acl-sel',opciones,'Buscar producto o lote...','','renderAccLoteInfo',origen)+'</div>'+
+      '<div id="acl-info" style="margin-top:14px"></div>'+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cerrar</button></div>'+
+  '</div>');
+}
+function renderAccLoteInfo(origen){
+  var box=g('acl-info');if(!box)return;
+  var id=parseInt(g('acl-sel')?g('acl-sel').value:0)||0;
+  if(!id){box.innerHTML='';return;}
+  var arr=origen==='camara'?camara:bodega;
+  var l=arr.find(function(x){return x.id===id;});
+  if(!l)return;
+  box.innerHTML='<div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;margin-bottom:12px">'+
+      '<div style="font-weight:700">'+l.esp+' — Lote '+l.lote+'</div>'+
+      '<div style="color:var(--text3);font-size:13px;margin-top:2px">'+l.kg.toFixed(1)+' '+(l.unidad||'kg')+' · Costo '+money(l.costo||0)+'</div>'+
+    '</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+      '<button class="btn" onclick="cm();'+(origen==='camara'?'mEditLote('+id+')':'mEditBodega('+id+')')+'">✏ Editar</button>'+
+      '<button class="btn btn-d" onclick="cm();'+(origen==='camara'?'bajaLote('+id+',false)':'bajaBodega('+id+')')+'">Dar de baja</button>'+
+    '</div>';
 }
 
 function mEditLote(id){
@@ -3027,9 +3048,6 @@ function rBodega(){
       '<td class="mn">'+costoStr+'</td>'+
       '<td class="mn" style="color:var(--info)">'+precioStr+'</td>'+
       (min?'<td class="mn" style="color:'+(bajMin?'var(--danger)':'var(--text3)')+'">'+min+'</td>':'<td style="color:var(--text3)">—</td>')+
-      (canEdit?'<td>'+(gr.lotes.length===1?'<div style="display:flex;gap:4px;align-items:center">'+
-        (isAdmin?accMenu('bod-'+gr.lotes[0].id,'<button class="btn btn-xs" onclick="mEditBodega('+gr.lotes[0].id+')">Editar</button><button class="btn btn-xs btn-d" onclick="bajaBodega('+gr.lotes[0].id+')">Baja</button>'):'')+
-      '</div>':'')+'</td>':'')+
     '</tr>';
 
     var filasLote='';
@@ -3041,9 +3059,6 @@ function rBodega(){
           '<td class="mn">'+money(l.costo||0)+'</td>'+
           '<td class="mn" style="color:var(--info)">'+money(l.precio||0)+'</td>'+
           '<td class="mn" style="color:var(--text3)">Ent: '+fmtFecha(l.ent)+'</td>'+
-          (canEdit?'<td><div style="display:flex;gap:4px;align-items:center">'+
-            (isAdmin?accMenu('bod-'+l.id,'<button class="btn btn-xs" onclick="mEditBodega('+l.id+')">Editar</button><button class="btn btn-xs btn-d" onclick="bajaBodega('+l.id+')">Baja</button>'):'')+
-          '</div></td>':'')+
         '</tr>';
       }).join('');
     }
@@ -3065,12 +3080,13 @@ function rBodega(){
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
       '<input type="text" placeholder="🔍 Buscar..." value="'+(window._BOD_Q||'')+'" oninput="setBodQ(this.value)" style="background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:7px 12px;border-radius:var(--r);font-size:14px;width:200px">'+
       (canEdit?'<button class="btn btn-p" onclick="mEntradaBodega()">+ Entrada a bodega</button>':'')+
+      (isAdmin?'<button class="btn" onclick="mAccionesLote(\'bodega\')">✏ Corregir / dar de baja</button>':'')+
     '</div>'+
   '</div><div class="tw"><table><thead><tr>'+
     thBod('esp','Producto')+thBod('kg','Total')+
-    '<th>Costo/u</th><th>Precio/u</th><th>Mínimo</th>'+(canEdit?'<th>Acciones</th>':'')+
+    '<th>Costo/u</th><th>Precio/u</th><th>Mínimo</th>'+
   '</tr></thead><tbody>'+
-  (nombresOrdenados.length===0?'<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text3)">Sin productos en bodega</td></tr>':filas)+
+  (nombresOrdenados.length===0?'<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text3)">Sin productos en bodega</td></tr>':filas)+
   '</tbody></table></div></div>';
 }
 
