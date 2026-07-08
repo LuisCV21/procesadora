@@ -1352,11 +1352,15 @@ function mEditLote(id){
 function saveEditLote(id){
   var l=camara.find(function(x){return x.id===id;});if(!l)return;
   var espAnt=l.esp,loteAnt=l.lote,unidadAnt=l.unidad||'kg';
+  var costoAntes=l.costo||0,precioAntes=l.precio||0;
   l.esp=g('el1').value; l.lote=g('el2').value.trim();
   l.kg=parseFloat(g('el3').value)||0; l.unidad=g('el8').value;
   l.costo=parseFloat(g('el4').value)||0;
   l.precio=parseFloat(g('el5').value)||0;
   l.ent=g('el6').value; l.cad=g('el7').value;
+  if(l.costo!==costoAntes||l.precio!==precioAntes){
+    audit('Actualizó precio de lote','Camara',l.esp+' · Lote '+l.lote+' · Costo '+money(costoAntes)+' → '+money(l.costo)+' · Precio '+money(precioAntes)+' → '+money(l.precio));
+  }
   ACC_OPEN['cam-'+id]=false;
   if(l.unidad!==unidadAnt)sincronizarUnidadProceso(espAnt,loteAnt,l.unidad);
   persist();cm();nav('camara');
@@ -3175,9 +3179,13 @@ function mEditBodega(id){
 function gEditBodega(id){
   var l=bodega.find(function(x){return x.id===id;});if(!l)return;
   var espAnt=l.esp,loteAnt=l.lote,unidadAnt=l.unidad||'kg';
+  var costoAntes=l.costo||0,precioAntes=l.precio||0;
   l.esp=g('be1').value;l.lote=g('be2').value.trim();
   l.kg=parseFloat(g('be3').value)||0;l.unidad=g('be4').value;
   l.costo=parseFloat(g('be5').value)||0;l.precio=parseFloat(g('be6').value)||0;
+  if(l.costo!==costoAntes||l.precio!==precioAntes){
+    audit('Actualizó precio de lote','Bodega',l.esp+' · Lote '+l.lote+' · Costo '+money(costoAntes)+' → '+money(l.costo)+' · Precio '+money(precioAntes)+' → '+money(l.precio));
+  }
   ACC_OPEN['bod-'+id]=false;
   if(l.unidad!==unidadAnt)sincronizarUnidadProceso(espAnt,loteAnt,l.unidad);
   persist();cm();nav('bodega');
