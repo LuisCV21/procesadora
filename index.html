@@ -109,7 +109,7 @@ td.mn{font-family:var(--mono);font-size:13px}
 .fg3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
 .fg4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px}
 /* ── BUSCADOR (autocompletar producto) ── */
-.busc-list{position:absolute;top:100%;left:0;right:0;z-index:80;background:var(--bg2);border:2px solid var(--border);border-top:none;border-radius:0 0 var(--r) var(--r);max-height:220px;overflow-y:auto;box-shadow:var(--shadow2)}
+.busc-list{position:fixed;z-index:1000;background:var(--bg2);border:2px solid var(--border);border-radius:var(--r);max-height:220px;overflow-y:auto;box-shadow:var(--shadow2)}
 .busc-item{padding:9px 12px;font-size:14px;color:var(--text);cursor:pointer;border-bottom:1px solid var(--border)}
 .busc-item:last-child{border-bottom:none}
 .busc-item:hover{background:var(--bg3)}
@@ -2245,6 +2245,14 @@ function buscFiltrar(id){
       var lbl=o.label.replace(/'/g,"\\'");
       return '<div class="busc-item" onmousedown="event.preventDefault()" onclick="buscElegir(\''+id+'\',\''+val+'\',\''+lbl+'\')">'+o.label+'</div>';
     }).join('');
+  // La lista es position:fixed (no absolute) para escapar del contenedor con
+  // scroll del modal (.modal-body{overflow-y:auto}) — si no, el modal "crecía"
+  // para hacerle espacio y la lista quedaba escondida fuera de lo visible.
+  // Por eso su posición se calcula aquí según dónde está el input en pantalla.
+  var rect=txt.getBoundingClientRect();
+  list.style.left=rect.left+'px';
+  list.style.top=(rect.bottom+2)+'px';
+  list.style.width=rect.width+'px';
   list.style.display='';
 }
 function buscElegir(id,value,label){
@@ -2256,6 +2264,12 @@ function buscElegir(id,value,label){
   if(cfg&&cfg.onchange&&typeof window[cfg.onchange]==='function')window[cfg.onchange](cfg.arg);
 }
 function buscCerrar(id){var list=g(id+'-l');if(list)list.style.display='none';}
+// Si el usuario hace scroll (ej. dentro del modal) mientras una lista está
+// abierta, su posición fija ya no coincidiría con el input — más simple
+// cerrarla que recalcularla en cada scroll.
+document.addEventListener('scroll',function(){
+  Object.keys(_BUSC).forEach(function(id){buscCerrar(id);});
+},true);
 
 function mPedido(){
   var opciones=PRODUCTOS.map(function(p){return {value:p.n,label:p.n};});
