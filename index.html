@@ -4132,6 +4132,7 @@ function saveEditItem(idx){
   var maxV=g('ai-max')?parseFloat(g('ai-max').value):null;
   if(minV&&minV>0)PRODUCTOS[idx].minStock=minV;else delete PRODUCTOS[idx].minStock;
   if(maxV&&maxV>0)PRODUCTOS[idx].maxStock=maxV;else delete PRODUCTOS[idx].maxStock;
+  PRODUCTOS.sort(function(a,b){return a.n.localeCompare(b.n,'es');});
   persist();cm();nav('config');
 }
 
@@ -4159,6 +4160,7 @@ function saveItem(tipo){
     var u=g('ai-u')?.value||'kg',c=readCatSelect();
     var soloProceso=!!(g('ai-sp')&&g('ai-sp').checked);
     PRODUCTOS.push({n:n,u:u,cat:c,soloProceso:soloProceso});
+    PRODUCTOS.sort(function(a,b){return a.n.localeCompare(b.n,'es');});
     audit('Agregó producto','Configuracion',n+' · '+u+' · cat:'+c+(soloProceso?' · solo proceso':''));
   } else if(tipo==='proveedor'){
     PROVEEDORES.push(n);
