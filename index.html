@@ -953,7 +953,7 @@ function preciosPendientesInfo(){
         if(!inv[l.esp])inv[l.esp]={esp:l.esp,kgTotal:0,costoMax:0,lotes:[]};
         inv[l.esp].kgTotal+=l.kg;
         inv[l.esp].costoMax=Math.max(inv[l.esp].costoMax,l.costo||0);
-        inv[l.esp].lotes.push({id:l.id,origen:origen});
+        inv[l.esp].lotes.push({id:l.id,origen:origen,lote:l.lote});
       }
     });
   });
@@ -989,9 +989,11 @@ function rPrecios(){
   (total===0?'<div class="card"><div class="card-body" style="text-align:center;padding:40px;color:var(--text3)">🎉 No hay nada pendiente de precio.</div></div>':'')+
   (_PRECIOS_INV.length>0?
   '<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">📦 Inventario (Cámara / Bodega)</div></div>'+
-  '<div class="tw"><table><thead><tr><th>Producto</th><th>Cantidad disponible</th><th>Costo</th><th>Precio de venta</th><th></th></tr></thead><tbody>'+
+  '<div class="tw"><table><thead><tr><th>Producto</th><th>Lote</th><th>Cantidad disponible</th><th>Costo</th><th>Precio de venta</th><th></th></tr></thead><tbody>'+
   _PRECIOS_INV.map(function(item,i){
+    var loteStr=item.lotes.map(function(l){return (l.origen==='camara'?'Cámara':'Bodega')+' '+(l.lote||'—');}).join(', ');
     return '<tr><td class="pr">'+item.esp+'</td>'+
+      '<td style="font-size:13px;color:var(--text3)">'+loteStr+'</td>'+
       '<td class="mn">'+item.kgTotal.toFixed(1)+'</td>'+
       '<td class="mn">'+money(item.costoMax)+'</td>'+
       '<td><input id="pp-inv-'+i+'" type="number" min="0" placeholder="$0" style="width:100px;padding:6px 8px;border:2px solid var(--border);border-radius:var(--r);font-size:14px"></td>'+
