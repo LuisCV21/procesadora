@@ -2287,8 +2287,11 @@ function buscElegir(id,value,label){
 function buscCerrar(id){var list=g(id+'-l');if(list)list.style.display='none';}
 // Si el usuario hace scroll (ej. dentro del modal) mientras una lista está
 // abierta, su posición fija ya no coincidiría con el input — más simple
-// cerrarla que recalcularla en cada scroll.
-document.addEventListener('scroll',function(){
+// cerrarla que recalcularla en cada scroll. Pero si el scroll ocurre DENTRO
+// de la propia lista de resultados (recorriéndola con el mouse o la barra
+// lateral), no hay que cerrarla — si no, nunca se puede navegar en ella.
+document.addEventListener('scroll',function(e){
+  if(e.target&&e.target.closest&&e.target.closest('.busc-list'))return;
   Object.keys(_BUSC).forEach(function(id){buscCerrar(id);});
 },true);
 
