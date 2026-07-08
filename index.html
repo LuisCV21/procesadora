@@ -1349,7 +1349,12 @@ function sincronizarUnidadProceso(esp,lote,unidad){
     });
     if(!tocado)return;
     p.mermaNA=p.salidas.some(function(s){return (s.unidad||'kg')!=='kg';});
-    if(!p.mermaNA){
+    if(p.mermaNA){
+      // Sin esto, un registro viejo (de antes del fix de unidades) se queda con la
+      // merma en kg mal calculada de cuando el código asumía kg para todo, y ese
+      // número sigue sumando en los totales de Procesos aunque diga "N/A".
+      p.merma=0;
+    } else {
       var kgSal=p.salidas.reduce(function(a,s){return a+s.kg;},0);
       p.merma=parseFloat((p.kgE-kgSal).toFixed(3));
     }
