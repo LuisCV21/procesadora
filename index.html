@@ -108,6 +108,12 @@ td.mn{font-family:var(--mono);font-size:13px}
 .fg2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .fg3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
 .fg4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px}
+/* ── BUSCADOR (autocompletar producto) ── */
+.busc-list{position:absolute;top:100%;left:0;right:0;z-index:80;background:var(--bg2);border:2px solid var(--border);border-top:none;border-radius:0 0 var(--r) var(--r);max-height:220px;overflow-y:auto;box-shadow:var(--shadow2)}
+.busc-item{padding:9px 12px;font-size:14px;color:var(--text);cursor:pointer;border-bottom:1px solid var(--border)}
+.busc-item:last-child{border-bottom:none}
+.busc-item:hover{background:var(--bg3)}
+.busc-empty{padding:10px 12px;font-size:13px;color:var(--text3)}
 /* ── ALERTS ── */
 .alert{display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:var(--r);font-size:14px;margin-bottom:10px;border:1px solid;font-weight:500}
 .al-w{background:var(--warn-dim);color:var(--warn);border-color:rgba(184,122,0,.3)}
@@ -1880,14 +1886,13 @@ function imprimirPedido(id){
 
 function mEditarPedido(id){
   var p=pedidos.find(function(x){return x.id===id;});if(!p||p.est!=='pendiente')return;
-  var po=PRODUCTOS.map(function(pr){return '<option data-u="'+pr.u+'">'+pr.n+'</option>';}).join('');
+  var opciones=PRODUCTOS.map(function(pr){return {value:pr.n,label:pr.n};});
   var pv=PROVEEDORES.map(function(pr){return '<option'+(pr===p.prov?' selected':'')+'>'+pr+'</option>';}).join('');
   // Resetear contador de partidas para edición
   _pedParts=p.partidas?p.partidas.length:1;
   var filas=( p.partidas||[{esp:p.esp||'',kg:p.kg||0,costo:p.costo||0,destino:'camara'}]).map(function(pt,i){
-    var poSel=PRODUCTOS.map(function(pr){return '<option data-u="'+pr.u+'"'+(pr.n===pt.esp?' selected':'')+'>'+pr.n+'</option>';}).join('');
     return '<div id="pp-row-'+i+'" style="display:grid;grid-template-columns:1fr 80px 90px 90px 28px;gap:6px;align-items:end;margin-bottom:8px">'+
-      '<div class="field"><label>Producto</label><select id="pps'+i+'" onchange="updPedUnit('+i+')"><option value="">Seleccionar...</option>'+poSel+'</select></div>'+
+      '<div class="field"><label>Producto</label>'+buscableHTML('pps'+i,opciones,'Buscar producto...',pt.esp,'updPedUnit',i)+'</div>'+
       '<div class="field"><label id="ppklbl'+i+'">Cantidad ('+( pt.unidad||'kg')+')</label><input id="ppk'+i+'" type="number" value="'+pt.kg+'" min="0"></div>'+
       '<div class="field"><label id="ppclbl'+i+'">Costo/'+(pt.unidad||'kg')+'</label><input id="ppc'+i+'" type="number" value="'+pt.costo+'" min="0"></div>'+
       '<div class="field"><label>Destino</label><select id="ppd'+i+'"><option value="camara"'+(pt.destino!=='bodega'?' selected':'')+'>Cámara</option><option value="bodega"'+(pt.destino==='bodega'?' selected':'')+'>Bodega</option></select></div>'+
@@ -2205,10 +2210,56 @@ function elimP(id){
   },{detalle:p?(p.numPedido||'#'+p.id)+' · '+p.prov+' · '+money(p.total||0):''});
 }
 
+// ══════════════════════════════════════════════════════
+//  BUSCADOR — input con autocompletado en vez de un <select> gigante,
+//  para encontrar un producto rápido al comprar (Pedidos) o vender (Notas).
+//  El input visible vive en "id-t"; el valor real se guarda en "id" (input
+//  oculto), así que el resto del código sigue leyendo g(id).value igual
+//  que si fuera un <select> de toda la vida.
+// ══════════════════════════════════════════════════════
+var _BUSC={};
+function buscableHTML(id,opciones,placeholder,valorInicial,onchangeFn,onchangeArg){
+  _BUSC[id]={opciones:opciones,onchange:onchangeFn||'',arg:onchangeArg};
+  var labelInicial='';
+  if(valorInicial!==undefined&&valorInicial!==null&&valorInicial!==''){
+    var m=opciones.find(function(o){return String(o.value)===String(valorInicial);});
+    if(m)labelInicial=m.label;
+  }
+  var esc=function(s){return String(s).replace(/"/g,'&quot;');};
+  return '<div style="position:relative">'+
+    '<input type="text" id="'+id+'-t" value="'+esc(labelInicial)+'" placeholder="'+esc(placeholder||'Buscar...')+'" autocomplete="off" '+
+      'oninput="buscFiltrar(\''+id+'\')" onfocus="buscFiltrar(\''+id+'\')" onblur="setTimeout(function(){buscCerrar(\''+id+'\')},180)">'+
+    '<input type="hidden" id="'+id+'" value="'+esc(valorInicial||'')+'">'+
+    '<div id="'+id+'-l" class="busc-list" style="display:none"></div>'+
+  '</div>';
+}
+function buscNorm(s){return (s||'').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');}
+function buscFiltrar(id){
+  var cfg=_BUSC[id];if(!cfg)return;
+  var txt=g(id+'-t'),list=g(id+'-l');if(!txt||!list)return;
+  var qn=buscNorm(txt.value.trim());
+  var match=cfg.opciones.filter(function(o){return !qn||buscNorm(o.label).indexOf(qn)>=0;}).slice(0,40);
+  list.innerHTML=match.length===0?'<div class="busc-empty">Sin resultados</div>':
+    match.map(function(o){
+      var val=String(o.value).replace(/'/g,"\\'").replace(/"/g,'&quot;');
+      var lbl=o.label.replace(/'/g,"\\'");
+      return '<div class="busc-item" onmousedown="event.preventDefault()" onclick="buscElegir(\''+id+'\',\''+val+'\',\''+lbl+'\')">'+o.label+'</div>';
+    }).join('');
+  list.style.display='';
+}
+function buscElegir(id,value,label){
+  var hid=g(id),txt=g(id+'-t'),list=g(id+'-l');
+  if(hid)hid.value=value;
+  if(txt)txt.value=label;
+  if(list)list.style.display='none';
+  var cfg=_BUSC[id];
+  if(cfg&&cfg.onchange&&typeof window[cfg.onchange]==='function')window[cfg.onchange](cfg.arg);
+}
+function buscCerrar(id){var list=g(id+'-l');if(list)list.style.display='none';}
+
 function mPedido(){
-  var po=PRODUCTOS.map(function(p){return '<option>'+p.n+'</option>';}).join('');
+  var opciones=PRODUCTOS.map(function(p){return {value:p.n,label:p.n};});
   var pv=PROVEEDORES.map(function(p){return '<option>'+p+'</option>';}).join('');
-  var partRow='<div id="ped-parts"></div>';
   modal('<div class="modal modal-wide"><div class="modal-hdr"><div class="modal-title">Nuevo pedido a proveedor</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
     '<div class="modal-body">'+
       '<div class="fg2" style="display:grid;gap:10px;margin-bottom:14px">'+
@@ -2217,7 +2268,7 @@ function mPedido(){
         '<div class="field"><label>Condiciones</label><select id="d6"><option value="Crédito">Crédito</option><option value="Contado">Contado</option></select></div>'+
       '</div>'+
       '<div style="font-size:11px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Partidas del pedido</div>'+
-      '<div id="ped-parts">'+buildPedPart(0,po)+'</div>'+
+      '<div id="ped-parts">'+buildPedPart(0,opciones)+'</div>'+
       '<button class="btn" style="margin-top:6px" onclick="addPedPart()">+ Agregar producto</button>'+
     '</div>'+
     '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gPedido()">Crear pedido</button></div>'+
@@ -2225,11 +2276,11 @@ function mPedido(){
 }
 
 var _pedParts=1;
-function buildPedPart(i,po){
-  if(!po)po=PRODUCTOS.map(function(p){return '<option data-u="'+p.u+'">'+p.n+'</option>';}).join('');
+function buildPedPart(i,opciones){
+  if(!opciones)opciones=PRODUCTOS.map(function(p){return {value:p.n,label:p.n};});
   var isAdmin=ROL==='admin';
   return '<div id="pp-row-'+i+'" style="display:grid;grid-template-columns:1fr 80px 90px'+(isAdmin?' 90px':'')+' 90px 28px;gap:6px;align-items:end;margin-bottom:8px">'+
-    '<div class="field"><label>Producto</label><select id="pps'+i+'" onchange="updPedUnit('+i+')" ><option value="">Seleccionar...</option>'+po+'</select></div>'+
+    '<div class="field"><label>Producto</label>'+buscableHTML('pps'+i,opciones,'Buscar producto...','','updPedUnit',i)+'</div>'+
     '<div class="field"><label id="ppklbl'+i+'">Cantidad</label><input id="ppk'+i+'" type="number" placeholder="0" min="0"></div>'+
     '<div class="field"><label id="ppclbl'+i+'">Costo/u</label><input id="ppc'+i+'" type="number" placeholder="0" min="0"></div>'+
     (isAdmin?'<div class="field"><label>Precio venta</label><input id="pppv'+i+'" type="number" placeholder="0" min="0" style="color:var(--info)"></div>':'')+
@@ -2238,22 +2289,20 @@ function buildPedPart(i,po){
   '</div>';
 }
 function updPedUnit(i){
-  var sel=g('pps'+i);if(!sel)return;
-  var opt=sel.options[sel.selectedIndex];
-  var u=opt?opt.getAttribute('data-u')||'kg':'kg';
-  var prod=PRODUCTOS.find(function(p){return p.n===opt.value;});
-  if(!prod)u='kg';else u=prod.u;
+  var esp=g('pps'+i)?g('pps'+i).value:'';
+  var prod=PRODUCTOS.find(function(p){return p.n===esp;});
+  var u=prod?prod.u:'kg';
   var lbl=g('ppklbl'+i);if(lbl)lbl.textContent='Cantidad ('+u+')';
   var clbl=g('ppclbl'+i);if(clbl)clbl.textContent='Costo/'+u;
   // Si bodega por defecto para no-kg
   if(u!=='kg'){var dest=g('ppd'+i);if(dest)dest.value='bodega';}
 }
 function addPedPart(){
-  var po=PRODUCTOS.map(function(p){return '<option data-u="'+p.u+'">'+p.n+'</option>';}).join('');
+  var opciones=PRODUCTOS.map(function(p){return {value:p.n,label:p.n};});
   var cont=g('ped-parts');
   if(!cont)return;
   var div=document.createElement('div');
-  div.innerHTML=buildPedPart(_pedParts,po);
+  div.innerHTML=buildPedPart(_pedParts,opciones);
   cont.appendChild(div.firstChild);
   _pedParts++;
 }
@@ -2743,15 +2792,14 @@ function rNuevaNota(){
       +l.esp+' — Lote '+l.lote+' ('+l.kg.toFixed(1)+' '+(l.unidad||'kg')+' · costo: '+money(l.costo||0)+'/'+(l.unidad||'kg')+' · '+o.origen+')</option>';
   }).join('');
   var tot=nuevaNota.partidas.reduce(function(a,p){return a+(parseFloat(p.importe)||0);},0);
+  var loteOpciones=lotesDisp.map(function(o){
+    var l=o.ref;
+    return {value:l.id,label:l.esp+' — Lote '+l.lote+' ('+l.kg.toFixed(1)+' '+(l.unidad||'kg')+' · costo: '+money(l.costo||0)+'/'+(l.unidad||'kg')+' · '+o.origen+')'};
+  });
   var filas=nuevaNota.partidas.map(function(p,i){
-    var selLote=buscarLoteVenta(p.loteId);
-    var poFila=lotesDisp.map(function(o){
-      var l=o.ref;
-      return '<option value="'+l.id+'"'+(p.loteId===l.id?' selected':'')+'>'+l.esp+' — Lote '+l.lote+' ('+l.kg.toFixed(1)+' '+(l.unidad||'kg')+' · costo: '+money(l.costo||0)+'/'+(l.unidad||'kg')+' · '+o.origen+')</option>';
-    }).join('');
     return '<div class="part-row" id="prow'+i+'">'+
       '<div class="field"><label>Cant.</label><input id="nc'+i+'" type="number" value="'+p.cant+'" min="0" placeholder="0" style="padding:8px 9px;font-size:15px" oninput="cimp('+i+')"></div>'+
-      '<div class="field" style="grid-column:span 1"><label>Producto / Lote</label><select id="ncon'+i+'" style="padding:8px 9px;font-size:14px" onchange="aun('+i+')"><option value="">— Seleccionar —</option>'+poFila+'</select></div>'+
+      '<div class="field" style="grid-column:span 1"><label>Producto / Lote</label>'+buscableHTML('ncon'+i,loteOpciones,'Buscar producto o lote...',p.loteId,'aun',i)+'</div>'+
       '<div class="field"><label>Precio $</label><input id="np'+i+'" type="number" value="'+p.precio+'" min="0" placeholder="0" style="padding:8px 9px;font-size:15px" oninput="cimp('+i+')"></div>'+
       '<div class="field"><label>Importe $</label><input id="ni'+i+'" type="number" value="'+p.importe+'" min="0" placeholder="0" style="padding:8px 9px;font-size:15px" oninput="updT()"></div>'+
       '<button class="btn btn-icon btn-d" style="margin-top:20px" onclick="elP('+i+')">✕</button>'+
