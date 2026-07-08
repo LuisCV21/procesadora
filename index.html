@@ -953,7 +953,7 @@ function preciosPendientesInfo(){
         if(!inv[l.esp])inv[l.esp]={esp:l.esp,kgTotal:0,costoMax:0,lotes:[]};
         inv[l.esp].kgTotal+=l.kg;
         inv[l.esp].costoMax=Math.max(inv[l.esp].costoMax,l.costo||0);
-        inv[l.esp].lotes.push({id:l.id,origen:origen,lote:l.lote});
+        inv[l.esp].lotes.push({id:l.id,origen:origen,lote:l.lote,kg:l.kg});
       }
     });
   });
@@ -991,7 +991,14 @@ function rPrecios(){
   '<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">📦 Inventario (Cámara / Bodega)</div></div>'+
   '<div class="tw"><table><thead><tr><th>Producto</th><th>Lote</th><th>Cantidad disponible</th><th>Costo</th><th>Precio de venta</th><th></th></tr></thead><tbody>'+
   _PRECIOS_INV.map(function(item,i){
-    var loteStr=item.lotes.map(function(l){return (l.origen==='camara'?'Cámara':'Bodega')+' '+(l.lote||'—');}).join(', ');
+    // Si el mismo lote aparece más de una vez (ej. dos partidas del mismo pedido a
+    // distinto costo), se agrega el kg de cada una — si no, parece un duplicado.
+    var loteConteo={};
+    item.lotes.forEach(function(l){loteConteo[l.lote]=(loteConteo[l.lote]||0)+1;});
+    var loteStr=item.lotes.map(function(l){
+      var base=(l.origen==='camara'?'Cámara':'Bodega')+' '+(l.lote||'—');
+      return loteConteo[l.lote]>1?base+' ('+(l.kg||0).toFixed(1)+' kg)':base;
+    }).join(', ');
     return '<tr><td class="pr">'+item.esp+'</td>'+
       '<td style="font-size:13px;color:var(--text3)">'+loteStr+'</td>'+
       '<td class="mn">'+item.kgTotal.toFixed(1)+'</td>'+
