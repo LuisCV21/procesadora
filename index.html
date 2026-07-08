@@ -1386,10 +1386,10 @@ function mEntrada(){
       'Esta entrada generará un registro de compra. Si el pago es de contado se descontará del efectivo en caja.'+
     '</div>'+
     '<div class="fg2" style="display:grid;gap:10px">'+
-      '<div class="field"><label>Especie / producto</label><select id="e1"><option value="">Seleccionar...</option>'+po+'</select></div>'+
+      '<div class="field"><label>Especie / producto</label><select id="e1" onchange="updEntradaUnidad()"><option value="">Seleccionar...</option>'+po+'</select></div>'+
       '<div class="field"><label>Proveedor</label><select id="e2"><option value="">Seleccionar...</option>'+pv+'</select></div>'+
-      '<div class="field"><label>Kg recibidos</label><input id="e3" type="number" placeholder="0" min="0"></div>'+
-      '<div class="field"><label>Costo por kg ($)</label><input id="e4" type="number" placeholder="0" min="0"></div>'+
+      '<div class="field"><label id="e3-lbl">Cantidad recibida</label><input id="e3" type="number" placeholder="0" min="0"></div>'+
+      '<div class="field"><label id="e4-lbl">Costo unitario ($)</label><input id="e4" type="number" placeholder="0" min="0"></div>'+
       '<div class="field"><label>Precio venta ($)</label><input id="e4b" type="number" placeholder="0" min="0"></div>'+
       '<div class="field"><label>Número de lote</label><input id="e4c" type="text" placeholder="Ej: 5762"></div>'+
       '<div class="field"><label>Condiciones de pago</label><select id="e7"><option value="Crédito">Crédito</option><option value="Contado">Contado</option></select></div>'+
@@ -1397,6 +1397,13 @@ function mEntrada(){
     '</div></div>'+
     '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gEntrada()">Guardar y registrar</button></div>'+
   '</div>');
+}
+function updEntradaUnidad(){
+  var esp=g('e1')?g('e1').value:'';
+  var prod=PRODUCTOS.find(function(p){return p.n===esp;});
+  var u=(prod&&prod.u)||'kg';
+  var l3=g('e3-lbl');if(l3)l3.textContent='Cantidad recibida ('+u+')';
+  var l4=g('e4-lbl');if(l4)l4.textContent='Costo por '+u+' ($)';
 }
 function gEntrada(){
   var e=g('e1').value,pr=g('e2').value,k=parseFloat(g('e3').value)||0,c=parseFloat(g('e4').value)||0;
@@ -1407,12 +1414,16 @@ function gEntrada(){
   }
   var id=uid();
   var lote=loteNum||numPedido(nextPedidoNum);
-  camara.push({id:id,esp:e,lote:lote,kg:k,ent:today(),cad:cad||fechaMas3Meses(),est:'ok',costo:c,precio:precio});
+  // La unidad se toma del catálogo (Configuración > Productos), no siempre kg
+  // — esta entrada no tenía campo de unidad y todo quedaba guardado como kg.
+  var prodCat=PRODUCTOS.find(function(x){return x.n===e;});
+  var unidadReal=(prodCat&&prodCat.u)||'kg';
+  camara.push({id:id,esp:e,lote:lote,kg:k,unidad:unidadReal,ent:today(),cad:cad||fechaMas3Meses(),est:'ok',costo:c,precio:precio});
   // Crear pedido/registro de compra
   nextPedidoNum++;
   var pedId=uid();
   var total=k*c;
-  pedidos.push({id:pedId,prov:pr,partidas:[{esp:e,kg:k,costo:c,unidad:'kg',destino:'camara',lote:lote}],
+  pedidos.push({id:pedId,prov:pr,partidas:[{esp:e,kg:k,costo:c,unidad:unidadReal,destino:'camara',lote:lote}],
     fecha:today(),condiciones:cond,est:'recibido',total:total,
     pagado:cond==='Contado',montoPagado:cond==='Contado'?total:0,
     numPedido:numPedido(nextPedidoNum-1)});
@@ -1927,12 +1938,14 @@ function recibirPedido(id){
   var parts=p.partidas||[{esp:p.esp,kg:p.kg,costo:p.costo,destino:'camara'}];
 
   var rows=parts.map(function(pt,i){
+    var prodCat=PRODUCTOS.find(function(x){return x.n===pt.esp;});
+    var uReal=(prodCat&&prodCat.u)||pt.unidad||'kg';
     return '<div style="border:1px solid var(--border);border-radius:var(--r);padding:14px;margin-bottom:10px;background:var(--bg3)">'+
       '<div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:10px">'+pt.esp+'</div>'+
       '<div class="fg2" style="display:grid;gap:10px">'+
-        '<div class="field"><label>Kg pedidos</label><input type="number" value="'+pt.kg+'" disabled style="background:var(--bg4);color:var(--text3)"></div>'+
-        '<div class="field"><label>Kg reales recibidos</label><input id="rkr'+i+'" type="number" value="'+pt.kg+'" min="0" oninput="recalcCosto('+i+','+parseFloat(pt.kg||0)+','+parseFloat(pt.costo||0)+')"></div>'+
-        '<div class="field"><label>Costo/kg ajustado</label><input id="rca'+i+'" type="number" value="'+parseFloat(pt.costo||0).toFixed(2)+'" min="0" style="color:var(--info);font-weight:600"></div>'+
+        '<div class="field"><label>'+uReal+' pedidos</label><input type="number" value="'+pt.kg+'" disabled style="background:var(--bg4);color:var(--text3)"></div>'+
+        '<div class="field"><label>'+uReal+' reales recibidos</label><input id="rkr'+i+'" type="number" value="'+pt.kg+'" min="0" oninput="recalcCosto('+i+','+parseFloat(pt.kg||0)+','+parseFloat(pt.costo||0)+')"></div>'+
+        '<div class="field"><label>Costo/'+uReal+' ajustado</label><input id="rca'+i+'" type="number" value="'+parseFloat(pt.costo||0).toFixed(2)+'" min="0" style="color:var(--info);font-weight:600"></div>'+
       '</div>'+
     '</div>';
   }).join('');
@@ -1968,10 +1981,15 @@ function gRecibirPedido(id){
     // El precio de venta ya no se pide aquí — si se asignó antes desde Precios
     // pendientes (pt.precioVenta) se conserva; si no, queda en 0 hasta que el
     // admin lo asigne desde Precios pendientes o Cámara/Bodega > Editar lote.
-    var item={id:newId,esp:pt.esp,lote:loteAuto,kg:kgReal,
+    // La unidad se toma del catálogo actual (Configuración > Productos) — este
+    // objeto no incluía "unidad", así que TODO lo recibido caía a kg por default
+    // sin importar cómo estuviera configurado el producto.
+    var prodCat=PRODUCTOS.find(function(x){return x.n===pt.esp;});
+    var unidadReal=(prodCat&&prodCat.u)||pt.unidad||'kg';
+    var item={id:newId,esp:pt.esp,lote:loteAuto,kg:kgReal,unidad:unidadReal,
       ent:today(),cad:fechaMas3Meses(),est:'ok',
       costo:costoAjust,precio:pt.precioVenta||0};
-    pt.kgReal=kgReal;pt.costoAjust=costoAjust;pt.lote=loteAuto;
+    pt.kgReal=kgReal;pt.costoAjust=costoAjust;pt.lote=loteAuto;pt.unidad=unidadReal;
     if(dest==='bodega'){bodega.push(item);}else{camara.push(item);}
   });
   // Recalcular total con kilos reales
@@ -3010,7 +3028,7 @@ function mEntradaBodega(){
   var pv=PROVEEDORES.map(function(p){return '<option>'+p+'</option>';}).join('');
   modal('<div class="modal"><div class="modal-hdr"><div class="modal-title">Entrada a bodega</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
     '<div class="modal-body"><div class="fg2" style="display:grid;gap:10px">'+
-      '<div class="field"><label>Producto</label><select id="b1"><option value="">Seleccionar...</option>'+po+'</select></div>'+
+      '<div class="field"><label>Producto</label><select id="b1" onchange="updEntradaBodegaUnidad()"><option value="">Seleccionar...</option>'+po+'</select></div>'+
       '<div class="field"><label>Proveedor</label><select id="b2"><option value="">Seleccionar...</option>'+pv+'</select></div>'+
       '<div class="field"><label>Cantidad</label><input id="b3" type="number" placeholder="0" min="0"></div>'+
       '<div class="field"><label>Unidad</label><select id="b4"><option value="kg">kg</option><option value="pz">pz</option><option value="lt">lt</option><option value="u">u</option></select></div>'+
@@ -3021,6 +3039,11 @@ function mEntradaBodega(){
     '</div></div>'+
     '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gEntradaBodega()">Guardar</button></div>'+
   '</div>');
+}
+function updEntradaBodegaUnidad(){
+  var esp=g('b1')?g('b1').value:'';
+  var prod=PRODUCTOS.find(function(p){return p.n===esp;});
+  if(prod&&g('b4'))g('b4').value=prod.u;
 }
 function gEntradaBodega(){
   var e=g('b1').value,pr=g('b2').value,k=parseFloat(g('b3').value)||0;
@@ -4123,14 +4146,33 @@ function saveEditItem(idx){
   var u=g('ai-u')?g('ai-u').value:'kg';
   var c=readCatSelect();
   if(!n){alert('Escribe un nombre');return;}
+  var nombreAnterior=PRODUCTOS[idx].n;
   PRODUCTOS[idx].n=n;PRODUCTOS[idx].u=u;PRODUCTOS[idx].cat=c;
   PRODUCTOS[idx].soloProceso=!!(g('ai-sp')&&g('ai-sp').checked);
   var minV=g('ai-min')?parseFloat(g('ai-min').value):null;
   var maxV=g('ai-max')?parseFloat(g('ai-max').value):null;
   if(minV&&minV>0)PRODUCTOS[idx].minStock=minV;else delete PRODUCTOS[idx].minStock;
   if(maxV&&maxV>0)PRODUCTOS[idx].maxStock=maxV;else delete PRODUCTOS[idx].maxStock;
+  if(n!==nombreAnterior)renombrarProductoEnTodo(nombreAnterior,n);
   PRODUCTOS.sort(function(a,b){return a.n.localeCompare(b.n,'es');});
   persist();cm();nav('config');
+}
+// Si se renombra un producto, el nombre viejo queda huérfano en todo lo que lo
+// referencia por nombre (Cámara, Bodega, Pedidos, Procesos) — esos registros ya
+// no encontrarían el producto en el catálogo (ej. perderían la unidad correcta
+// al recalcularse) porque el nombre dejó de coincidir. Se actualiza en cascada.
+function renombrarProductoEnTodo(anterior,nuevo){
+  camara.forEach(function(l){if(l.esp===anterior)l.esp=nuevo;});
+  bodega.forEach(function(l){if(l.esp===anterior)l.esp=nuevo;});
+  pedidos.forEach(function(p){
+    if(p.esp===anterior)p.esp=nuevo;
+    (p.partidas||[]).forEach(function(pt){if(pt.esp===anterior)pt.esp=nuevo;});
+  });
+  procesos.forEach(function(pr){
+    if(pr.esp===anterior)pr.esp=nuevo;
+    (pr.salidas||[]).forEach(function(s){if(s.esp===anterior)s.esp=nuevo;});
+  });
+  audit('Renombró producto en todos los registros','Configuracion',anterior+' → '+nuevo);
 }
 
 function mAddItem(tipo){
