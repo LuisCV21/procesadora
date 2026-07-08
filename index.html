@@ -1696,9 +1696,8 @@ function rPed(){
     '<div class="stat"><div class="stat-lbl">Pedidos totales</div><div class="stat-val">'+pedidos.length+'</div></div>'+
     '<div class="stat"><div class="stat-lbl">Por recibir</div><div class="stat-val c-warn">'+porRecibir+'</div><div class="stat-sub">Pendientes de llegar</div></div>'+
     '<div class="stat"><div class="stat-lbl">Por pagar</div><div class="stat-val c-danger">'+money(porPagar)+'</div><div class="stat-sub">Recibidos sin liquidar</div></div>'+
-    (sinPrecio>0?'<div class="stat" style="border-color:rgba(184,122,0,.4)"><div class="stat-lbl" style="color:var(--warn)">⚠ Sin precio de venta</div><div class="stat-val c-warn">'+sinPrecio+'</div><div class="stat-sub">Requieren autorización</div></div>':'')+
+    (sinPrecio>0?'<div class="stat" style="border-color:rgba(184,122,0,.4);'+(isAdmin?'cursor:pointer':'')+'"'+(isAdmin?' onclick="nav(\'precios\')"':'')+'><div class="stat-lbl" style="color:var(--warn)">⚠ Sin precio de venta</div><div class="stat-val c-warn">'+sinPrecio+'</div><div class="stat-sub">'+(isAdmin?'Clic para asignar en Precios pendientes':'Requieren autorización')+'</div></div>':'')+
   '</div>'+
-  (sinPrecio>0&&isAdmin?'<div class="alert al-w"><div class="al-dot"></div>Hay <strong>'+sinPrecio+' pedido(s)</strong> sin precio de venta definido. Da clic en el pedido para asignarlos.</div>':'')+
   '<div class="card"><div class="card-hdr" style="flex-wrap:wrap;gap:8px"><div class="card-title">Órdenes de compra a proveedores</div>'+
     selectorMes('pedidos')+
     (isAdmin?'<button class="btn" onclick="mAccionesPedido()">🗑 Eliminar / Corregir</button>':'')+
@@ -1709,7 +1708,7 @@ function rPed(){
     var partStr=(p.partidas&&p.partidas.length>0)?p.partidas.map(function(pt){return pt.esp;}).join(', '):'—';
     if(partStr.length>40)partStr=partStr.slice(0,40)+'…';
     var faltaPrecio=p.partidas&&p.partidas.some(partidaFaltaPrecio);
-    return '<tr'+(faltaPrecio?' style="background:rgba(184,122,0,.04)"':'')+' style="cursor:pointer" onclick="verPedido('+p.id+')">'+
+    return '<tr style="cursor:pointer" onclick="verPedido('+p.id+')">'+
       '<td class="mn" style="font-weight:700;color:var(--accent)">'+(p.numPedido||'—')+'</td>'+
       '<td class="pr">'+p.prov+'</td>'+
       '<td style="font-size:13px;color:var(--text2)">'+partStr+(faltaPrecio?' <span style="color:var(--warn);font-size:11px">⚠ sin precio</span>':'')+'</td>'+
