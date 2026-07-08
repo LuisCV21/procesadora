@@ -1092,7 +1092,7 @@ function rDash(){
       sinPrecio.slice(0,4).map(function(p){
         return '<div class="alert al-w" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div class="al-dot"></div>'+
           '<span><strong>'+(p.numPedido||'Pedido')+'</strong> — '+p.prov+' · '+money(p.total||0)+'</span></div>'+
-          '<button class="btn btn-xs" onclick="verPedido('+p.id+')">Asignar precio</button></div>';
+          '<button class="btn btn-xs" onclick="nav(\'precios\')">Asignar precio</button></div>';
       }).join('')+'</div>';
   }
   var secNotas='';
