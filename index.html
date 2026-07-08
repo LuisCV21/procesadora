@@ -1326,13 +1326,34 @@ function mEditLote(id){
 }
 function saveEditLote(id){
   var l=camara.find(function(x){return x.id===id;});if(!l)return;
+  var espAnt=l.esp,loteAnt=l.lote,unidadAnt=l.unidad||'kg';
   l.esp=g('el1').value; l.lote=g('el2').value.trim();
   l.kg=parseFloat(g('el3').value)||0; l.unidad=g('el8').value;
   l.costo=parseFloat(g('el4').value)||0;
   l.precio=parseFloat(g('el5').value)||0;
   l.ent=g('el6').value; l.cad=g('el7').value;
   ACC_OPEN['cam-'+id]=false;
+  if(l.unidad!==unidadAnt)sincronizarUnidadProceso(espAnt,loteAnt,l.unidad);
   persist();cm();nav('camara');
+}
+// Cuando se corrige la unidad de un lote a mano (ej. de kg a pz porque el proceso
+// que lo generó se registró antes del fix que respeta la unidad real del producto),
+// refleja el mismo cambio en el registro de Procesos del que salió ese lote, para
+// que Cámara y el historial de Procesos no queden desincronizados.
+function sincronizarUnidadProceso(esp,lote,unidad){
+  procesos.forEach(function(p){
+    if(p.lote!==lote||!p.salidas)return;
+    var tocado=false;
+    p.salidas.forEach(function(s){
+      if(s.esp===esp&&s.unidad!==unidad){s.unidad=unidad;tocado=true;}
+    });
+    if(!tocado)return;
+    p.mermaNA=p.salidas.some(function(s){return (s.unidad||'kg')!=='kg';});
+    if(!p.mermaNA){
+      var kgSal=p.salidas.reduce(function(a,s){return a+s.kg;},0);
+      p.merma=parseFloat((p.kgE-kgSal).toFixed(3));
+    }
+  });
 }
 function moverLote(id,destino){
   var origenArr=destino==='bodega'?camara:bodega;
@@ -1528,7 +1549,8 @@ function buildProcSalida(i,po){
   var isAdmin=ROL==='admin';
   return '<div id="ps-row-'+i+'" style="display:grid;grid-template-columns:1fr 90px 130px 28px;gap:8px;align-items:end;margin-bottom:8px">'+
     '<div class="field"><label>Producto de salida</label><select id="psp'+i+'" onchange="updProcSalidaUnidad('+i+')"><option value="">Seleccionar...</option>'+po+'</select></div>'+
-    '<div class="field"><label id="pskl'+i+'">Cantidad</label><input id="psk'+i+'" type="number" placeholder="0" min="0" oninput="calcProcMerma()"></div>'+
+    '<div class="field"><label id="pskl'+i+'">Cantidad</label><input id="psk'+i+'" type="number" placeholder="0" min="0" oninput="calcProcMerma()">'+
+      '<div id="psub'+i+'" style="font-size:11px;font-weight:700;color:var(--info);margin-top:3px;display:none"></div></div>'+
     (isAdmin?'<div class="field"><label>Precio venta</label><input id="pspv'+i+'" type="number" placeholder="Opcional" min="0"></div>':
       '<div class="field"><label>Precio venta</label><input type="text" value="Lo asigna el admin" disabled style="background:var(--bg4);color:var(--text3);font-size:12px"></div>')+
     (i>0?'<button class="btn btn-icon btn-d" style="margin-top:18px" onclick="remProcSalida('+i+')">✕</button>':'<div></div>')+
@@ -1553,6 +1575,13 @@ function updProcSalidaUnidad(i){
   var u=procSalidaUnidad(i)||'kg';
   var lbl=g('pskl'+i);
   if(lbl)lbl.textContent='Cantidad ('+u+')';
+  // Aviso visible (no solo la etiqueta, fácil de pasar por alto) cuando la salida
+  // no se guarda en kg — para que quede claro qué se está registrando antes de guardar.
+  var badge=g('psub'+i);
+  if(badge){
+    if(u!=='kg'){badge.style.display='';badge.textContent='⚠ Se guarda en '+u+', no en kg';}
+    else badge.style.display='none';
+  }
   calcProcMerma();
 }
 function calcProcMerma(){
@@ -3018,10 +3047,12 @@ function mEditBodega(id){
 }
 function gEditBodega(id){
   var l=bodega.find(function(x){return x.id===id;});if(!l)return;
+  var espAnt=l.esp,loteAnt=l.lote,unidadAnt=l.unidad||'kg';
   l.esp=g('be1').value;l.lote=g('be2').value.trim();
   l.kg=parseFloat(g('be3').value)||0;l.unidad=g('be4').value;
   l.costo=parseFloat(g('be5').value)||0;l.precio=parseFloat(g('be6').value)||0;
   ACC_OPEN['bod-'+id]=false;
+  if(l.unidad!==unidadAnt)sincronizarUnidadProceso(espAnt,loteAnt,l.unidad);
   persist();cm();nav('bodega');
 }
 function bajaBodega(id){
@@ -3904,7 +3935,7 @@ function rConfig(){
       '<div>'+CLIENTES.map(function(c,i){return '<div class="list-item"><span>'+c+'</span><button class="btn btn-xs btn-d" onclick="delItem(\'cliente\','+i+')">Eliminar</button></div>';}).join('')+'</div>';
   } else if(CFG_TAB==='proc_tipos'){
     body='<div class="card-hdr"><div class="card-title">Tipos de proceso de planta</div><button class="btn btn-p" onclick="mAddItem(\'proc_tipo\')">+ Agregar tipo</button></div>'+
-      '<div>'+PROC_TIPOS.map(function(t,i){return '<div class="list-item"><span>'+t+'</span><button class="btn btn-xs btn-d" onclick="delItem(\'proc_tipo\','+i+')">Eliminar</button></div>';}).join('')+'</div>';
+      '<div>'+PROC_TIPOS.map(function(t,i){return '<div class="list-item"><span>'+t+'</span><div style="display:flex;gap:6px"><button class="btn btn-xs" onclick="mEditProcTipo('+i+')">Editar</button><button class="btn btn-xs btn-d" onclick="delItem(\'proc_tipo\','+i+')">Eliminar</button></div></div>';}).join('')+'</div>';
   } else if(CFG_TAB==='usuarios'){
     body='<div class="card-hdr"><div class="card-title">Usuarios del sistema</div><button class="btn btn-p" onclick="mAddUsuario()">+ Agregar usuario</button></div>'+
       '<div class="tw"><table><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Acciones</th></tr></thead><tbody>'+
@@ -4137,6 +4168,22 @@ function saveItem(tipo){
   persist();cm();nav('config');
 }
 
+function mEditProcTipo(idx){
+  var t=PROC_TIPOS[idx];
+  if(t===undefined)return;
+  modal('<div class="modal" style="max-width:380px"><div class="modal-hdr"><div class="modal-title">Editar tipo de proceso</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body"><div class="field"><label>Nombre</label><input id="ai-n" type="text" value="'+t+'"></div></div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="saveEditProcTipo('+idx+')">Guardar cambios</button></div>'+
+  '</div>');
+}
+function saveEditProcTipo(idx){
+  var n=(g('ai-n')?g('ai-n').value:'').trim();
+  if(!n){alert('Escribe un nombre');return;}
+  var anterior=PROC_TIPOS[idx];
+  PROC_TIPOS[idx]=n;
+  audit('Editó tipo de proceso','Configuracion',anterior+' → '+n);
+  persist();cm();nav('config');
+}
 function delItem(tipo,idx){
   var nom=tipo==='producto'?(PRODUCTOS[idx]?PRODUCTOS[idx].n:''):tipo==='proveedor'?(PROVEEDORES[idx]||''):tipo==='cliente'?(CLIENTES[idx]||''):'';
   confirmarEliminar('¿Eliminar este registro del catálogo?',function(){
