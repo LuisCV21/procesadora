@@ -945,20 +945,19 @@ function updateBadges(){
 //  producto por producto en Cámara/Bodega/Pedidos.
 // ══════════════════════════════════════════════════════
 function preciosPendientesInfo(){
-  var inv={};
+  // Un renglón por lote (no agrupado por producto): dos lotes del mismo producto
+  // pueden tener costo distinto (ej. dos partidas del mismo pedido a distinto
+  // precio de compra), y por lo tanto necesitan poder llevar precio de venta
+  // distinto — agruparlos forzaba el mismo precio para todos.
+  var listaInv=[];
   [['camara',camara],['bodega',bodega]].forEach(function(par){
     var origen=par[0],arr=par[1];
     arr.forEach(function(l){
       if(l.kg>0&&!l.precio&&!esSoloProceso(l.esp)){
-        if(!inv[l.esp])inv[l.esp]={esp:l.esp,kgTotal:0,costoMax:0,lotes:[]};
-        inv[l.esp].kgTotal+=l.kg;
-        inv[l.esp].costoMax=Math.max(inv[l.esp].costoMax,l.costo||0);
-        inv[l.esp].lotes.push({id:l.id,origen:origen,lote:l.lote,kg:l.kg});
+        listaInv.push({id:l.id,origen:origen,esp:l.esp,lote:l.lote,kg:l.kg,costo:l.costo||0});
       }
     });
   });
-  var listaInv=[];
-  Object.keys(inv).forEach(function(k){listaInv.push(inv[k]);});
 
   // Solo pedidos SIN recibir: en cuanto se reciben, el producto ya vive en
   // Cámara/Bodega con su propio precio — mostrarlo aquí también duplicaría
@@ -983,7 +982,7 @@ function rPrecios(){
   _PRECIOS_PED=info.ped;
   var total=_PRECIOS_INV.length+_PRECIOS_PED.length;
   return '<div class="stat-grid" style="margin-bottom:18px">'+
-    '<div class="stat"><div class="stat-lbl">Productos en inventario sin precio</div><div class="stat-val c-warn">'+_PRECIOS_INV.length+'</div></div>'+
+    '<div class="stat"><div class="stat-lbl">Lotes en inventario sin precio</div><div class="stat-val c-warn">'+_PRECIOS_INV.length+'</div></div>'+
     '<div class="stat"><div class="stat-lbl">Partidas de pedidos sin precio</div><div class="stat-val c-warn">'+_PRECIOS_PED.length+'</div></div>'+
   '</div>'+
   (total===0?'<div class="card"><div class="card-body" style="text-align:center;padding:40px;color:var(--text3)">🎉 No hay nada pendiente de precio.</div></div>':'')+
@@ -991,18 +990,10 @@ function rPrecios(){
   '<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">📦 Inventario (Cámara / Bodega)</div></div>'+
   '<div class="tw"><table><thead><tr><th>Producto</th><th>Lote</th><th>Cantidad disponible</th><th>Costo</th><th>Precio de venta</th><th></th></tr></thead><tbody>'+
   _PRECIOS_INV.map(function(item,i){
-    // Si el mismo lote aparece más de una vez (ej. dos partidas del mismo pedido a
-    // distinto costo), se agrega el kg de cada una — si no, parece un duplicado.
-    var loteConteo={};
-    item.lotes.forEach(function(l){loteConteo[l.lote]=(loteConteo[l.lote]||0)+1;});
-    var loteStr=item.lotes.map(function(l){
-      var base=(l.origen==='camara'?'Cámara':'Bodega')+' '+(l.lote||'—');
-      return loteConteo[l.lote]>1?base+' ('+(l.kg||0).toFixed(1)+' kg)':base;
-    }).join(', ');
     return '<tr><td class="pr">'+item.esp+'</td>'+
-      '<td style="font-size:13px;color:var(--text3)">'+loteStr+'</td>'+
-      '<td class="mn">'+item.kgTotal.toFixed(1)+'</td>'+
-      '<td class="mn">'+money(item.costoMax)+'</td>'+
+      '<td style="font-size:13px;color:var(--text3)">'+(item.origen==='camara'?'Cámara':'Bodega')+' '+(item.lote||'—')+'</td>'+
+      '<td class="mn">'+item.kg.toFixed(1)+'</td>'+
+      '<td class="mn">'+money(item.costo)+'</td>'+
       '<td><input id="pp-inv-'+i+'" type="number" min="0" placeholder="$0" style="width:100px;padding:6px 8px;border:2px solid var(--border);border-radius:var(--r);font-size:14px"></td>'+
       '<td><button class="btn btn-xs btn-p" onclick="guardarPrecioInv('+i+')">Guardar</button></td></tr>';
   }).join('')+
@@ -1025,12 +1016,10 @@ function guardarPrecioInv(i){
   var item=_PRECIOS_INV[i];if(!item)return;
   var v=parseFloat(g('pp-inv-'+i)?g('pp-inv-'+i).value:0)||0;
   if(v<=0){alert('Ingresa un precio válido');return;}
-  item.lotes.forEach(function(l){
-    var arr=l.origen==='camara'?camara:bodega;
-    var lote=arr.find(function(x){return x.id===l.id;});
-    if(lote)lote.precio=v;
-  });
-  audit('Asignó precio de venta','Configuracion',item.esp+' · '+money(v)+' · '+item.lotes.length+' lote(s)');
+  var arr=item.origen==='camara'?camara:bodega;
+  var lote=arr.find(function(x){return x.id===item.id;});
+  if(lote)lote.precio=v;
+  audit('Asignó precio de venta','Configuracion',item.esp+' · '+money(v)+' · Lote '+item.lote);
   persist();nav('precios');
 }
 function guardarPrecioPed(i){
