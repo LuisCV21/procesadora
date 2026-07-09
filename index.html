@@ -1632,8 +1632,7 @@ function buildProcSalida(i,po){
   var isAdmin=ROL==='admin';
   return '<div id="ps-row-'+i+'" style="display:grid;grid-template-columns:1fr 90px 90px 110px 130px 28px;gap:8px;align-items:end;margin-bottom:8px">'+
     '<div class="field"><label>Producto de salida</label><select id="psp'+i+'" onchange="updProcSalidaUnidad('+i+')"><option value="">Seleccionar...</option>'+po+'</select></div>'+
-    '<div class="field"><label id="pskl'+i+'">Cantidad</label><input id="psk'+i+'" type="number" placeholder="0" min="0" oninput="calcProcMerma()">'+
-      '<div id="psub'+i+'" style="font-size:11px;font-weight:700;color:var(--info);margin-top:3px;display:none"></div></div>'+
+    '<div class="field"><label id="pskl'+i+'">Peso</label><input id="psk'+i+'" type="number" placeholder="0" min="0" oninput="calcProcMerma()"></div>'+
     '<div class="field" id="pspzw'+i+'" style="display:none"><label>Piezas</label><input id="pspz'+i+'" type="number" placeholder="0" min="0" oninput="calcProcMerma()">'+
       '<div id="pspzprom'+i+'" style="font-size:11px;color:var(--text3);margin-top:3px"></div></div>'+
     '<div class="field" id="pspgw'+i+'"><label id="pspgl'+i+'">Peso x pieza (g)</label><input id="pspg'+i+'" type="number" placeholder="N/A" min="0" disabled oninput="calcProcMerma()"></div>'+
@@ -1753,14 +1752,7 @@ function procSalidaUnidad(i){
 function updProcSalidaUnidad(i){
   var u=procSalidaUnidad(i)||'kg';
   var lbl=g('pskl'+i);
-  if(lbl)lbl.textContent='Cantidad ('+u+')';
-  // Aviso visible (no solo la etiqueta, fácil de pasar por alto) cuando la salida
-  // no se guarda en kg — para que quede claro qué se está registrando antes de guardar.
-  var badge=g('psub'+i);
-  if(badge){
-    if(u!=='kg'){badge.style.display='';badge.textContent='⚠ Se guarda en '+u+', no en kg';}
-    else badge.style.display='none';
-  }
+  if(lbl)lbl.textContent=(u==='kg'?'Peso':'Cantidad')+' ('+u+')';
   // El peso x pieza es lo que permite convertir piezas a kg equivalentes y así
   // calcular la merma real (ej. 123 filetes de 230g vs los kg que entraron).
   var pesoInput=g('pspg'+i);
