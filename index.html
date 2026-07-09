@@ -631,11 +631,17 @@ var PRODS_DEF=[
   {id:78,n:'Cabeza para caldo',u:'kg',cat:'robalo'},
   {id:79,n:'Calamar entero',u:'kg',cat:'calamar'},{id:80,n:'Filete de pollo ch.',u:'kg',cat:'pollo'},
   {id:82,n:'Tinta de pulpo',u:'kg',cat:'pulpo'},
+  // — flujo de limpieza/clasificación de Sargo (recepción → limpio → tallas) —
+  {id:83,n:'Sargo S/Ordenar',u:'kg',cat:'pescado',soloProceso:true},
+  {id:84,n:'Sargo Limpio',u:'kg',cat:'pescado',soloProceso:true},
 ];
 
 var PROVS_DEF=['Pescadería Hernández','Mariscos del Golfo S.A.','Exportadores Veracruz','Mariscos Tuxpan'];
 var CLIENTES_DEF=['Mar Bravo — Centro','El Barco — Bulevard','Marisquería La Punta','El Delfín — Col. Petrolera','Puebla','Petromex','Florida','Sra. Angelia'];
-var PROC_TIPOS_DEF=['Corte en posta','Fileteado','Empaque al vacío','Descabezado','Desvenado'];
+var PROC_TIPOS_DEF=['Corte en posta','Fileteado','Empaque al vacío','Descabezado','Desvenado','Limpieza de pescado','Clasificación por talla'];
+// Merma esperada al limpiar pescado (desvenado/destripado) — arriba de esto se
+// avisa a los admins en el dashboard para que revisen si algo salió mal.
+var UMBRAL_MERMA_LIMPIEZA=15;
 
 var PRODUCTOS=load('productos',PRODS_DEF);
 // Categorías cuyo producto normalmente se guarda en bodega (seco/abarrotes/bebidas), no en cámara.
@@ -1061,6 +1067,12 @@ function rDash(){
   var sinPrecio=isAdmin?pedidos.filter(function(p){
     return p.partidas&&p.partidas.some(partidaFaltaPrecio);
   }):[];
+  // Procesos de limpieza de pescado cuya merma superó el umbral esperado (~15%)
+  // y que nadie ha revisado todavía — puede ser normal (pescado más chico de lo
+  // usual) o señal de que algo se está perdiendo/mal pesando.
+  var mermasAltas=isAdmin?procesos.filter(function(p){
+    return p.tipo==='Limpieza de pescado'&&!p.revisadoMerma&&p.kgE>0&&(p.merma/p.kgE*100)>UMBRAL_MERMA_LIMPIEZA;
+  }):[];
   var ultTemp=tempLogs.length>0?tempLogs[tempLogs.length-1]:null;
   var eventos=[];
   notas.slice(-5).reverse().forEach(function(n){
@@ -1097,6 +1109,16 @@ function rDash(){
         return '<div class="alert al-w" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div class="al-dot"></div>'+
           '<span><strong>'+(p.numPedido||'Pedido')+'</strong> — '+p.prov+' · '+money(p.total||0)+'</span></div>'+
           '<button class="btn btn-xs" onclick="nav(\'precios\')">Asignar precio</button></div>';
+      }).join('')+'</div>';
+  }
+  if(mermasAltas.length>0){
+    secAlertas+='<div style="margin-bottom:14px">'+
+      '<div style="font-size:14px;font-weight:700;color:var(--danger);margin-bottom:8px">🐟 Merma de limpieza arriba de '+UMBRAL_MERMA_LIMPIEZA+'% — revisar</div>'+
+      mermasAltas.map(function(p){
+        var pct=(p.merma/p.kgE*100).toFixed(1);
+        return '<div class="alert al-d" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div class="al-dot"></div>'+
+          '<span><strong>'+p.esp+'</strong> — Lote '+p.lote+' · '+fmtFecha(p.fecha)+' · merma '+pct+'% ('+p.merma.toFixed(2)+' kg de '+p.kgE+' kg) · '+p.op+'</span></div>'+
+          '<button class="btn btn-xs" onclick="revisarMermaAlta('+p.id+')">Marcar revisado</button></div>';
       }).join('')+'</div>';
   }
   var secNotas='';
@@ -1211,7 +1233,7 @@ function rCam(){
     var filaP='<tr style="background:'+(bajMin?'rgba(192,57,43,.04)':'')+'">'+
       '<td class="pr" style="cursor:pointer" onclick="toggleCamExp(\''+esp.replace(/'/g,"\\'")+'\')" >'+
         (lotes.length>1?'<span style="color:var(--accent);font-weight:700;margin-right:6px">'+(expanded?'▼':'▶')+'</span>':'')+
-        esp+(lotes.length===1?'<span style="color:var(--text3);font-size:12px;font-weight:normal;margin-left:8px">· Lote '+lotes[0].lote+'</span>':'')+
+        esp+(lotes.length===1?'<span style="color:var(--text3);font-size:12px;font-weight:normal;margin-left:8px">· Lote '+lotes[0].lote+(lotes[0].pesoProm?' · ~'+Math.round(lotes[0].pesoProm*1000)+'g/pieza':'')+'</span>':'')+
         (bajMin?'<span style="color:var(--danger);font-size:11px;margin-left:8px">⚠ Stock bajo</span>':'')+
       '</td>'+
       '<td class="mn" style="font-weight:700;color:var(--accent)">'+g.totalKg.toFixed(1)+' '+g.unidad+'</td>'+
@@ -1225,7 +1247,7 @@ function rCam(){
     if(expanded&&lotes.length>1){
       filasLote=lotes.map(function(l){
         return '<tr style="background:var(--bg3)">'+
-          '<td style="padding-left:32px;font-size:13px;color:var(--text3)">Lote <strong>'+l.lote+'</strong></td>'+
+          '<td style="padding-left:32px;font-size:13px;color:var(--text3)">Lote <strong>'+l.lote+'</strong>'+(l.pesoProm?' · ~'+Math.round(l.pesoProm*1000)+'g/pieza':'')+'</td>'+
           '<td class="mn">'+l.kg.toFixed(1)+' '+(l.unidad||'kg')+'</td>'+
           '<td class="mn">'+money(l.costo||0)+'</td>'+
           '<td class="mn" style="color:var(--info)">'+money(l.precio||0)+'</td>'+
@@ -1530,7 +1552,7 @@ function rProc(){
   '</tr></thead><tbody>'+
   (procesos.length===0?'<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text3)">Sin registros</td></tr>':
   procesos.slice().reverse().map(function(p){
-    var salidasStr=p.salidas&&p.salidas.length>0?p.salidas.map(function(s){return s.kg.toFixed(1)+' '+(s.unidad||'kg')+' '+s.esp+(s.pesoUnitG?' ('+s.pesoUnitG+'g c/u)':'');}).join(', '):p.kgS+' kg (salida)';
+    var salidasStr=p.salidas&&p.salidas.length>0?p.salidas.map(function(s){return s.kg.toFixed(1)+' '+(s.unidad||'kg')+' '+s.esp+(s.pesoUnitG?' ('+s.pesoUnitG+'g c/u)':'')+(s.piezas?' — '+s.piezas+' pz, ~'+Math.round((s.pesoProm||0)*1000)+'g/pieza':'');}).join(', '):p.kgS+' kg (salida)';
     return '<tr><td class="mn">'+fmtFecha(p.fecha)+'</td><td class="pr">'+p.tipo+'</td>'+
       '<td style="font-size:14px">'+p.esp+'<div style="font-size:12px;color:var(--text3)">Lote '+p.lote+'</div></td>'+
       '<td class="mn">'+p.kgE+' kg</td>'+
@@ -1563,7 +1585,7 @@ function mProceso(){
     '<div class="modal-body">'+
       (lotesDisp.length===0?'<div style="padding:10px 14px;background:var(--warn-dim);border:1px solid rgba(184,122,0,.3);border-radius:var(--r);font-size:13px;color:var(--warn);margin-bottom:14px">No hay lotes disponibles de productos marcados "siempre se va a procesar". Actívalo en Configuración → Productos → Editar (ej. Bistec de res).</div>':'')+
       '<div class="fg2" style="display:grid;gap:12px;margin-bottom:16px">'+
-        '<div class="field"><label>Tipo de proceso</label><select id="p1"><option value="">Seleccionar...</option>'+to+'</select></div>'+
+        '<div class="field"><label>Tipo de proceso</label><select id="p1" onchange="onProcTipoChange()"><option value="">Seleccionar...</option>'+to+'</select></div>'+
         '<div class="field"><label>Lote de entrada (producto original)</label><select id="p2" onchange="calcProcMerma()"><option value="">Seleccionar lote...</option>'+lo+'</select></div>'+
         '<div class="field"><label>Kg que entran al proceso</label><input id="p3" type="number" placeholder="0" min="0" oninput="calcProcMerma()"></div>'+
         '<div class="field"><label>Operador</label><input id="p5" type="text" placeholder="Nombre"></div>'+
@@ -1572,7 +1594,7 @@ function mProceso(){
       '</div>'+
       '<div style="border-top:1px solid var(--border);padding-top:14px">'+
         '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">Productos que salen del proceso</div>'+
-        '<div style="font-size:13px;color:var(--text3);margin-bottom:12px">Define los productos resultantes. La merma se calcula automáticamente (entrada − suma de salidas).</div>'+
+        '<div id="proc-salidas-hint" style="font-size:13px;color:var(--text3);margin-bottom:12px">Define los productos resultantes. La merma se calcula automáticamente (entrada − suma de salidas).</div>'+
         (ROL!=='admin'?'<div style="padding:8px 14px;background:var(--warn-dim);border:1px solid rgba(184,122,0,.3);border-radius:var(--r);margin-bottom:12px;font-size:13px;color:var(--warn)">El precio de venta solo puede asignarlo el administrador. Registra el proceso ahora y el admin le pone el precio después en Cámara.</div>':'')+
         '<div id="proc-salidas">'+
           buildProcSalida(0,po)+
@@ -1591,10 +1613,12 @@ var _procSalidas=1;
 function buildProcSalida(i,po){
   if(!po)po=PRODUCTOS.map(function(p){return '<option value="'+p.n+'" data-u="'+p.u+'">'+p.n+'</option>';}).join('');
   var isAdmin=ROL==='admin';
-  return '<div id="ps-row-'+i+'" style="display:grid;grid-template-columns:1fr 90px 110px 130px 28px;gap:8px;align-items:end;margin-bottom:8px">'+
+  return '<div id="ps-row-'+i+'" style="display:grid;grid-template-columns:1fr 90px 90px 110px 130px 28px;gap:8px;align-items:end;margin-bottom:8px">'+
     '<div class="field"><label>Producto de salida</label><select id="psp'+i+'" onchange="updProcSalidaUnidad('+i+')"><option value="">Seleccionar...</option>'+po+'</select></div>'+
     '<div class="field"><label id="pskl'+i+'">Cantidad</label><input id="psk'+i+'" type="number" placeholder="0" min="0" oninput="calcProcMerma()">'+
       '<div id="psub'+i+'" style="font-size:11px;font-weight:700;color:var(--info);margin-top:3px;display:none"></div></div>'+
+    '<div class="field" id="pspzw'+i+'" style="display:none"><label>Piezas</label><input id="pspz'+i+'" type="number" placeholder="0" min="0" oninput="calcProcMerma()">'+
+      '<div id="pspzprom'+i+'" style="font-size:11px;color:var(--text3);margin-top:3px"></div></div>'+
     '<div class="field"><label id="pspgl'+i+'">Peso x pieza (g)</label><input id="pspg'+i+'" type="number" placeholder="N/A" min="0" disabled oninput="calcProcMerma()"></div>'+
     (isAdmin?'<div class="field"><label>Precio venta</label><input id="pspv'+i+'" type="number" placeholder="Opcional" min="0"></div>':
       '<div class="field"><label>Precio venta</label><input type="text" value="Lo asigna el admin" disabled style="background:var(--bg4);color:var(--text3);font-size:12px"></div>')+
@@ -1608,8 +1632,23 @@ function addProcSalida(){
   div.innerHTML=buildProcSalida(_procSalidas,po);
   cont.appendChild(div.firstChild);
   _procSalidas++;
+  onProcTipoChange();
 }
 function remProcSalida(i){var el=g('ps-row-'+i);if(el)el.remove();calcProcMerma();}
+// El conteo de piezas (chico/mediano/grande) solo aplica a "Clasificación por
+// talla" — en el resto de procesos el campo se oculta para no confundir.
+function onProcTipoChange(){
+  var esTalla=g('p1')&&g('p1').value==='Clasificación por talla';
+  for(var i=0;i<_procSalidas;i++){
+    var w=g('pspzw'+i);
+    if(w)w.style.display=esTalla?'':'none';
+  }
+  var hint=g('proc-salidas-hint');
+  if(hint)hint.textContent=esTalla?
+    'Registra cada talla (chico/mediano/grande) con su kg pesado y cuántas piezas salieron — la suma de kg debe dar el total de entrada. Con eso se calcula el peso promedio por pieza de cada talla.':
+    'Define los productos resultantes. La merma se calcula automáticamente (entrada − suma de salidas).';
+  calcProcMerma();
+}
 function procSalidaUnidad(i){
   var sel=g('psp'+i);
   if(!sel||!sel.value)return null;
@@ -1650,6 +1689,13 @@ function calcProcMerma(){
       kgSalEquiv+=cant*pesoG/1000;
     } else {
       kgSalEquiv+=cant;
+      // Piezas es solo informativo (peso promedio por pieza) — no participa en
+      // el cálculo de la merma, que sigue siendo entrada − suma de kg de salida.
+      var promEl=g('pspzprom'+i);
+      if(promEl){
+        var piezas=parseFloat(g('pspz'+i)?g('pspz'+i).value:0)||0;
+        promEl.textContent=(piezas>0&&cant>0)?('≈ '+Math.round(cant/piezas*1000)+' g/pieza'):'';
+      }
     }
   }
   var merma=kgE-kgSalEquiv;
@@ -1694,7 +1740,11 @@ function gProceso(){
     } else {
       kgEquiv=kg;
     }
-    salidas.push({esp:esp,kg:kg,precio:precio,unidad:unidadSal,pesoUnitG:pesoUnitG,kgEquiv:parseFloat(kgEquiv.toFixed(3))});
+    // Piezas (solo en "Clasificación por talla"): conteo informativo para sacar
+    // el peso promedio por pieza de cada talla — no afecta el cálculo de merma.
+    var piezas=(t==='Clasificación por talla'&&unidadSal==='kg')?(parseFloat(g('pspz'+i)?g('pspz'+i).value:0)||0):0;
+    var pesoProm=piezas>0?parseFloat((kg/piezas).toFixed(3)):null;
+    salidas.push({esp:esp,kg:kg,precio:precio,unidad:unidadSal,pesoUnitG:pesoUnitG,kgEquiv:parseFloat(kgEquiv.toFixed(3)),piezas:piezas||undefined,pesoProm:pesoProm||undefined});
     kgEquivTotal+=kgEquiv;
   }
   if(salidas.length===0){alert('Agrega al menos un producto de salida');return;}
@@ -1717,12 +1767,18 @@ function gProceso(){
     // Buscar si ya existe un lote de ese producto con el mismo lote
     var existing=camara.find(function(x){return x.esp===s.esp&&x.lote===loteOrig.lote;});
     if(existing){
+      // Si ya traía peso promedio (de una captura anterior del mismo lote), se
+      // pondera por kg en vez de sobrescribirlo, para no perder esa referencia.
+      if(s.pesoProm){
+        var kgAnt=existing.kg;
+        existing.pesoProm=existing.pesoProm?((existing.pesoProm*kgAnt+s.pesoProm*s.kg)/(kgAnt+s.kg)):s.pesoProm;
+      }
       existing.kg=parseFloat((existing.kg+s.kg).toFixed(3));
       if(!existing.precio&&s.precio)existing.precio=s.precio;
       if(!existing.unidad&&s.unidad)existing.unidad=s.unidad;
     } else {
       camara.push({id:uid(),esp:s.esp,lote:loteOrig.lote,kg:s.kg,unidad:s.unidad,
-        ent:f,cad:loteOrig.cad,est:'ok',costo:costoPorUnidadSalida,precio:s.precio});
+        ent:f,cad:loteOrig.cad,est:'ok',costo:costoPorUnidadSalida,precio:s.precio,pesoProm:s.pesoProm});
     }
   });
 
@@ -1733,6 +1789,13 @@ function gProceso(){
   persist();cm();nav('procesos');
 }
 
+function revisarMermaAlta(id){
+  var p=procesos.find(function(x){return x.id===id;});
+  if(!p)return;
+  p.revisadoMerma=true;
+  audit('Revisó alerta de merma alta','Procesos',p.esp+' · Lote '+p.lote+' · '+p.merma.toFixed(2)+' kg');
+  persist();nav('dashboard');
+}
 function elimProc(id){
   var p=procesos.find(function(x){return x.id===id;});
   if(!p)return;
