@@ -1569,7 +1569,7 @@ function rProc(){
   '</tr></thead><tbody>'+
   (procesos.length===0?'<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text3)">Sin registros</td></tr>':
   procesos.slice().reverse().map(function(p){
-    var salidasStr=p.salidas&&p.salidas.length>0?p.salidas.map(function(s){return s.kg.toFixed(1)+' '+(s.unidad||'kg')+' '+s.esp+(s.pesoUnitG?' ('+s.pesoUnitG+'g c/u)':'')+(s.piezas?' — '+s.piezas+' pz, ~'+Math.round((s.pesoProm||0)*1000)+'g/pieza':'');}).join(', '):p.kgS+' kg (salida)';
+    var salidasStr=p.salidas&&p.salidas.length>0?p.salidas.map(function(s){return s.kg.toFixed(1)+' '+(s.unidad||'kg')+' '+s.esp+(s.pesoUnitG?' ('+s.pesoUnitG+'g c/u)':'');}).join(', '):p.kgS+' kg (salida)';
     return '<tr><td class="mn">'+fmtFecha(p.fecha)+'</td><td class="pr">'+p.tipo+'</td>'+
       '<td style="font-size:14px">'+p.esp+'<div style="font-size:12px;color:var(--text3)">Lote '+p.lote+'</div></td>'+
       '<td class="mn">'+p.kgE+' kg</td>'+
@@ -1632,9 +1632,8 @@ function buildProcSalida(i,po){
   var isAdmin=ROL==='admin';
   return '<div id="ps-row-'+i+'" style="display:grid;grid-template-columns:1fr 90px 90px 110px 130px 28px;gap:8px;align-items:end;margin-bottom:8px">'+
     '<div class="field"><label>Producto de salida</label><select id="psp'+i+'" onchange="updProcSalidaUnidad('+i+')"><option value="">Seleccionar...</option>'+po+'</select></div>'+
-    '<div class="field"><label id="pskl'+i+'">Peso</label><input id="psk'+i+'" type="number" placeholder="0" min="0" oninput="calcProcMerma()"></div>'+
-    '<div class="field" id="pspzw'+i+'" style="display:none"><label>Piezas</label><input id="pspz'+i+'" type="number" placeholder="0" min="0" oninput="calcProcMerma()">'+
-      '<div id="pspzprom'+i+'" style="font-size:11px;color:var(--text3);margin-top:3px"></div></div>'+
+    '<div class="field"><label id="pskl'+i+'">Peso</label><input id="psk'+i+'" type="number" placeholder="0" min="0" oninput="calcPesoPorPieza('+i+')"></div>'+
+    '<div class="field" id="psptw'+i+'" style="display:none"><label>Peso total (kg)</label><input id="pspt'+i+'" type="number" placeholder="0" min="0" oninput="calcPesoPorPieza('+i+')"></div>'+
     '<div class="field" id="pspgw'+i+'"><label id="pspgl'+i+'">Peso x pieza (g)</label><input id="pspg'+i+'" type="number" placeholder="N/A" min="0" disabled oninput="calcProcMerma()"></div>'+
     (isAdmin?'<div class="field"><label>Precio venta</label><input id="pspv'+i+'" type="number" placeholder="Opcional" min="0"></div>':
       '<div class="field"><label>Precio venta</label><input type="text" value="Lo asigna el admin" disabled style="background:var(--bg4);color:var(--text3);font-size:12px"></div>')+
@@ -1719,25 +1718,14 @@ function refreshSalidaOptions(){
   var btnAdd=g('btn-add-salida');
   if(btnAdd)btnAdd.style.display=(tipo==='Limpieza de pescado')?'none':'';
 }
-// El conteo de piezas (chico/mediano/grande) solo aplica a "Clasificación por
-// talla" — en el resto de procesos el campo se oculta para no confundir.
 function onProcTipoChange(){
   refreshLoteEntradaOptions();
   refreshSalidaOptions();
   var tipo=g('p1')?g('p1').value:'';
   var esTalla=tipo==='Clasificación por talla';
-  for(var i=0;i<_procSalidas;i++){
-    var w=g('pspzw'+i);
-    if(w)w.style.display=esTalla?'':'none';
-    // "Peso x pieza" es de un mecanismo aparte (productos que se venden por
-    // pieza, ej. milanesas) y en clasificación por talla siempre queda
-    // deshabilitado — se oculta para no confundirlo con el campo de Piezas.
-    var wg=g('pspgw'+i);
-    if(wg)wg.style.display=esTalla?'none':'';
-  }
   var hint=g('proc-salidas-hint');
   if(hint)hint.textContent=esTalla?
-    'Registra cada talla (chico/mediano/grande) con su kg pesado y cuántas piezas salieron — la suma de kg debe dar el total de entrada. Con eso se calcula el peso promedio por pieza de cada talla.':
+    'Registra cada talla (chico/mediano/grande): cuántas piezas salieron y cuánto pesaron juntas en la báscula — el peso por pieza se calcula solo. La suma de los pesos debe dar el total de entrada.':
     tipo==='Limpieza de pescado'?
     'La salida es siempre el producto limpio correspondiente — se selecciona sola al elegir el lote de entrada.':
     'Define los productos resultantes. La merma se calcula automáticamente (entrada − suma de salidas).';
@@ -1751,14 +1739,32 @@ function procSalidaUnidad(i){
 }
 function updProcSalidaUnidad(i){
   var u=procSalidaUnidad(i)||'kg';
+  var esPieza=u!=='kg';
   var lbl=g('pskl'+i);
   if(lbl)lbl.textContent=(u==='kg'?'Peso':'Cantidad')+' ('+u+')';
   // El peso x pieza es lo que permite convertir piezas a kg equivalentes y así
   // calcular la merma real (ej. 123 filetes de 230g vs los kg que entraron).
   var pesoInput=g('pspg'+i);
   if(pesoInput){
-    if(u!=='kg'){pesoInput.disabled=false;pesoInput.placeholder='ej. 230';}
+    if(esPieza){pesoInput.disabled=false;pesoInput.placeholder='ej. 230';}
     else {pesoInput.disabled=true;pesoInput.placeholder='N/A';pesoInput.value='';}
+  }
+  var pesoGw=g('pspgw'+i);
+  if(pesoGw)pesoGw.style.display=esPieza?'':'none';
+  // "Peso total (kg)" es lo que Janet realmente lee de la báscula (ej. 12
+  // piezas que juntas pesaron 3.635 kg) — a partir de eso se calcula solo el
+  // peso x pieza, en vez de pedirle que haga la división a mano.
+  var totw=g('psptw'+i);
+  if(totw)totw.style.display=esPieza?'':'none';
+  if(!esPieza){var totInp=g('pspt'+i);if(totInp)totInp.value='';}
+  calcProcMerma();
+}
+function calcPesoPorPieza(i){
+  var piezas=parseFloat(g('psk'+i)?g('psk'+i).value:0)||0;
+  var totalKg=parseFloat(g('pspt'+i)?g('pspt'+i).value:0)||0;
+  if(piezas>0&&totalKg>0){
+    var pg=g('pspg'+i);
+    if(pg)pg.value=(totalKg*1000/piezas).toFixed(1);
   }
   calcProcMerma();
 }
@@ -1776,13 +1782,6 @@ function calcProcMerma(){
       kgSalEquiv+=cant*pesoG/1000;
     } else {
       kgSalEquiv+=cant;
-      // Piezas es solo informativo (peso promedio por pieza) — no participa en
-      // el cálculo de la merma, que sigue siendo entrada − suma de kg de salida.
-      var promEl=g('pspzprom'+i);
-      if(promEl){
-        var piezas=parseFloat(g('pspz'+i)?g('pspz'+i).value:0)||0;
-        promEl.textContent=(piezas>0&&cant>0)?('≈ '+Math.round(cant/piezas*1000)+' g/pieza'):'';
-      }
     }
   }
   var merma=kgE-kgSalEquiv;
@@ -1827,11 +1826,10 @@ function gProceso(){
     } else {
       kgEquiv=kg;
     }
-    // Piezas (solo en "Clasificación por talla"): conteo informativo para sacar
-    // el peso promedio por pieza de cada talla — no afecta el cálculo de merma.
-    var piezas=(t==='Clasificación por talla'&&unidadSal==='kg')?(parseFloat(g('pspz'+i)?g('pspz'+i).value:0)||0):0;
-    var pesoProm=piezas>0?parseFloat((kg/piezas).toFixed(3)):null;
-    salidas.push({esp:esp,kg:kg,precio:precio,unidad:unidadSal,pesoUnitG:pesoUnitG,kgEquiv:parseFloat(kgEquiv.toFixed(3)),piezas:piezas||undefined,pesoProm:pesoProm||undefined});
+    // Peso promedio por pieza (kg) — se guarda en el lote de Cámara resultante
+    // como referencia (ej. "~303g/pieza"), útil para cotizar por pieza después.
+    var pesoProm=pesoUnitG?parseFloat((pesoUnitG/1000).toFixed(4)):null;
+    salidas.push({esp:esp,kg:kg,precio:precio,unidad:unidadSal,pesoUnitG:pesoUnitG,kgEquiv:parseFloat(kgEquiv.toFixed(3)),pesoProm:pesoProm||undefined});
     kgEquivTotal+=kgEquiv;
   }
   if(salidas.length===0){alert('Agrega al menos un producto de salida');return;}
