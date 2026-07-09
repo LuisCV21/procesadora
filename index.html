@@ -1636,7 +1636,7 @@ function buildProcSalida(i,po){
       '<div id="psub'+i+'" style="font-size:11px;font-weight:700;color:var(--info);margin-top:3px;display:none"></div></div>'+
     '<div class="field" id="pspzw'+i+'" style="display:none"><label>Piezas</label><input id="pspz'+i+'" type="number" placeholder="0" min="0" oninput="calcProcMerma()">'+
       '<div id="pspzprom'+i+'" style="font-size:11px;color:var(--text3);margin-top:3px"></div></div>'+
-    '<div class="field"><label id="pspgl'+i+'">Peso x pieza (g)</label><input id="pspg'+i+'" type="number" placeholder="N/A" min="0" disabled oninput="calcProcMerma()"></div>'+
+    '<div class="field" id="pspgw'+i+'"><label id="pspgl'+i+'">Peso x pieza (g)</label><input id="pspg'+i+'" type="number" placeholder="N/A" min="0" disabled oninput="calcProcMerma()"></div>'+
     (isAdmin?'<div class="field"><label>Precio venta</label><input id="pspv'+i+'" type="number" placeholder="Opcional" min="0"></div>':
       '<div class="field"><label>Precio venta</label><input type="text" value="Lo asigna el admin" disabled style="background:var(--bg4);color:var(--text3);font-size:12px"></div>')+
     (i>0?'<button class="btn btn-icon btn-d" style="margin-top:18px" onclick="remProcSalida('+i+')">✕</button>':'<div></div>')+
@@ -1730,6 +1730,11 @@ function onProcTipoChange(){
   for(var i=0;i<_procSalidas;i++){
     var w=g('pspzw'+i);
     if(w)w.style.display=esTalla?'':'none';
+    // "Peso x pieza" es de un mecanismo aparte (productos que se venden por
+    // pieza, ej. milanesas) y en clasificación por talla siempre queda
+    // deshabilitado — se oculta para no confundirlo con el campo de Piezas.
+    var wg=g('pspgw'+i);
+    if(wg)wg.style.display=esTalla?'none':'';
   }
   var hint=g('proc-salidas-hint');
   if(hint)hint.textContent=esTalla?
