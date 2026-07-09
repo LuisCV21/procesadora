@@ -1137,7 +1137,7 @@ function rDash(){
       '<div class="stat" style="cursor:pointer" onclick="mTempLog()">'+
         '<div class="stat-lbl">🌡 Temperatura</div>'+
         '<div class="stat-val c-info">'+(ultTemp?ultTemp.temp+'°C':'—')+'</div>'+
-        '<div class="stat-sub">'+(ultTemp?fmtFecha(ultTemp.fecha):'Toca para registrar')+'</div></div>'+
+        '<div class="stat-sub">'+(ultTemp?fmtFecha(ultTemp.fecha)+(ultTemp.motor?' · '+ultTemp.motor:''):'Toca para registrar')+'</div></div>'+
       '<div class="stat"><div class="stat-lbl">💵 Efectivo en caja</div>'+
         '<div class="stat-val c-ok">'+money(efectivoDeclarado)+'</div>'+
         '<div class="stat-sub">Disponible</div></div>'+
@@ -1243,7 +1243,7 @@ function rCam(){
     '<div class="stat"><div class="stat-lbl">Alertas caducidad</div><div class="stat-val '+(pv>0?'c-danger':'c-ok')+'">'+pv+'</div></div>'+
     '<div class="stat"><div class="stat-lbl">Valor inventario</div><div class="stat-val">'+money(camara.reduce(function(a,i){return a+i.kg*(i.costo||0);},0))+'</div></div>'+
     '<div class="stat '+(alertasMin.length>0?'':'')+'"><div class="stat-lbl">⚠ Stock bajo mínimo</div><div class="stat-val '+(alertasMin.length>0?'c-danger':'c-ok')+'">'+alertasMin.length+'</div></div>'+
-    '<div class="stat" style="cursor:pointer" onclick="mVerTemps()"><div class="stat-lbl">Última temp.</div><div class="stat-val c-info">'+(ultTemp?ultTemp.temp+'°C':'—')+'</div><div class="stat-sub">'+(ultTemp?fmtFecha(ultTemp.fecha):'Clic para registrar')+'</div></div>'+
+    '<div class="stat" style="cursor:pointer" onclick="mVerTemps()"><div class="stat-lbl">Última temp.</div><div class="stat-val c-info">'+(ultTemp?ultTemp.temp+'°C':'—')+'</div><div class="stat-sub'+(ultTemp&&ultTemp.motor==='Ambos'?' c-danger':'')+'">'+(ultTemp?fmtFecha(ultTemp.fecha)+(ultTemp.motor?' · '+ultTemp.motor:''):'Clic para registrar')+'</div></div>'+
   '</div>'+
   (alertasMin.length>0?'<div class="card" style="margin-bottom:14px;border-color:rgba(192,57,43,.3)"><div class="card-hdr" style="background:var(--danger-dim)"><div class="card-title" style="color:var(--danger)">⚠ Productos bajo stock mínimo</div></div><div class="card-body">'+
     alertasMin.map(function(a){return '<div class="alert al-d"><div class="al-dot"></div><strong>'+a.n+'</strong> — Stock actual: '+a.tot.toFixed(1)+' '+a.u+' · Mínimo: '+a.min+' '+a.u+'</div>';}).join('')+
@@ -1473,12 +1473,14 @@ function mTempLog(){
         '<th style="text-align:left;padding:6px 8px;font-size:12px;font-weight:700;color:var(--text3);border-bottom:1px solid var(--border)">Fecha</th>'+
         '<th style="text-align:left;padding:6px 8px;font-size:12px;font-weight:700;color:var(--text3);border-bottom:1px solid var(--border)">Hora</th>'+
         '<th style="text-align:left;padding:6px 8px;font-size:12px;font-weight:700;color:var(--text3);border-bottom:1px solid var(--border)">Temp.</th>'+
+        '<th style="text-align:left;padding:6px 8px;font-size:12px;font-weight:700;color:var(--text3);border-bottom:1px solid var(--border)">Motor</th>'+
         '<th style="text-align:left;padding:6px 8px;font-size:12px;font-weight:700;color:var(--text3);border-bottom:1px solid var(--border)">Registró</th></tr></thead><tbody>'+
         tempLogs.slice().reverse().map(function(t,i){
           var orig=tempLogs.length-1-i;
           return '<tr><td style="padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text2)">'+fmtFecha(t.fecha)+'</td>'+
             '<td style="padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text2)">'+t.hora+'</td>'+
             '<td style="padding:6px 8px;border-bottom:1px solid var(--border);color:var(--info);font-weight:700">'+t.temp+'°C</td>'+
+            '<td style="padding:6px 8px;border-bottom:1px solid var(--border);color:'+(t.motor==='Ambos'?'var(--danger)':'var(--text2)')+';font-weight:'+(t.motor==='Ambos'?'700':'400')+'">'+(t.motor||'—')+'</td>'+
             '<td style="padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text3)">'+t.op+
             (ROL==='admin'?'<button class="btn btn-xs btn-d" style="margin-left:8px" onclick="elimTempLog('+orig+')">×</button>':'')+
             '</td></tr>';
@@ -1490,6 +1492,7 @@ function mTempLog(){
       '<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px">Registrar temperatura del día</div>'+
       '<div class="fg2" style="display:grid;gap:10px">'+
         '<div class="field"><label>Temperatura (°C)</label><input id="tl1" type="number" placeholder="-18" step="0.1"></div>'+
+        '<div class="field"><label>Motor en operación</label><select id="tl5"><option value="Motor 1">Motor 1</option><option value="Motor 2">Motor 2</option><option value="Ambos">Ambos (⚠ congela la cámara)</option></select></div>'+
         '<div class="field"><label>Fecha</label><input id="tl2" type="date" value="'+today()+'"></div>'+
         '<div class="field"><label>Hora</label><input id="tl3" type="time" value="'+new Date().toTimeString().slice(0,5)+'"></div>'+
         '<div class="field"><label>Registrado por</label><input id="tl4" type="text" value="'+(CUR_USER?CUR_USER.nombre:'')+'"></div>'+
@@ -1507,7 +1510,7 @@ function elimTempLog(idx){
 function gTempLog(){
   var t=parseFloat(g('tl1').value);
   if(isNaN(t)){alert('Ingresa una temperatura válida');return;}
-  tempLogs.push({temp:t,fecha:g('tl2').value,hora:g('tl3').value,op:g('tl4').value||''});
+  tempLogs.push({temp:t,motor:g('tl5').value,fecha:g('tl2').value,hora:g('tl3').value,op:g('tl4').value||''});
   persist();cm();mTempLog();nav('camara');
 }
 
