@@ -1837,12 +1837,15 @@ function gProceso(){
   var merma=parseFloat((kgE-kgEquivTotal).toFixed(3));
   var estimado=salidas.some(function(s){return s.unidad!=='kg';});
 
-  // Costo por unidad de salida: se reparte el costo total del insumo usado entre
-  // lo que realmente salió, en vez de copiar el costo/kg original — así un producto
-  // que rinde menos (por merma, o porque se vende por pieza y no por kg) queda con
-  // su costo real por unidad.
+  // Costo por unidad de salida: se reparte el costo total del insumo por PESO
+  // real (kgEquiv), no por cantidad de unidades — si se repartiera por cantidad,
+  // una talla grande (pocas piezas pesadas) saldría con el mismo costo unitario
+  // que una chica (muchas piezas ligeras), lo cual no refleja cuánto pesó cada una.
   var costoTotalEntrada=kgE*(loteOrig.costo||0);
-  var costoPorUnidadSalida=kgSal>0?costoTotalEntrada/kgSal:(loteOrig.costo||0);
+  salidas.forEach(function(s){
+    var costoAsignado=kgEquivTotal>0?costoTotalEntrada*(s.kgEquiv/kgEquivTotal):0;
+    s.costoPorUnidad=s.kg>0?costoAsignado/s.kg:(loteOrig.costo||0);
+  });
 
   // Descontar del lote original
   loteOrig.kg=Math.max(0,parseFloat((loteOrig.kg-kgE).toFixed(3)));
@@ -1854,16 +1857,20 @@ function gProceso(){
     if(existing){
       // Si ya traía peso promedio (de una captura anterior del mismo lote), se
       // pondera por kg en vez de sobrescribirlo, para no perder esa referencia.
+      var kgAnt=existing.kg;
       if(s.pesoProm){
-        var kgAnt=existing.kg;
         existing.pesoProm=existing.pesoProm?((existing.pesoProm*kgAnt+s.pesoProm*s.kg)/(kgAnt+s.kg)):s.pesoProm;
       }
+      // El costo también se pondera por cantidad al fusionar con un lote que
+      // ya existía (mismo producto + mismo lote), para no perder el costo real
+      // del stock que ya estaba ahí.
+      existing.costo=(kgAnt+s.kg)>0?((existing.costo||0)*kgAnt+s.costoPorUnidad*s.kg)/(kgAnt+s.kg):existing.costo;
       existing.kg=parseFloat((existing.kg+s.kg).toFixed(3));
       if(!existing.precio&&s.precio)existing.precio=s.precio;
       if(!existing.unidad&&s.unidad)existing.unidad=s.unidad;
     } else {
       camara.push({id:uid(),esp:s.esp,lote:loteOrig.lote,kg:s.kg,unidad:s.unidad,
-        ent:f,cad:loteOrig.cad,est:'ok',costo:costoPorUnidadSalida,precio:s.precio,pesoProm:s.pesoProm});
+        ent:f,cad:loteOrig.cad,est:'ok',costo:s.costoPorUnidad,precio:s.precio,pesoProm:s.pesoProm});
     }
   });
 
