@@ -652,6 +652,23 @@ var PROVEEDORES=load('proveedores',PROVS_DEF);
 var CLIENTES=load('clientes',CLIENTES_DEF);
 var PROC_TIPOS=load('proc_tipos',PROC_TIPOS_DEF);
 
+// Instalaciones que ya tenían datos guardados (en Supabase o localStorage) nunca
+// ven los productos/tipos de proceso nuevos que se agregan al código, porque
+// PRODUCTOS/PROC_TIPOS se sobreescriben con lo ya guardado (ver aplicarDatos).
+// Este merge agrega lo que falte del catálogo del código sin tocar lo existente,
+// y se vuelve a correr cada vez que llegan datos frescos de Supabase.
+function mergeCatalogosNuevos(){
+  var cambio=false;
+  PRODS_DEF.forEach(function(pd){
+    if(!PRODUCTOS.some(function(p){return p.n===pd.n;})){PRODUCTOS.push(Object.assign({},pd));cambio=true;}
+  });
+  PROC_TIPOS_DEF.forEach(function(t){
+    if(PROC_TIPOS.indexOf(t)===-1){PROC_TIPOS.push(t);cambio=true;}
+  });
+  if(cambio){save('productos',PRODUCTOS);save('proc_tipos',PROC_TIPOS);}
+}
+mergeCatalogosNuevos();
+
 // Cámara: cada entrada es un LOTE — mismo producto puede tener múltiples lotes
 var camara=load('camara',[
   {id:1,esp:'Agua',lote:'5635',kg:144,temp:0,ent:'2026-04-18',cad:'2026-12-31',est:'ok',costo:5.74,precio:7},
@@ -4665,6 +4682,9 @@ function aplicarDatos(data){
   if(data.admin_puede_recibir!==undefined&&data.admin_puede_recibir!==null)ADMIN_RECIBE=data.admin_puede_recibir;
   // Actualizar caché local con datos de Supabase
   Object.keys(data).forEach(function(k){saveLocal(k,data[k]);});
+  // Los datos que acaban de llegar de Supabase pueden ser de antes de que
+  // existieran productos/tipos de proceso nuevos — completar con lo del código.
+  mergeCatalogosNuevos();
 }
 
 function mostrarCargando(){
