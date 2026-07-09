@@ -1603,7 +1603,7 @@ function mProceso(){
       (lotesDisp.length===0?'<div style="padding:10px 14px;background:var(--warn-dim);border:1px solid rgba(184,122,0,.3);border-radius:var(--r);font-size:13px;color:var(--warn);margin-bottom:14px">No hay lotes disponibles de productos marcados "siempre se va a procesar". Actívalo en Configuración → Productos → Editar (ej. Bistec de res).</div>':'')+
       '<div class="fg2" style="display:grid;gap:12px;margin-bottom:16px">'+
         '<div class="field"><label>Tipo de proceso</label><select id="p1" onchange="onProcTipoChange()"><option value="">Seleccionar...</option>'+to+'</select></div>'+
-        '<div class="field"><label>Lote de entrada (producto original)</label><select id="p2" onchange="calcProcMerma()"><option value="">Seleccionar lote...</option>'+lo+'</select></div>'+
+        '<div class="field"><label>Lote de entrada (producto original)</label><select id="p2" onchange="calcProcMerma();refreshSalidaOptions()"><option value="">Seleccionar lote...</option>'+lo+'</select></div>'+
         '<div class="field"><label>Kg que entran al proceso</label><input id="p3" type="number" placeholder="0" min="0" oninput="calcProcMerma()"></div>'+
         '<div class="field"><label>Operador</label><input id="p5" type="text" placeholder="Nombre"></div>'+
         '<div class="field"><label>Fecha</label><input id="p6" type="date" value="'+today()+'"></div>'+
@@ -1616,7 +1616,7 @@ function mProceso(){
         '<div id="proc-salidas">'+
           buildProcSalida(0,po)+
         '</div>'+
-        '<button class="btn" style="margin-top:6px" onclick="addProcSalida()">+ Agregar producto de salida</button>'+
+        '<button class="btn" id="btn-add-salida" style="margin-top:6px" onclick="addProcSalida()">+ Agregar producto de salida</button>'+
         '<div id="proc-merma-info" style="margin-top:12px;padding:10px 14px;background:var(--warn-dim);border:1px solid rgba(184,122,0,.3);border-radius:var(--r);font-size:14px;color:var(--warn);display:none">'+
           'Merma calculada: <strong id="proc-merma-val">0 kg</strong>'+
         '</div>'+
@@ -1652,10 +1652,81 @@ function addProcSalida(){
   onProcTipoChange();
 }
 function remProcSalida(i){var el=g('ps-row-'+i);if(el)el.remove();calcProcMerma();}
+
+// "Sargo S/Ordenar" → "Sargo Limpio": el nombre del producto limpio se deriva
+// del nombre del producto crudo, para que funcione con cualquier especie que
+// siga el mismo patrón "<especie> S/Ordenar" sin tener que mapearlas a mano.
+function nombreProductoLimpio(espEntrada){
+  if(!espEntrada||espEntrada.indexOf('S/Ordenar')===-1)return null;
+  return espEntrada.replace('S/Ordenar','Limpio').replace(/\s+/g,' ').trim();
+}
+// En "Limpieza de pescado" solo tiene sentido elegir como entrada pescado
+// marcado "siempre se va a procesar" (crudo/sin ordenar, nunca se vende tal
+// cual) — para el resto de procesos se deja el comportamiento de siempre.
+function refreshLoteEntradaOptions(){
+  var sel=g('p2');if(!sel)return;
+  var tipo=g('p1')?g('p1').value:'';
+  var lotesDisp=camara.filter(function(i){
+    if(i.kg<=0||!esSoloProceso(i.esp))return false;
+    if(tipo==='Limpieza de pescado'){
+      var prod=PRODUCTOS.find(function(p){return p.n===i.esp;});
+      if(!prod||prod.cat!=='pescado')return false;
+    }
+    return true;
+  });
+  var cur=sel.value;
+  sel.innerHTML='<option value="">Seleccionar lote...</option>'+
+    lotesDisp.map(function(i){return '<option value="'+i.id+'">'+i.esp+' — Lote '+i.lote+' ('+i.kg.toFixed(1)+' kg)</option>';}).join('');
+  sel.value=lotesDisp.some(function(i){return String(i.id)===cur;})?cur:'';
+}
+// La salida de "Limpieza de pescado" es siempre el producto limpio que
+// corresponde al lote de entrada elegido (ej. Sargo S/Ordenar → Sargo Limpio)
+// — no puede salir ningún otro producto, así que se deja como única opción
+// y se autoselecciona.
+function productosSalidaParaTipo(tipo,loteEntradaId){
+  if(tipo!=='Limpieza de pescado')return PRODUCTOS;
+  var loteSel=loteEntradaId?camara.find(function(x){return x.id===loteEntradaId;}):null;
+  var nombreLimpio=loteSel?nombreProductoLimpio(loteSel.esp):null;
+  var prodLimpio=nombreLimpio?PRODUCTOS.find(function(p){return p.n===nombreLimpio;}):null;
+  if(prodLimpio)return [prodLimpio];
+  // Sin lote elegido todavía (o sin producto limpio configurado): al menos
+  // limitar a pescado marcado "solo proceso" en vez de mostrar todo el catálogo.
+  return PRODUCTOS.filter(function(p){return p.soloProceso&&p.cat==='pescado';});
+}
+function refreshSalidaOptions(){
+  var tipo=g('p1')?g('p1').value:'';
+  // Limpieza de pescado siempre es 1 entrada → 1 salida: si venían filas extra
+  // de haber elegido otro tipo de proceso antes, se quitan.
+  if(tipo==='Limpieza de pescado'){
+    for(var j=1;j<_procSalidas;j++){
+      var rowEl=g('ps-row-'+j);
+      if(rowEl)rowEl.remove();
+    }
+  }
+  var loteEntradaId=parseInt(g('p2')?g('p2').value:0)||0;
+  var lista=productosSalidaParaTipo(tipo,loteEntradaId);
+  var po=lista.map(function(p){return '<option value="'+p.n+'" data-u="'+p.u+'">'+p.n+'</option>';}).join('');
+  for(var i=0;i<_procSalidas;i++){
+    var sel=g('psp'+i);if(!sel)continue;
+    var cur=sel.value;
+    sel.innerHTML='<option value="">Seleccionar...</option>'+po;
+    var sigueValido=lista.some(function(p){return p.n===cur;});
+    if(cur&&sigueValido){sel.value=cur;}
+    else if(lista.length===1){sel.value=lista[0].n;}
+    else {sel.value='';}
+    updProcSalidaUnidad(i);
+  }
+  // Con una sola salida posible no aplica agregar más productos de salida.
+  var btnAdd=g('btn-add-salida');
+  if(btnAdd)btnAdd.style.display=(tipo==='Limpieza de pescado')?'none':'';
+}
 // El conteo de piezas (chico/mediano/grande) solo aplica a "Clasificación por
 // talla" — en el resto de procesos el campo se oculta para no confundir.
 function onProcTipoChange(){
-  var esTalla=g('p1')&&g('p1').value==='Clasificación por talla';
+  refreshLoteEntradaOptions();
+  refreshSalidaOptions();
+  var tipo=g('p1')?g('p1').value:'';
+  var esTalla=tipo==='Clasificación por talla';
   for(var i=0;i<_procSalidas;i++){
     var w=g('pspzw'+i);
     if(w)w.style.display=esTalla?'':'none';
@@ -1663,6 +1734,8 @@ function onProcTipoChange(){
   var hint=g('proc-salidas-hint');
   if(hint)hint.textContent=esTalla?
     'Registra cada talla (chico/mediano/grande) con su kg pesado y cuántas piezas salieron — la suma de kg debe dar el total de entrada. Con eso se calcula el peso promedio por pieza de cada talla.':
+    tipo==='Limpieza de pescado'?
+    'La salida es siempre el producto limpio correspondiente — se selecciona sola al elegir el lote de entrada.':
     'Define los productos resultantes. La merma se calcula automáticamente (entrada − suma de salidas).';
   calcProcMerma();
 }
