@@ -1726,7 +1726,7 @@ function gProceso(){
     }
   });
 
-  procesos.push({id:uid(),fecha:f,tipo:t,esp:loteOrig.esp,lote:loteOrig.lote,
+  procesos.push({id:uid(),fecha:f,tipo:t,esp:loteOrig.esp,lote:loteOrig.lote,loteId:loteOrig.id,
     kgE:kgE,kgS:kgSal,merma:merma,estimado:estimado,op:op,notas:notas_,est:'completado',
     salidas:salidas});
   _procSalidas=1;
@@ -1734,10 +1734,46 @@ function gProceso(){
 }
 
 function elimProc(id){
-  confirmarEliminar('¿Eliminar este registro de proceso?',function(){
+  var p=procesos.find(function(x){return x.id===id;});
+  if(!p)return;
+  confirmarEliminar('¿Eliminar este registro de proceso? Se revertirá el movimiento de inventario: regresa la entrada y quita lo que se generó como salida.',function(){
+    revertirProceso(p);
     procesos=procesos.filter(function(x){return x.id!==id;});
     persist();nav('procesos');
   });
+}
+
+// Busca un lote por id (preferente) o por especie+lote, en cámara o bodega —
+// el proceso pudo haberse movido de cámara a bodega después de registrarse.
+function buscarLoteProceso(id,esp,lote){
+  return camara.find(function(x){return (id&&x.id===id)||(x.esp===esp&&x.lote===lote);})||
+         bodega.find(function(x){return (id&&x.id===id)||(x.esp===esp&&x.lote===lote);});
+}
+
+// Deshace el efecto en inventario de un proceso: regresa los kg al lote de
+// entrada y quita de cámara/bodega lo que ese proceso generó como salida.
+// Si algo ya no cuadra (se vendió/movió por separado), avisa en vez de fallar.
+function revertirProceso(p){
+  var avisos=[];
+  var loteEntrada=buscarLoteProceso(p.loteId,p.esp,p.lote);
+  if(loteEntrada){
+    loteEntrada.kg=parseFloat((loteEntrada.kg+p.kgE).toFixed(3));
+  } else {
+    camara.push({id:uid(),esp:p.esp,lote:p.lote,kg:p.kgE,unidad:'kg',ent:p.fecha,cad:null,est:'ok',costo:0});
+    avisos.push('No se encontró el lote de entrada original ('+p.esp+' · Lote '+p.lote+'); se creó uno nuevo en Cámara — revisa costo y caducidad.');
+  }
+  (p.salidas||[]).forEach(function(s){
+    var loteSalida=buscarLoteProceso(null,s.esp,p.lote);
+    if(loteSalida){
+      if(loteSalida.kg<s.kg-0.001){
+        avisos.push('"'+s.esp+'" tenía menos existencia ('+loteSalida.kg.toFixed(2)+') de la que generó este proceso ('+s.kg.toFixed(2)+') — parte ya se vendió o movió. Se dejó en 0.');
+      }
+      loteSalida.kg=Math.max(0,parseFloat((loteSalida.kg-s.kg).toFixed(3)));
+    } else {
+      avisos.push('No se encontró el lote de salida "'+s.esp+'" (Lote '+p.lote+') para quitarlo — puede que ya lo hayan eliminado por separado.');
+    }
+  });
+  if(avisos.length>0)alert('Proceso revertido con avisos:\n\n'+avisos.join('\n\n'));
 }
 
 function mEditProceso(id){
