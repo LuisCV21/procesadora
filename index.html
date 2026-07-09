@@ -1526,7 +1526,7 @@ function rProc(){
   '</div>'+
   '<div class="card"><div class="card-hdr"><div class="card-title">Registros de procesos</div>'+
     (canEdit?'<button class="btn btn-p" onclick="mProceso()">+ Registrar proceso</button>':'')+
-  '</div><div class="tw"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Entrada</th><th>Kg entrada</th><th>Productos de salida</th><th>Merma</th><th>Operador</th>'+(canDelete?'<th></th>':'')+
+  '</div><div class="tw"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Entrada</th><th>Kg entrada</th><th>Productos de salida</th><th>Merma</th><th>Operador</th>'+((canEdit||canDelete)?'<th></th>':'')+
   '</tr></thead><tbody>'+
   (procesos.length===0?'<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text3)">Sin registros</td></tr>':
   procesos.slice().reverse().map(function(p){
@@ -1537,7 +1537,7 @@ function rProc(){
       '<td style="font-size:13px;color:var(--info)">'+salidasStr+'</td>'+
       '<td class="mn" style="color:'+(p.merma>3?'var(--danger)':p.merma>1?'var(--warn)':'inherit')+'">'+p.merma.toFixed(2)+' kg'+(p.estimado?' <span style="font-size:11px;color:var(--text3)">(estimado)</span>':'')+'</td>'+
       '<td style="color:var(--text3);font-size:13px">'+p.op+(p.notas?'<div style="font-size:12px;color:var(--text3)">'+p.notas+'</div>':'')+'</td>'+
-      (canDelete?'<td><button class="btn btn-xs btn-d" onclick="elimProc('+p.id+')">Eliminar</button></td>':'')+
+      ((canEdit||canDelete)?'<td>'+(canEdit?'<button class="btn btn-xs" onclick="mEditProceso('+p.id+')">Editar</button>':'')+(canDelete?'<button class="btn btn-xs btn-d" style="margin-left:6px" onclick="elimProc('+p.id+')">Eliminar</button>':'')+'</td>':'')+
       '</tr>';
   }).join(''))+
   '</tbody></table></div></div>'+
@@ -1738,6 +1738,47 @@ function elimProc(id){
     procesos=procesos.filter(function(x){return x.id!==id;});
     persist();nav('procesos');
   });
+}
+
+function mEditProceso(id){
+  var p=procesos.find(function(x){return x.id===id;});
+  if(!p)return;
+  if(!p.salidas||p.salidas.length===0){alert('Este registro no tiene productos de salida individuales para editar');return;}
+  var rows=p.salidas.map(function(s,i){
+    var esNoKg=(s.unidad||'kg')!=='kg';
+    return '<div style="display:grid;grid-template-columns:1fr 100px 130px;gap:8px;align-items:end;margin-bottom:8px">'+
+      '<div class="field"><label>Producto</label><input type="text" value="'+s.esp+'" disabled></div>'+
+      '<div class="field"><label>Cantidad</label><input type="text" value="'+s.kg+' '+(s.unidad||'kg')+'" disabled></div>'+
+      '<div class="field"><label>Peso x pieza (g)</label><input id="epg'+i+'" type="number" min="0" placeholder="'+(esNoKg?'ej. 230':'N/A')+'" value="'+(s.pesoUnitG||'')+'" '+(esNoKg?'':'disabled')+'></div>'+
+    '</div>';
+  }).join('');
+  modal('<div class="modal" style="max-width:520px"><div class="modal-hdr"><div class="modal-title">Editar salidas — '+p.esp+' (Lote '+p.lote+')</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div style="font-size:13px;color:var(--text3);margin-bottom:14px">Ajusta el peso por pieza de cada salida para recalcular la merma real. Entrada: '+p.kgE+' kg.</div>'+
+      rows+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gEditProceso('+p.id+')">Guardar cambios</button></div>'+
+  '</div>');
+}
+function gEditProceso(id){
+  var p=procesos.find(function(x){return x.id===id;});
+  if(!p||!p.salidas)return;
+  var kgEquivTotal=0;
+  for(var i=0;i<p.salidas.length;i++){
+    var s=p.salidas[i];
+    if((s.unidad||'kg')!=='kg'){
+      var pesoG=parseFloat(g('epg'+i)?g('epg'+i).value:0)||0;
+      if(pesoG<=0){alert('Indica el peso por pieza (g) de "'+s.esp+'" para poder calcular la merma');return;}
+      s.pesoUnitG=pesoG;
+      s.kgEquiv=parseFloat((s.kg*pesoG/1000).toFixed(3));
+    } else {
+      s.kgEquiv=s.kg;
+    }
+    kgEquivTotal+=s.kgEquiv;
+  }
+  p.merma=parseFloat((p.kgE-kgEquivTotal).toFixed(3));
+  p.estimado=p.salidas.some(function(s){return (s.unidad||'kg')!=='kg';});
+  persist();cm();nav('procesos');
 }
 // ══════════════════════════════════════════════════════
 //  PEDIDOS
