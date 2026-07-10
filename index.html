@@ -638,7 +638,15 @@ var PRODS_DEF=[
 
 var PROVS_DEF=['Pescadería Hernández','Mariscos del Golfo S.A.','Exportadores Veracruz','Mariscos Tuxpan'];
 var CLIENTES_DEF=['Mar Bravo — Centro','El Barco — Bulevard','Marisquería La Punta','El Delfín — Col. Petrolera','Puebla','Petromex','Florida','Sra. Angelia'];
-var PROC_TIPOS_DEF=['Corte en posta','Fileteado','Empaque al vacío','Descabezado','Desvenado','Limpieza de pescado','Clasificación por talla'];
+var PROC_TIPOS_DEF=['Limpieza de pescado','Clasificación por talla'];
+// Qué productos puede tomar como entrada y devolver como salida cada tipo de
+// proceso — configurable desde Configuración → Tipos de proceso. Si un tipo no
+// tiene reglas (arrays vacíos), se comporta como antes: cualquier lote marcado
+// "solo proceso" sirve de entrada y cualquier producto puede ser salida.
+var PROC_REGLAS_DEF={
+  'Limpieza de pescado':{entradas:['Sargo S/Ordenar'],salidas:['Sargo Limpio']},
+  'Clasificación por talla':{entradas:['Sargo Limpio'],salidas:['Sargo ch.','Sargo med.','Sargo gr.']}
+};
 // Merma esperada al limpiar pescado (desvenado/destripado) — arriba de esto se
 // avisa a los admins en el dashboard para que revisen si algo salió mal.
 var UMBRAL_MERMA_LIMPIEZA=15;
@@ -651,21 +659,49 @@ function esProductoBodega(pr){return CATS_BODEGA.indexOf(pr.cat)!==-1;}
 var PROVEEDORES=load('proveedores',PROVS_DEF);
 var CLIENTES=load('clientes',CLIENTES_DEF);
 var PROC_TIPOS=load('proc_tipos',PROC_TIPOS_DEF);
+var PROC_REGLAS=load('proc_reglas',PROC_REGLAS_DEF);
 
 // Instalaciones que ya tenían datos guardados (en Supabase o localStorage) nunca
 // ven los productos/tipos de proceso nuevos que se agregan al código, porque
 // PRODUCTOS/PROC_TIPOS se sobreescriben con lo ya guardado (ver aplicarDatos).
-// Este merge agrega lo que falte del catálogo del código sin tocar lo existente,
-// y se vuelve a correr cada vez que llegan datos frescos de Supabase.
+// Este merge agrega lo que falte del catálogo del código sin tocar lo existente.
+//
+// "Vistos" lleva registro de qué nombres del código ya se le ofrecieron alguna
+// vez a esta base de datos — sin esto, cada sync con Supabase volvía a agregar
+// cualquier producto/tipo que el usuario hubiera borrado a propósito (splice()
+// solo lo quita del array en memoria; en el siguiente reload, aplicarDatos()
+// carga el catálogo ya sin ese ítem y este merge lo resucitaba de nuevo).
+var CATALOGO_SEEDS_VISTOS=load('catalogo_seeds_vistos',null);
 function mergeCatalogosNuevos(){
-  var cambio=false;
+  var primeraVez=!CATALOGO_SEEDS_VISTOS;
+  if(primeraVez)CATALOGO_SEEDS_VISTOS={productos:[],proc_tipos:[]};
+  var vistosProd=CATALOGO_SEEDS_VISTOS.productos;
+  var vistosTipo=CATALOGO_SEEDS_VISTOS.proc_tipos;
+  var cambioCatalogo=false,cambioVistos=false;
   PRODS_DEF.forEach(function(pd){
-    if(!PRODUCTOS.some(function(p){return p.n===pd.n;})){PRODUCTOS.push(Object.assign({},pd));cambio=true;}
+    if(vistosProd.indexOf(pd.n)!==-1)return;
+    vistosProd.push(pd.n);cambioVistos=true;
+    // Solo se agrega si es la primera vez que este código corre contra esta
+    // base de datos — después de eso, si no está, es porque se borró a propósito.
+    if(primeraVez&&!PRODUCTOS.some(function(p){return p.n===pd.n;})){
+      PRODUCTOS.push(Object.assign({},pd));cambioCatalogo=true;
+    }
   });
   PROC_TIPOS_DEF.forEach(function(t){
-    if(PROC_TIPOS.indexOf(t)===-1){PROC_TIPOS.push(t);cambio=true;}
+    if(vistosTipo.indexOf(t)!==-1)return;
+    vistosTipo.push(t);cambioVistos=true;
+    if(primeraVez&&PROC_TIPOS.indexOf(t)===-1){PROC_TIPOS.push(t);cambioCatalogo=true;}
   });
-  if(cambio){save('productos',PRODUCTOS);save('proc_tipos',PROC_TIPOS);}
+  // Las reglas de entrada/salida sí se pueden completar sin tombstone: si el
+  // usuario ya definió reglas para un tipo (aunque sea vacías a propósito) se
+  // respetan; solo se rellena lo que nunca se ha configurado.
+  var cambioReglas=false;
+  Object.keys(PROC_REGLAS_DEF).forEach(function(t){
+    if(!PROC_REGLAS[t]){PROC_REGLAS[t]=PROC_REGLAS_DEF[t];cambioReglas=true;}
+  });
+  if(cambioCatalogo){save('productos',PRODUCTOS);save('proc_tipos',PROC_TIPOS);}
+  if(cambioReglas)save('proc_reglas',PROC_REGLAS);
+  if(cambioVistos)save('catalogo_seeds_vistos',CATALOGO_SEEDS_VISTOS);
 }
 mergeCatalogosNuevos();
 
@@ -794,6 +830,7 @@ function persist(){
   save('camara',camara);save('procesos',procesos);save('pedidos',pedidos);save('notas',notas);
   save('next_id',NEXT_ID);save('next_folio',nextFolio);
   save('productos',PRODUCTOS);save('proveedores',PROVEEDORES);save('clientes',CLIENTES);save('proc_tipos',PROC_TIPOS);
+  save('proc_reglas',PROC_REGLAS);
   save('bodega',bodega);save('efectivo_declarado',efectivoDeclarado);
   save('mov_tarjeta',movTransferencias);save('saldo_tarjeta',saldoTransferencias);
   save('compensaciones',compensaciones);save('temp_logs',tempLogs);
@@ -1134,7 +1171,7 @@ function rDash(){
       mermasAltas.map(function(p){
         var pct=(p.merma/p.kgE*100).toFixed(1);
         return '<div class="alert al-d" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div class="al-dot"></div>'+
-          '<span><strong>'+p.esp+'</strong> — Lote '+p.lote+' · '+fmtFecha(p.fecha)+' · merma '+pct+'% ('+p.merma.toFixed(2)+' kg de '+p.kgE+' kg) · '+p.op+'</span></div>'+
+          '<span><strong>'+p.esp+'</strong> — Lote '+p.lote+' · '+fmtFecha(p.fecha)+' · merma '+pct+'% ('+p.merma.toFixed(2)+' kg de '+p.kgE+' kg)</span></div>'+
           '<button class="btn btn-xs" onclick="revisarMermaAlta('+p.id+')">Marcar revisado</button></div>';
       }).join('')+'</div>';
   }
@@ -1565,7 +1602,7 @@ function rProc(){
   '</div>'+
   '<div class="card"><div class="card-hdr"><div class="card-title">Registros de procesos</div>'+
     (canEdit?'<button class="btn btn-p" onclick="mProceso()">+ Registrar proceso</button>':'')+
-  '</div><div class="tw"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Entrada</th><th>Kg entrada</th><th>Productos de salida</th><th>Merma</th><th>Operador</th>'+((canEdit||canDelete)?'<th></th>':'')+
+  '</div><div class="tw"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Entrada</th><th>Kg entrada</th><th>Productos de salida</th><th>Merma</th><th>Notas</th>'+((canEdit||canDelete)?'<th></th>':'')+
   '</tr></thead><tbody>'+
   (procesos.length===0?'<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text3)">Sin registros</td></tr>':
   procesos.slice().reverse().map(function(p){
@@ -1575,7 +1612,7 @@ function rProc(){
       '<td class="mn">'+p.kgE+' kg</td>'+
       '<td style="font-size:13px;color:var(--info)">'+salidasStr+'</td>'+
       '<td class="mn" style="color:'+(p.merma>3?'var(--danger)':p.merma>1?'var(--warn)':'inherit')+'">'+p.merma.toFixed(2)+' kg'+(p.estimado?' <span style="font-size:11px;color:var(--text3)">(estimado)</span>':'')+'</td>'+
-      '<td style="color:var(--text3);font-size:13px">'+p.op+(p.notas?'<div style="font-size:12px;color:var(--text3)">'+p.notas+'</div>':'')+'</td>'+
+      '<td style="color:var(--text3);font-size:13px">'+(p.notas||'—')+'</td>'+
       ((canEdit||canDelete)?'<td>'+(canEdit?'<button class="btn btn-xs" onclick="mEditProceso('+p.id+')">Editar</button>':'')+(canDelete?'<button class="btn btn-xs btn-d" style="margin-left:6px" onclick="elimProc('+p.id+')">Eliminar</button>':'')+'</td>':'')+
       '</tr>';
   }).join(''))+
@@ -1605,7 +1642,6 @@ function mProceso(){
         '<div class="field"><label>Tipo de proceso</label><select id="p1" onchange="onProcTipoChange()"><option value="">Seleccionar...</option>'+to+'</select></div>'+
         '<div class="field"><label>Lote de entrada (producto original)</label><select id="p2" onchange="calcProcMerma();refreshSalidaOptions()"><option value="">Seleccionar lote...</option>'+lo+'</select></div>'+
         '<div class="field"><label>Kg que entran al proceso</label><input id="p3" type="number" placeholder="0" min="0" oninput="calcProcMerma()"></div>'+
-        '<div class="field"><label>Operador</label><input id="p5" type="text" placeholder="Nombre"></div>'+
         '<div class="field"><label>Fecha</label><input id="p6" type="date" value="'+today()+'"></div>'+
         '<div class="field"><label>Notas</label><input id="p7" type="text" placeholder="Opcional"></div>'+
       '</div>'+
@@ -1651,58 +1687,49 @@ function addProcSalida(){
 }
 function remProcSalida(i){var el=g('ps-row-'+i);if(el)el.remove();calcProcMerma();}
 
-// "Sargo S/Ordenar" → "Sargo Limpio": el nombre del producto limpio se deriva
-// del nombre del producto crudo, para que funcione con cualquier especie que
-// siga el mismo patrón "<especie> S/Ordenar" sin tener que mapearlas a mano.
-function nombreProductoLimpio(espEntrada){
-  if(!espEntrada||espEntrada.indexOf('S/Ordenar')===-1)return null;
-  return espEntrada.replace('S/Ordenar','Limpio').replace(/\s+/g,' ').trim();
+// Lista de productos permitidos como entrada para un tipo de proceso, según
+// PROC_REGLAS (Configuración → Tipos de proceso). Sin reglas definidas para
+// ese tipo, se usa el comportamiento genérico de siempre: cualquier lote
+// marcado "solo proceso".
+function productosEntradaParaTipo(tipo){
+  var regla=PROC_REGLAS[tipo];
+  if(regla&&regla.entradas&&regla.entradas.length>0)return regla.entradas;
+  return null; // null = sin restricción propia, usar esSoloProceso()
 }
-// En "Limpieza de pescado" solo tiene sentido elegir como entrada pescado
-// marcado "siempre se va a procesar" (crudo/sin ordenar, nunca se vende tal
-// cual) — para el resto de procesos se deja el comportamiento de siempre.
 function refreshLoteEntradaOptions(){
   var sel=g('p2');if(!sel)return;
   var tipo=g('p1')?g('p1').value:'';
+  var permitidos=productosEntradaParaTipo(tipo);
   var lotesDisp=camara.filter(function(i){
-    if(i.kg<=0||!esSoloProceso(i.esp))return false;
-    if(tipo==='Limpieza de pescado'){
-      var prod=PRODUCTOS.find(function(p){return p.n===i.esp;});
-      if(!prod||prod.cat!=='pescado')return false;
-    }
-    return true;
+    if(i.kg<=0)return false;
+    return permitidos?permitidos.indexOf(i.esp)!==-1:esSoloProceso(i.esp);
   });
   var cur=sel.value;
   sel.innerHTML='<option value="">Seleccionar lote...</option>'+
     lotesDisp.map(function(i){return '<option value="'+i.id+'">'+i.esp+' — Lote '+i.lote+' ('+i.kg.toFixed(1)+' kg)</option>';}).join('');
   sel.value=lotesDisp.some(function(i){return String(i.id)===cur;})?cur:'';
 }
-// La salida de "Limpieza de pescado" es siempre el producto limpio que
-// corresponde al lote de entrada elegido (ej. Sargo S/Ordenar → Sargo Limpio)
-// — no puede salir ningún otro producto, así que se deja como única opción
-// y se autoselecciona.
-function productosSalidaParaTipo(tipo,loteEntradaId){
-  if(tipo!=='Limpieza de pescado')return PRODUCTOS;
-  var loteSel=loteEntradaId?camara.find(function(x){return x.id===loteEntradaId;}):null;
-  var nombreLimpio=loteSel?nombreProductoLimpio(loteSel.esp):null;
-  var prodLimpio=nombreLimpio?PRODUCTOS.find(function(p){return p.n===nombreLimpio;}):null;
-  if(prodLimpio)return [prodLimpio];
-  // Sin lote elegido todavía (o sin producto limpio configurado): al menos
-  // limitar a pescado marcado "solo proceso" en vez de mostrar todo el catálogo.
-  return PRODUCTOS.filter(function(p){return p.soloProceso&&p.cat==='pescado';});
+// Lista de productos permitidos como salida para un tipo de proceso, según
+// PROC_REGLAS. Sin reglas, cualquier producto del catálogo puede ser salida
+// (comportamiento de siempre).
+function productosSalidaParaTipo(tipo){
+  var regla=PROC_REGLAS[tipo];
+  if(regla&&regla.salidas&&regla.salidas.length>0){
+    return PRODUCTOS.filter(function(p){return regla.salidas.indexOf(p.n)!==-1;});
+  }
+  return PRODUCTOS;
 }
 function refreshSalidaOptions(){
   var tipo=g('p1')?g('p1').value:'';
-  // Limpieza de pescado siempre es 1 entrada → 1 salida: si venían filas extra
-  // de haber elegido otro tipo de proceso antes, se quitan.
-  if(tipo==='Limpieza de pescado'){
+  var lista=productosSalidaParaTipo(tipo);
+  // Si el tipo de proceso solo tiene 1 salida posible configurada (ej.
+  // Limpieza de pescado), no aplica tener varias filas de salida.
+  if(lista.length===1){
     for(var j=1;j<_procSalidas;j++){
       var rowEl=g('ps-row-'+j);
       if(rowEl)rowEl.remove();
     }
   }
-  var loteEntradaId=parseInt(g('p2')?g('p2').value:0)||0;
-  var lista=productosSalidaParaTipo(tipo,loteEntradaId);
   var po=lista.map(function(p){return '<option value="'+p.n+'" data-u="'+p.u+'">'+p.n+'</option>';}).join('');
   for(var i=0;i<_procSalidas;i++){
     var sel=g('psp'+i);if(!sel)continue;
@@ -1716,18 +1743,19 @@ function refreshSalidaOptions(){
   }
   // Con una sola salida posible no aplica agregar más productos de salida.
   var btnAdd=g('btn-add-salida');
-  if(btnAdd)btnAdd.style.display=(tipo==='Limpieza de pescado')?'none':'';
+  if(btnAdd)btnAdd.style.display=(lista.length===1)?'none':'';
 }
 function onProcTipoChange(){
   refreshLoteEntradaOptions();
   refreshSalidaOptions();
   var tipo=g('p1')?g('p1').value:'';
   var esTalla=tipo==='Clasificación por talla';
+  var lista=productosSalidaParaTipo(tipo);
   var hint=g('proc-salidas-hint');
   if(hint)hint.textContent=esTalla?
     'Registra cada talla (chico/mediano/grande): cuántas piezas salieron y cuánto pesaron juntas en la báscula — el peso por pieza se calcula solo. La suma de los pesos debe dar el total de entrada.':
-    tipo==='Limpieza de pescado'?
-    'La salida es siempre el producto limpio correspondiente — se selecciona sola al elegir el lote de entrada.':
+    lista.length===1?
+    'La salida es siempre "'+lista[0].n+'" — se selecciona sola.':
     'Define los productos resultantes. La merma se calcula automáticamente (entrada − suma de salidas).';
   calcProcMerma();
 }
@@ -1797,10 +1825,9 @@ function gProceso(){
   var t=g('p1').value;
   var loteId=parseInt(g('p2')?g('p2').value:0)||0;
   var kgE=parseFloat(g('p3')?g('p3').value:0)||0;
-  var op=g('p5')?g('p5').value:'';
   var f=g('p6')?g('p6').value:today();
   var notas_=g('p7')?g('p7').value:'';
-  if(!t||!loteId||!kgE||!op){alert('Completa tipo de proceso, lote, kg de entrada y operador');return;}
+  if(!t||!loteId||!kgE){alert('Completa tipo de proceso, lote y kg de entrada');return;}
   var loteOrig=camara.find(function(x){return x.id===loteId;});
   if(!loteOrig){alert('Lote no encontrado');return;}
   if(kgE>loteOrig.kg){alert('Los kg de entrada ('+kgE+') superan el stock disponible del lote ('+loteOrig.kg.toFixed(1)+' kg)');return;}
@@ -1875,7 +1902,7 @@ function gProceso(){
   });
 
   procesos.push({id:uid(),fecha:f,tipo:t,esp:loteOrig.esp,lote:loteOrig.lote,loteId:loteOrig.id,
-    kgE:kgE,kgS:kgSal,merma:merma,estimado:estimado,op:op,notas:notas_,est:'completado',
+    kgE:kgE,kgS:kgSal,merma:merma,estimado:estimado,notas:notas_,est:'completado',
     salidas:salidas});
   _procSalidas=1;
   persist();cm();nav('procesos');
@@ -4321,8 +4348,19 @@ function rConfig(){
     body='<div class="card-hdr"><div class="card-title">Clientes</div><button class="btn btn-p" onclick="mAddItem(\'cliente\')">+ Agregar cliente</button></div>'+
       '<div>'+CLIENTES.map(function(c,i){return '<div class="list-item"><span>'+c+'</span><button class="btn btn-xs btn-d" onclick="delItem(\'cliente\','+i+')">Eliminar</button></div>';}).join('')+'</div>';
   } else if(CFG_TAB==='proc_tipos'){
-    body='<div class="card-hdr"><div class="card-title">Tipos de proceso de planta</div><button class="btn btn-p" onclick="mAddItem(\'proc_tipo\')">+ Agregar tipo</button></div>'+
-      '<div>'+PROC_TIPOS.map(function(t,i){return '<div class="list-item"><span>'+t+'</span><div style="display:flex;gap:6px"><button class="btn btn-xs" onclick="mEditProcTipo('+i+')">Editar</button><button class="btn btn-xs btn-d" onclick="delItem(\'proc_tipo\','+i+')">Eliminar</button></div></div>';}).join('')+'</div>';
+    body='<div class="card-hdr"><div class="card-title">Tipos de proceso de planta</div><button class="btn btn-p" onclick="mAddProcTipo()">+ Agregar tipo</button></div>'+
+      '<div>'+PROC_TIPOS.map(function(t,i){
+        var regla=PROC_REGLAS[t];
+        var resumen=(regla&&(regla.entradas.length||regla.salidas.length))?
+          '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+
+            (regla.entradas.length?'Entrada: '+regla.entradas.join(', '):'Entrada: cualquier "solo proceso"')+' → '+
+            (regla.salidas.length?'Salida: '+regla.salidas.join(', '):'Salida: cualquier producto')+
+          '</div>':
+          '<div style="font-size:12px;color:var(--text3);margin-top:2px">Sin restricción — cualquier "solo proceso" → cualquier producto</div>';
+        return '<div class="list-item" style="align-items:flex-start"><div><span>'+t+'</span>'+resumen+'</div><div style="display:flex;gap:6px">'+
+          '<button class="btn btn-xs" onclick="mEditProcTipo('+i+')">Editar</button>'+
+          '<button class="btn btn-xs btn-d" onclick="delItem(\'proc_tipo\','+i+')">Eliminar</button></div></div>';
+      }).join('')+'</div>';
   } else if(CFG_TAB==='usuarios'){
     body='<div class="card-hdr"><div class="card-title">Usuarios del sistema</div><button class="btn btn-p" onclick="mAddUsuario()">+ Agregar usuario</button></div>'+
       '<div class="tw"><table><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Acciones</th></tr></thead><tbody>'+
@@ -4538,7 +4576,7 @@ function renombrarProductoEnTodo(anterior,nuevo){
 }
 
 function mAddItem(tipo){
-  var titulo={producto:'Nuevo producto',proveedor:'Nuevo proveedor',cliente:'Nuevo cliente',proc_tipo:'Nuevo tipo de proceso'}[tipo];
+  var titulo={producto:'Nuevo producto',proveedor:'Nuevo proveedor',cliente:'Nuevo cliente'}[tipo];
   var campos=tipo==='producto'?
     '<div class="field"><label>Nombre</label><input id="ai-n" type="text" placeholder="Ej: Camarón manchado"></div>'+
     '<div class="field" style="margin-top:10px"><label>Unidad</label><select id="ai-u"><option value="kg">kg</option><option value="pz">pz</option><option value="u">u</option><option value="lt">lt</option></select></div>'+
@@ -4569,18 +4607,69 @@ function saveItem(tipo){
   } else if(tipo==='cliente'){
     CLIENTES.push(n);
     audit('Agregó cliente','Configuracion',n);
-  } else if(tipo==='proc_tipo'){
-    PROC_TIPOS.push(n);
-    audit('Agregó tipo de proceso','Configuracion',n);
   }
   persist();cm();nav('config');
 }
 
+// Checklist con buscador para elegir qué productos puede tomar/devolver un
+// tipo de proceso — reutilizable tanto al crear como al editar.
+function checklistProductosHTML(idPrefix,seleccionados){
+  seleccionados=seleccionados||[];
+  var filas=PRODUCTOS.map(function(p){
+    var checked=seleccionados.indexOf(p.n)!==-1;
+    return '<label class="chk-row" data-nombre="'+p.n.toLowerCase()+'" style="display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:13px;cursor:pointer">'+
+      '<input type="checkbox" data-n="'+p.n.replace(/"/g,'&quot;')+'" '+(checked?'checked':'')+' style="width:15px;height:15px">'+
+      '<span>'+p.n+'</span><span style="color:var(--text3);font-size:11px;margin-left:auto">'+p.cat+'</span>'+
+    '</label>';
+  }).join('');
+  return '<input type="text" placeholder="Buscar producto..." oninput="filtrarChecklist(\''+idPrefix+'\',this.value)" style="width:100%;margin-bottom:6px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg2);color:var(--text);font-size:13px">'+
+    '<div id="'+idPrefix+'" style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r);padding:4px">'+filas+'</div>';
+}
+function filtrarChecklist(idPrefix,q){
+  var cont=g(idPrefix);if(!cont)return;
+  q=(q||'').toLowerCase();
+  cont.querySelectorAll('.chk-row').forEach(function(row){
+    row.style.display=row.getAttribute('data-nombre').indexOf(q)!==-1?'':'none';
+  });
+}
+function leerChecklist(idPrefix){
+  var cont=g(idPrefix);if(!cont)return [];
+  return Array.from(cont.querySelectorAll('input[type=checkbox]:checked')).map(function(cb){return cb.getAttribute('data-n');});
+}
+function procTipoCamposHTML(nombre,regla){
+  regla=regla||{entradas:[],salidas:[]};
+  return '<div class="field"><label>Nombre</label><input id="ai-n" type="text" value="'+(nombre||'')+'" placeholder="Ej: Fileteado"></div>'+
+    '<div style="margin-top:14px"><label style="font-size:13px;font-weight:700;color:var(--text);display:block;margin-bottom:4px">Productos que puede tomar como entrada</label>'+
+    '<div style="font-size:12px;color:var(--text3);margin-bottom:6px">Vacío = cualquier lote marcado "solo proceso" (como antes)</div>'+
+    checklistProductosHTML('pt-entradas',regla.entradas)+
+    '</div>'+
+    '<div style="margin-top:14px"><label style="font-size:13px;font-weight:700;color:var(--text);display:block;margin-bottom:4px">Productos que puede devolver como salida</label>'+
+    '<div style="font-size:12px;color:var(--text3);margin-bottom:6px">Vacío = cualquier producto del catálogo (como antes)</div>'+
+    checklistProductosHTML('pt-salidas',regla.salidas)+
+    '</div>';
+}
+function mAddProcTipo(){
+  modal('<div class="modal" style="max-width:460px"><div class="modal-hdr"><div class="modal-title">Nuevo tipo de proceso</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+procTipoCamposHTML('',null)+'</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="saveNuevoProcTipo()">Guardar</button></div>'+
+  '</div>');
+}
+function saveNuevoProcTipo(){
+  var n=(g('ai-n')?g('ai-n').value:'').trim();
+  if(!n){alert('Escribe un nombre');return;}
+  if(PROC_TIPOS.indexOf(n)!==-1){alert('Ya existe un tipo de proceso con ese nombre');return;}
+  var entradas=leerChecklist('pt-entradas');
+  var salidas=leerChecklist('pt-salidas');
+  PROC_TIPOS.push(n);
+  PROC_REGLAS[n]={entradas:entradas,salidas:salidas};
+  audit('Agregó tipo de proceso','Configuracion',n+(entradas.length?' · entradas: '+entradas.join(', '):'')+(salidas.length?' · salidas: '+salidas.join(', '):''));
+  persist();cm();nav('config');
+}
 function mEditProcTipo(idx){
   var t=PROC_TIPOS[idx];
   if(t===undefined)return;
-  modal('<div class="modal" style="max-width:380px"><div class="modal-hdr"><div class="modal-title">Editar tipo de proceso</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
-    '<div class="modal-body"><div class="field"><label>Nombre</label><input id="ai-n" type="text" value="'+t+'"></div></div>'+
+  modal('<div class="modal" style="max-width:460px"><div class="modal-hdr"><div class="modal-title">Editar tipo de proceso</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+procTipoCamposHTML(t,PROC_REGLAS[t])+'</div>'+
     '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="saveEditProcTipo('+idx+')">Guardar cambios</button></div>'+
   '</div>');
 }
@@ -4588,18 +4677,22 @@ function saveEditProcTipo(idx){
   var n=(g('ai-n')?g('ai-n').value:'').trim();
   if(!n){alert('Escribe un nombre');return;}
   var anterior=PROC_TIPOS[idx];
+  var entradas=leerChecklist('pt-entradas');
+  var salidas=leerChecklist('pt-salidas');
   PROC_TIPOS[idx]=n;
+  if(anterior!==n)delete PROC_REGLAS[anterior];
+  PROC_REGLAS[n]={entradas:entradas,salidas:salidas};
   audit('Editó tipo de proceso','Configuracion',anterior+' → '+n);
   persist();cm();nav('config');
 }
 function delItem(tipo,idx){
-  var nom=tipo==='producto'?(PRODUCTOS[idx]?PRODUCTOS[idx].n:''):tipo==='proveedor'?(PROVEEDORES[idx]||''):tipo==='cliente'?(CLIENTES[idx]||''):'';
+  var nom=tipo==='producto'?(PRODUCTOS[idx]?PRODUCTOS[idx].n:''):tipo==='proveedor'?(PROVEEDORES[idx]||''):tipo==='cliente'?(CLIENTES[idx]||''):tipo==='proc_tipo'?(PROC_TIPOS[idx]||''):'';
   confirmarEliminar('¿Eliminar este registro del catálogo?',function(){
     audit('Eliminó de catálogo','Configuración',tipo+': '+nom);
     if(tipo==='producto') PRODUCTOS.splice(idx,1);
     else if(tipo==='proveedor') PROVEEDORES.splice(idx,1);
     else if(tipo==='cliente') CLIENTES.splice(idx,1);
-    else if(tipo==='proc_tipo') PROC_TIPOS.splice(idx,1);
+    else if(tipo==='proc_tipo'){delete PROC_REGLAS[PROC_TIPOS[idx]];PROC_TIPOS.splice(idx,1);}
     persist();nav('config');
   },{detalle:nom});
 }
@@ -4743,6 +4836,8 @@ function aplicarDatos(data){
   if(data.proveedores)PROVEEDORES=data.proveedores;
   if(data.clientes)CLIENTES=data.clientes;
   if(data.proc_tipos)PROC_TIPOS=data.proc_tipos;
+  if(data.proc_reglas)PROC_REGLAS=data.proc_reglas;
+  if(data.catalogo_seeds_vistos)CATALOGO_SEEDS_VISTOS=data.catalogo_seeds_vistos;
   if(data.bodega)bodega=data.bodega;
   if(data.efectivo_declarado!==undefined&&data.efectivo_declarado!==null)efectivoDeclarado=data.efectivo_declarado;
   if(data.mov_tarjeta)movTransferencias=data.mov_tarjeta;
