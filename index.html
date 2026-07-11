@@ -1357,6 +1357,8 @@ function rCam(){
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
       '<input type="text" placeholder="🔍 Buscar producto o lote..." value="'+FILTRO_CAM_Q+'" oninput="setFCQ(this.value)" style="background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:7px 12px;border-radius:var(--r);font-size:14px;width:220px">'+
       '<div class="chips">'+['todos','ok','warn','danger'].map(function(f){return '<button class="chip'+(FILTRO_CAM===f?' active':'')+'" onclick="setFC(\''+f+'\')">'+(f==='todos'?'Todos':f==='ok'?'OK':f==='warn'?'Por vencer':'Vence hoy')+'</button>';}).join('')+'</div>'+
+      '<button class="btn" onclick="imprimirInventario(\'camara\')">🖨 Imprimir</button>'+
+      '<button class="btn" onclick="imprimirInventario(\'ambos\')">🖨 Imprimir cámara + bodega</button>'+
       (isAdmin?'<button class="btn" onclick="mAccionesLote(\'camara\')">✏ Corregir / dar de baja</button>':'')+
     '</div>'+
   '</div><div class="tw"><table><thead><tr>'+
@@ -3437,6 +3439,8 @@ function rBodega(){
   '<div class="card"><div class="card-hdr" style="flex-wrap:wrap;gap:8px"><div class="card-title">Inventario de bodega</div>'+
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
       '<input type="text" placeholder="🔍 Buscar..." value="'+(window._BOD_Q||'')+'" oninput="setBodQ(this.value)" style="background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:7px 12px;border-radius:var(--r);font-size:14px;width:200px">'+
+      '<button class="btn" onclick="imprimirInventario(\'bodega\')">🖨 Imprimir</button>'+
+      '<button class="btn" onclick="imprimirInventario(\'ambos\')">🖨 Imprimir cámara + bodega</button>'+
       (canEdit?'<button class="btn btn-p" onclick="mEntradaBodega()">+ Entrada a bodega</button>':'')+
       (isAdmin?'<button class="btn" onclick="mAccionesLote(\'bodega\')">✏ Corregir / dar de baja</button>':'')+
     '</div>'+
@@ -3446,6 +3450,86 @@ function rBodega(){
   '</tr></thead><tbody>'+
   (nombresOrdenados.length===0?'<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text3)">Sin productos en bodega</td></tr>':filas)+
   '</tbody></table></div></div>';
+}
+
+// ══════════════════════════════════════════════════════
+//  IMPRIMIR INVENTARIO (Cámara / Bodega / ambos)
+// ══════════════════════════════════════════════════════
+function estColorInv(est){return est==='danger'?'#c0392b':est==='warn'?'#b87a00':'#1d9e75';}
+function estTxtInv(est){return est==='danger'?'Vence hoy':est==='warn'?'Por vencer':'OK';}
+// Agrupa por producto (igual que en pantalla) pero sin colapsar lotes — en
+// papel se quiere ver todo de una vez, no dar clic para expandir.
+function filasInventarioImpresion(items,esCamara){
+  var grupos={};
+  items.filter(function(i){return i.kg>0;}).forEach(function(i){
+    if(!grupos[i.esp])grupos[i.esp]=[];
+    grupos[i.esp].push(i);
+  });
+  var nombres=Object.keys(grupos).sort(function(a,b){return a.localeCompare(b,'es');});
+  var nCols=esCamara?7:6;
+  var filas=nombres.map(function(esp){
+    var lotes=grupos[esp].slice().sort(function(a,b){return (a.lote||'').localeCompare(b.lote||'',undefined,{numeric:true});});
+    var filaLote=function(l,soloEsp){
+      return '<tr class="inv-row">'+
+        '<td class="inv-prod">'+(soloEsp?esp:'')+'</td>'+
+        '<td class="inv-lote">'+(l.lote||'—')+'</td>'+
+        '<td class="mn">'+l.kg.toFixed(1)+' '+(l.unidad||'kg')+'</td>'+
+        '<td class="mn">'+money(l.costo||0)+'</td>'+
+        '<td class="mn">'+money(l.precio||0)+'</td>'+
+        '<td class="mn">'+fmtFecha(esCamara?l.cad:l.ent)+'</td>'+
+        (esCamara?'<td style="color:'+estColorInv(l.est)+';font-weight:700">'+estTxtInv(l.est)+'</td>':'')+
+      '</tr>';
+    };
+    if(lotes.length===1)return filaLote(lotes[0],true);
+    var totalKg=lotes.reduce(function(a,i){return a+i.kg;},0);
+    var sub='<tr class="inv-sub"><td class="inv-prod">'+esp+'</td><td></td>'+
+      '<td class="mn">'+totalKg.toFixed(1)+' '+(lotes[0].unidad||'kg')+'</td>'+
+      '<td colspan="'+(nCols-3)+'"></td></tr>';
+    return sub+lotes.map(function(l){return filaLote(l,false);}).join('');
+  }).join('');
+  return {filas:filas,nProductos:nombres.length,
+    valorTotal:items.filter(function(i){return i.kg>0;}).reduce(function(a,i){return a+i.kg*(i.costo||0);},0)};
+}
+function seccionInventarioHTML(titulo,items,esCamara){
+  var r=filasInventarioImpresion(items,esCamara);
+  var nCols=esCamara?7:6;
+  return '<div class="inv-seccion">'+
+    '<div class="inv-seccion-hdr"><span>'+titulo+'</span><span>'+r.nProductos+' productos · '+money(r.valorTotal)+' en inventario</span></div>'+
+    '<table class="inv-tbl"><thead><tr><th>Producto</th><th>Lote</th><th>Cantidad</th><th>Costo/u</th><th>Precio/u</th><th>'+(esCamara?'Caducidad':'Entrada')+'</th>'+(esCamara?'<th>Estado</th>':'')+'</tr></thead>'+
+    '<tbody>'+(r.filas||'<tr><td colspan="'+nCols+'" style="text-align:center;padding:10px;color:#888">Sin existencias</td></tr>')+'</tbody></table>'+
+  '</div>';
+}
+function imprimirInventario(origen){
+  var secciones='';
+  if(origen==='camara'||origen==='ambos')secciones+=seccionInventarioHTML('Inventario de Cámara',camara,true);
+  if(origen==='bodega'||origen==='ambos')secciones+=seccionInventarioHTML('Inventario de Bodega',bodega,false);
+  var titulo=origen==='ambos'?'Cámara + Bodega':origen==='camara'?'Cámara':'Bodega';
+  var win=window.open('','_blank');
+  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Inventario — '+titulo+'</title><style>'+
+    '@page{size:215.9mm 279.4mm;margin:8mm}'+
+    'body{font-family:Arial,sans-serif;margin:0;padding:0;background:#fff;color:#000;font-size:10.5px}'+
+    '.inv-top{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1a3a6b;padding-bottom:7px;margin-bottom:10px}'+
+    '.inv-brand{font-size:16px;font-weight:700;color:#1a3a6b}'+
+    '.inv-brand-sub{font-size:10px;color:#555;margin-top:2px}'+
+    '.inv-fecha{font-size:10px;color:#555}'+
+    '.inv-seccion{margin-bottom:16px}'+
+    '.inv-seccion+.inv-seccion{page-break-before:always}'+
+    '.inv-seccion-hdr{display:flex;justify-content:space-between;align-items:baseline;background:#1a3a6b;color:#fff;padding:5px 10px;font-weight:700;font-size:12px;border-radius:3px 3px 0 0}'+
+    '.inv-tbl{width:100%;border-collapse:collapse}'+
+    '.inv-tbl th{background:#eef1f6;color:#1a3a6b;text-align:left;padding:4px 7px;font-size:9.5px;border-bottom:1px solid #1a3a6b}'+
+    '.inv-tbl td{padding:3px 7px;border-bottom:1px solid #e6e6e6;font-size:10px}'+
+    '.inv-tbl .mn{text-align:right;white-space:nowrap}'+
+    '.inv-prod{font-weight:700}'+
+    '.inv-sub td{background:#f3f5f9;font-weight:700}'+
+    '.inv-lote{color:#555}'+
+    '@media print{body{padding:0}thead{display:table-header-group}}'+
+  '</style></head><body>'+
+  '<div class="inv-top"><div><div class="inv-brand">BODEGA DE MARISCOS Y PRODUCTOS</div><div class="inv-brand-sub">Inventario — '+titulo+'</div></div>'+
+  '<div class="inv-fecha">Impreso: '+fmtFecha(today())+'</div></div>'+
+  secciones+
+  '</body></html>');
+  win.document.close();
+  setTimeout(function(){win.print();},350);
 }
 
 function setBodSort(col){
