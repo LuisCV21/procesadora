@@ -4374,9 +4374,10 @@ function rInvTotal(){
 function rConfig(){
   if(ROL!=='admin'&&ROL!=='gerente')return '<div class="card"><div class="card-body"><div style="text-align:center;padding:40px;color:var(--text3)">Solo el administrador puede acceder a la configuración.</div></div></div>';
   var isAdmin=ROL==='admin';
-  if(!isAdmin)CFG_TAB='productos';
-  var tabs=isAdmin?['productos','proveedores','clientes','proc_tipos','usuarios','auditoria']:['productos'];
-  var labels=isAdmin?['Productos','Proveedores','Clientes','Tipos de proceso','Usuarios','🔍 Auditoría']:['Productos'];
+  var tabsGerente=['productos','proveedores'];
+  if(!isAdmin&&tabsGerente.indexOf(CFG_TAB)===-1)CFG_TAB='productos';
+  var tabs=isAdmin?['productos','proveedores','clientes','proc_tipos','usuarios','auditoria']:tabsGerente;
+  var labels=isAdmin?['Productos','Proveedores','Clientes','Tipos de proceso','Usuarios','🔍 Auditoría']:['Productos','Proveedores'];
   var tabBar='<div class="config-tabs">'+tabs.map(function(t,i){return '<div class="cfg-tab'+(CFG_TAB===t?' active':'')+'" onclick="setCfgTab(\''+t+'\')">'+labels[i]+'</div>';}).join('')+'</div>';
   var body='';
   if(CFG_TAB==='productos'){
@@ -4395,7 +4396,7 @@ function rConfig(){
       '</tbody></table></div>';
   } else if(CFG_TAB==='proveedores'){
     body='<div class="card-hdr"><div class="card-title">Proveedores</div><button class="btn btn-p" onclick="mAddItem(\'proveedor\')">+ Agregar proveedor</button></div>'+
-      '<div>'+PROVEEDORES.map(function(p,i){return {p:p,i:i};}).sort(function(a,b){return a.p.localeCompare(b.p,'es');}).map(function(x){return '<div class="list-item"><span>'+x.p+'</span><button class="btn btn-xs btn-d" onclick="delItem(\'proveedor\','+x.i+')">Eliminar</button></div>';}).join('')+'</div>';
+      '<div>'+PROVEEDORES.map(function(p,i){return {p:p,i:i};}).sort(function(a,b){return a.p.localeCompare(b.p,'es');}).map(function(x){return '<div class="list-item"><span>'+x.p+'</span>'+(isAdmin?'<button class="btn btn-xs btn-d" onclick="delItem(\'proveedor\','+x.i+')">Eliminar</button>':'')+'</div>';}).join('')+'</div>';
   } else if(CFG_TAB==='clientes'){
     body='<div class="card-hdr"><div class="card-title">Clientes</div><button class="btn btn-p" onclick="mAddItem(\'cliente\')">+ Agregar cliente</button></div>'+
       '<div>'+CLIENTES.map(function(c,i){return '<div class="list-item"><span>'+c+'</span><button class="btn btn-xs btn-d" onclick="delItem(\'cliente\','+i+')">Eliminar</button></div>';}).join('')+'</div>';
