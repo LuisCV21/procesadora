@@ -2037,7 +2037,6 @@ function rPed(){
   var porRecibir=pedidos.filter(function(p){return p.est==='pendiente';}).length;
   var porPagar=pedidos.filter(function(p){return p.est==='recibido'&&!p.pagado;}).reduce(function(a,p){
     var ab=p.montoPagado||0;return a+Math.max(0,(p.total||p.costo||0)-ab);},0);
-  var sinPrecio=pedidos.filter(function(p){return p.est!=='pagado'&&p.partidas&&p.partidas.some(partidaFaltaPrecio);}).length;
   var ymPed=MES_SEL.pedidos;
   // Se muestra el mes seleccionado + cualquier pedido pendiente de otros meses (para no perderlo de vista)
   var pedidosFilt=pedidos.filter(function(p){return (p.fecha&&p.fecha.slice(0,7)===ymPed)||p.est==='pendiente';});
@@ -2045,7 +2044,6 @@ function rPed(){
     '<div class="stat"><div class="stat-lbl">Pedidos totales</div><div class="stat-val">'+pedidos.length+'</div></div>'+
     '<div class="stat"><div class="stat-lbl">Por recibir</div><div class="stat-val c-warn">'+porRecibir+'</div><div class="stat-sub">Pendientes de llegar</div></div>'+
     '<div class="stat"><div class="stat-lbl">Por pagar</div><div class="stat-val c-danger">'+money(porPagar)+'</div><div class="stat-sub">Recibidos sin liquidar</div></div>'+
-    (sinPrecio>0?'<div class="stat" style="border-color:rgba(184,122,0,.4);'+(isAdmin?'cursor:pointer':'')+'"'+(isAdmin?' onclick="nav(\'precios\')"':'')+'><div class="stat-lbl" style="color:var(--warn)">⚠ Sin precio de venta</div><div class="stat-val c-warn">'+sinPrecio+'</div><div class="stat-sub">'+(isAdmin?'Clic para asignar en Precios pendientes':'Requieren autorización')+'</div></div>':'')+
   '</div>'+
   '<div class="card"><div class="card-hdr" style="flex-wrap:wrap;gap:8px"><div class="card-title">Órdenes de compra a proveedores</div>'+
     selectorMes('pedidos')+
@@ -2056,11 +2054,10 @@ function rPed(){
   pedidosFilt.slice().reverse().map(function(p){
     var partStr=(p.partidas&&p.partidas.length>0)?p.partidas.map(function(pt){return pt.esp;}).join(', '):'—';
     if(partStr.length>40)partStr=partStr.slice(0,40)+'…';
-    var faltaPrecio=p.partidas&&p.partidas.some(partidaFaltaPrecio);
     return '<tr style="cursor:pointer" onclick="verPedido('+p.id+')">'+
       '<td class="mn" style="font-weight:700;color:var(--accent)">'+(p.numPedido||'—')+'</td>'+
       '<td class="pr">'+p.prov+'</td>'+
-      '<td style="font-size:13px;color:var(--text2)">'+partStr+(faltaPrecio?' <span style="color:var(--warn);font-size:11px">⚠ sin precio</span>':'')+'</td>'+
+      '<td style="font-size:13px;color:var(--text2)">'+partStr+'</td>'+
       '<td class="mn">'+money(p.total||p.costo||0)+'</td>'+
       '<td class="mn">'+fmtFecha(p.fecha)+'</td>'+
       '<td style="font-size:13px;color:var(--text3)">'+(p.condiciones||'—')+'</td>'+
