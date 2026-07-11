@@ -1670,8 +1670,8 @@ function mProceso(){
       (lotesDisp.length===0?'<div style="padding:10px 14px;background:var(--warn-dim);border:1px solid rgba(184,122,0,.3);border-radius:var(--r);font-size:13px;color:var(--warn);margin-bottom:14px">No hay lotes disponibles de productos marcados "siempre se va a procesar". Actívalo en Configuración → Productos → Editar (ej. Bistec de res).</div>':'')+
       '<div class="fg2" style="display:grid;gap:12px;margin-bottom:16px">'+
         '<div class="field"><label>Tipo de proceso</label><select id="p1" onchange="onProcTipoChange()"><option value="">Seleccionar...</option>'+to+'</select></div>'+
-        '<div class="field"><label>Lote de entrada (producto original)</label><select id="p2" onchange="calcProcMerma();refreshSalidaOptions()"><option value="">Seleccionar lote...</option>'+lo+'</select></div>'+
-        '<div class="field"><label>Kg que entran al proceso</label><input id="p3" type="number" placeholder="0" min="0" oninput="calcProcMerma()"></div>'+
+        '<div class="field"><label>Lote de entrada (producto original)</label><select id="p2" onchange="actualizarEntradaAuto();calcProcMerma();refreshSalidaOptions()"><option value="">Seleccionar lote...</option>'+lo+'</select></div>'+
+        '<div class="field"><label id="p3-lbl">Kg que entran al proceso</label><input id="p3" type="number" placeholder="0" min="0" oninput="calcProcMerma()"></div>'+
         '<div class="field"><label>Fecha</label><input id="p6" type="date" value="'+today()+'"></div>'+
         '<div class="field"><label>Notas</label><input id="p7" type="text" placeholder="Opcional"></div>'+
       '</div>'+
@@ -1778,6 +1778,7 @@ function refreshSalidaOptions(){
 function onProcTipoChange(){
   refreshLoteEntradaOptions();
   refreshSalidaOptions();
+  actualizarEntradaAuto();
   var tipo=g('p1')?g('p1').value:'';
   var esTalla=tipo==='Clasificación por talla';
   var lista=productosSalidaParaTipo(tipo);
@@ -1788,6 +1789,25 @@ function onProcTipoChange(){
     'La salida es siempre "'+lista[0].n+'" — se selecciona sola.':
     'Define los productos resultantes. La merma se calcula automáticamente (entrada − suma de salidas).';
   calcProcMerma();
+}
+// "Ordenado" no transforma el producto (solo cuenta piezas y pesa cada una) —
+// por eso el kg de entrada no se escribe a mano: se toma completo del lote
+// elegido, y la merma se sigue calculando igual (entrada del lote − piezas × peso c/u).
+function actualizarEntradaAuto(){
+  var tipo=g('p1')?g('p1').value:'';
+  var p3=g('p3'),lbl=g('p3-lbl');
+  if(!p3)return;
+  var esOrdenado=tipo==='Ordenado';
+  if(esOrdenado){
+    var loteId=parseInt(g('p2')?g('p2').value:0)||0;
+    var lote=camara.find(function(x){return x.id===loteId;});
+    p3.value=lote?lote.kg:'';
+    p3.disabled=true;
+    if(lbl)lbl.textContent='Kg que entran al proceso (todo el lote)';
+  } else {
+    p3.disabled=false;
+    if(lbl)lbl.textContent='Kg que entran al proceso';
+  }
 }
 function procSalidaUnidad(i){
   var sel=g('psp'+i);
