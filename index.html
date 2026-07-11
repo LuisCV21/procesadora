@@ -1154,6 +1154,11 @@ function rDash(){
   // "sin precio" para siempre porque pt.precioVenta del pedido nunca se toca.
   var precPend=isAdmin?preciosPendientesInfo():{inv:[],ped:[]};
   var sinPrecioItems=precPend.inv.concat(precPend.ped);
+  // Lotes de productos "solo proceso" que ya llegaron a Cámara (por un pedido
+  // recibido o entrada directa) y siguen sin pasar por Registrar proceso — se
+  // le puede olvidar a quien recibe, y mientras tanto ese producto no se puede
+  // ni vender ni usar. Se avisa a todos (no solo admin) hasta que se procese.
+  var sinProcesar=camara.filter(function(l){return l.kg>0&&esSoloProceso(l.esp);});
   // Procesos de limpieza de pescado cuya merma superó el umbral esperado (~15%)
   // y que nadie ha revisado todavía — puede ser normal (pescado más chico de lo
   // usual) o señal de que algo se está perdiendo/mal pesando.
@@ -1199,6 +1204,15 @@ function rDash(){
           '<button class="btn btn-xs" onclick="nav(\'precios\')">Asignar precio</button></div>';
       }).join('')+'</div>';
   }
+  if(sinProcesar.length>0){
+    secAlertas+='<div style="margin-bottom:14px">'+
+      '<div style="font-size:14px;font-weight:700;color:var(--danger);margin-bottom:8px">🔪 Productos por procesar</div>'+
+      sinProcesar.map(function(l){
+        return '<div class="alert al-d" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div class="al-dot"></div>'+
+          '<span><strong>'+l.esp+'</strong> — Lote '+l.lote+' · '+l.kg.toFixed(1)+' '+(l.unidad||'kg')+' esperando proceso</span></div>'+
+          '<button class="btn btn-xs" onclick="mProceso()">Procesar ahora</button></div>';
+      }).join('')+'</div>';
+  }
   if(mermasAltas.length>0){
     secAlertas+='<div style="margin-bottom:14px">'+
       '<div style="font-size:14px;font-weight:700;color:var(--danger);margin-bottom:8px">🐟 Merma de limpieza arriba de '+UMBRAL_MERMA_LIMPIEZA+'% — revisar</div>'+
@@ -1232,6 +1246,9 @@ function rDash(){
       '<div class="stat"><div class="stat-lbl">📦 Stock bajo mínimo</div>'+
         '<div class="stat-val '+(stockBajo.length>0?'c-danger':'c-ok')+'">'+stockBajo.length+'</div>'+
         '<div class="stat-sub">'+(stockBajo.length>0?'Productos por surtir':'Inventario suficiente')+'</div></div>'+
+      (sinProcesar.length>0?'<div class="stat" style="border-color:rgba(192,57,43,.4);cursor:pointer" onclick="mProceso()"><div class="stat-lbl" style="color:var(--danger)">🔪 Por procesar</div>'+
+        '<div class="stat-val c-danger">'+sinProcesar.length+'</div>'+
+        '<div class="stat-sub">Toca para registrar el proceso</div></div>':'')+
       '<div class="stat"><div class="stat-lbl">📋 Por enviar</div>'+
         '<div class="stat-val c-info">'+notasPend.length+'</div>'+
         '<div class="stat-sub">'+(notasPend.length>0?'Notas pendientes':'Sin pendientes')+'</div></div>'+
