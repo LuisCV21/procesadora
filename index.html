@@ -1831,10 +1831,13 @@ function updProcSalidaUnidad(i){
   if(pesoGw)pesoGw.style.display=esPieza?'':'none';
   // "Peso total (kg)" es lo que Janet realmente lee de la báscula (ej. 12
   // piezas que juntas pesaron 3.635 kg) — a partir de eso se calcula solo el
-  // peso x pieza, en vez de pedirle que haga la división a mano.
+  // peso x pieza, en vez de pedirle que haga la división a mano. En "Ordenado"
+  // no aplica: ahí solo importa la cantidad y el peso x pieza directo.
+  var tipo=g('p1')?g('p1').value:'';
+  var mostrarTotal=esPieza&&tipo!=='Ordenado';
   var totw=g('psptw'+i);
-  if(totw)totw.style.display=esPieza?'':'none';
-  if(!esPieza){var totInp=g('pspt'+i);if(totInp)totInp.value='';}
+  if(totw)totw.style.display=mostrarTotal?'':'none';
+  if(!mostrarTotal){var totInp=g('pspt'+i);if(totInp)totInp.value='';}
   calcProcMerma();
 }
 function calcPesoPorPieza(i){
