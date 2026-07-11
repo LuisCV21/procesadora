@@ -1147,9 +1147,13 @@ function rDash(){
     if(!pr.minStock)return false;
     return stockTotal(pr.n,camara)+stockTotal(pr.n,bodega)<=pr.minStock;
   });
-  var sinPrecio=isAdmin?pedidos.filter(function(p){
-    return p.partidas&&p.partidas.some(partidaFaltaPrecio);
-  }):[];
+  // Misma fuente que la pantalla "Precios pendientes" (y su badge en el menú) —
+  // antes este resumen contaba pedidos completos con some(partidaFaltaPrecio)
+  // sin importar si ya se habían recibido, así que un pedido ya recibido y
+  // repreciado en Cámara/Bodega (donde vive el precio real) se seguía marcando
+  // "sin precio" para siempre porque pt.precioVenta del pedido nunca se toca.
+  var precPend=isAdmin?preciosPendientesInfo():{inv:[],ped:[]};
+  var sinPrecioItems=precPend.inv.concat(precPend.ped);
   // Procesos de limpieza de pescado cuya merma superó el umbral esperado (~15%)
   // y que nadie ha revisado todavía — puede ser normal (pescado más chico de lo
   // usual) o señal de que algo se está perdiendo/mal pesando.
@@ -1185,12 +1189,13 @@ function rDash(){
           '<strong>'+pr.n+'</strong> — Quedan '+tot.toFixed(1)+' '+pr.u+' · Mínimo: '+pr.minStock+' '+pr.u+'</div>';
       }).join('')+'</div>';
   }
-  if(sinPrecio.length>0){
+  if(sinPrecioItems.length>0){
     secAlertas+='<div style="margin-bottom:14px">'+
-      '<div style="font-size:14px;font-weight:700;color:var(--warn);margin-bottom:8px">💲 Pedidos sin precio de venta — requieren tu atención</div>'+
-      sinPrecio.slice(0,4).map(function(p){
+      '<div style="font-size:14px;font-weight:700;color:var(--warn);margin-bottom:8px">💲 Productos sin precio de venta — requieren tu atención</div>'+
+      sinPrecioItems.slice(0,4).map(function(item){
+        var origenTxt=item.origen?(item.origen==='camara'?'Cámara':'Bodega')+' · Lote '+(item.lote||'—'):(item.numPedido||'Pedido')+' · '+item.prov;
         return '<div class="alert al-w" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:8px"><div class="al-dot"></div>'+
-          '<span><strong>'+(p.numPedido||'Pedido')+'</strong> — '+p.prov+' · '+money(p.total||0)+'</span></div>'+
+          '<span><strong>'+item.esp+'</strong> — '+origenTxt+'</span></div>'+
           '<button class="btn btn-xs" onclick="nav(\'precios\')">Asignar precio</button></div>';
       }).join('')+'</div>';
   }
@@ -1236,9 +1241,9 @@ function rDash(){
       '<div class="stat"><div class="stat-lbl">🧾 Deuda proveedores</div>'+
         '<div class="stat-val c-danger">'+money(totalDeuda)+'</div>'+
         '<div class="stat-sub">'+pedidosSinPagar.length+' pedidos</div></div>'+
-      (isAdmin&&sinPrecio.length>0?'<div class="stat" style="border-color:rgba(184,122,0,.4)"><div class="stat-lbl" style="color:var(--warn)">💲 Sin precio de venta</div>'+
-        '<div class="stat-val c-warn">'+sinPrecio.length+'</div>'+
-        '<div class="stat-sub">Pedidos sin autorizar</div></div>':'')+
+      (isAdmin&&sinPrecioItems.length>0?'<div class="stat" style="border-color:rgba(184,122,0,.4);cursor:pointer" onclick="nav(\'precios\')"><div class="stat-lbl" style="color:var(--warn)">💲 Sin precio de venta</div>'+
+        '<div class="stat-val c-warn">'+sinPrecioItems.length+'</div>'+
+        '<div class="stat-sub">Productos sin autorizar</div></div>':'')+
       '<div class="stat" style="cursor:pointer" onclick="mTempLog()">'+
         '<div class="stat-lbl">🌡 Temperatura</div>'+
         '<div class="stat-val c-info">'+(ultTemp?ultTemp.temp+'°C':'—')+'</div>'+
