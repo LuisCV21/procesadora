@@ -660,6 +660,14 @@ var PROVEEDORES=load('proveedores',PROVS_DEF);
 var CLIENTES=load('clientes',CLIENTES_DEF);
 var PROC_TIPOS=load('proc_tipos',PROC_TIPOS_DEF);
 var PROC_REGLAS=load('proc_reglas',PROC_REGLAS_DEF);
+// persist() se llama en CASI toda acción del sistema (recibir pedido, asignar
+// precio, editar lote, etc.), no solo al tocar Configuración. Si guardara el
+// catálogo (productos/proveedores/clientes/proc_tipos) sin condición, cualquier
+// dispositivo con una copia vieja en memoria lo pisaría en Supabase al hacer
+// cualquier otra cosa, borrando en silencio (sin auditoría) lo que otro
+// dispositivo acababa de agregar en Configuración. Esta bandera hace que el
+// catálogo solo se vuelva a subir cuando de verdad se editó en esta sesión.
+var CATALOGO_SUCIO=false;
 
 // Instalaciones que ya tenían datos guardados (en Supabase o localStorage) nunca
 // ven los productos/tipos de proceso nuevos que se agregan al código, porque
@@ -829,8 +837,11 @@ function puedeCobrar(){return ROL==='gerente'||ROL==='admin';}
 function persist(){
   save('camara',camara);save('procesos',procesos);save('pedidos',pedidos);save('notas',notas);
   save('next_id',NEXT_ID);save('next_folio',nextFolio);
-  save('productos',PRODUCTOS);save('proveedores',PROVEEDORES);save('clientes',CLIENTES);save('proc_tipos',PROC_TIPOS);
-  save('proc_reglas',PROC_REGLAS);
+  if(CATALOGO_SUCIO){
+    save('productos',PRODUCTOS);save('proveedores',PROVEEDORES);save('clientes',CLIENTES);save('proc_tipos',PROC_TIPOS);
+    save('proc_reglas',PROC_REGLAS);
+    CATALOGO_SUCIO=false;
+  }
   save('bodega',bodega);save('efectivo_declarado',efectivoDeclarado);
   save('mov_tarjeta',movTransferencias);save('saldo_tarjeta',saldoTransferencias);
   save('compensaciones',compensaciones);save('temp_logs',tempLogs);
@@ -855,6 +866,24 @@ function esSoloProceso(esp){
 }
 function partidaFaltaPrecio(pt){
   return !pt.precioVenta&&!esSoloProceso(pt.esp);
+}
+// Campo "Precio venta" reutilizado en Entrada a cámara/bodega y Editar lote —
+// si el producto es "solo proceso" el precio no aplica (nunca se vende tal
+// cual), así que el campo se bloquea en vez de dejar que se capture por error.
+function precioVentaCampoHTML(inputId,esp,valor){
+  var bloqueado=esSoloProceso(esp);
+  return '<div class="field"><label>Precio venta ($)</label>'+
+    '<input id="'+inputId+'" type="number" value="'+(bloqueado?0:(valor||0))+'" min="0"'+(bloqueado?' disabled':'')+' placeholder="0">'+
+    '<div id="'+inputId+'-nota" style="font-size:12px;color:var(--text3);margin-top:4px;'+(bloqueado?'':'display:none')+'">No aplica — este producto solo se procesa, no se vende directo</div>'+
+    '</div>';
+}
+function toggleCandadoPrecio(selectId,inputId){
+  var sel=g(selectId),inp=g(inputId),nota=g(inputId+'-nota');
+  if(!sel||!inp)return;
+  var bloqueado=esSoloProceso(sel.value);
+  inp.disabled=bloqueado;
+  if(bloqueado)inp.value=0;
+  if(nota)nota.style.display=bloqueado?'':'none';
 }
 function categoriasUnicas(){
   var cats=[];
@@ -1413,12 +1442,12 @@ function mEditLote(id){
   var po=PRODUCTOS.map(function(p){return '<option value="'+p.n+'"'+(l.esp===p.n?' selected':'')+'>'+p.n+'</option>';}).join('');
   modal('<div class="modal"><div class="modal-hdr"><div class="modal-title">Editar lote — '+l.esp+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
     '<div class="modal-body"><div class="fg2" style="display:grid;gap:10px">'+
-      '<div class="field"><label>Especie / producto</label><select id="el1">'+po+'</select></div>'+
+      '<div class="field"><label>Especie / producto</label><select id="el1" onchange="toggleCandadoPrecio(\'el1\',\'el5\')">'+po+'</select></div>'+
       '<div class="field"><label>Número de lote</label><input id="el2" type="text" value="'+l.lote+'"></div>'+
       '<div class="field"><label>Cantidad disponible</label><input id="el3" type="number" value="'+l.kg+'" min="0"></div>'+
       '<div class="field"><label>Unidad</label><select id="el8"><option value="kg"'+((l.unidad||'kg')==='kg'?' selected':'')+'>kg</option><option value="pz"'+(l.unidad==='pz'?' selected':'')+'>pz</option><option value="lt"'+(l.unidad==='lt'?' selected':'')+'>lt</option><option value="u"'+(l.unidad==='u'?' selected':'')+'>u</option></select></div>'+
       '<div class="field"><label>Costo por unidad ($)</label><input id="el4" type="number" value="'+(l.costo||0)+'" min="0"></div>'+
-      '<div class="field"><label>Precio venta ($)</label><input id="el5" type="number" value="'+(l.precio||0)+'" min="0"></div>'+
+      precioVentaCampoHTML('el5',l.esp,l.precio)+
       '<div class="field"><label>Fecha entrada</label><input id="el6" type="date" value="'+l.ent+'"></div>'+
       '<div class="field"><label>Fecha caducidad</label><input id="el7" type="date" value="'+l.cad+'"></div>'+
     '</div></div>'+
@@ -1432,7 +1461,7 @@ function saveEditLote(id){
   l.esp=g('el1').value; l.lote=g('el2').value.trim();
   l.kg=parseFloat(g('el3').value)||0; l.unidad=g('el8').value;
   l.costo=parseFloat(g('el4').value)||0;
-  l.precio=parseFloat(g('el5').value)||0;
+  l.precio=esSoloProceso(l.esp)?0:(parseFloat(g('el5').value)||0);
   l.ent=g('el6').value; l.cad=g('el7').value;
   if(l.costo!==costoAntes||l.precio!==precioAntes){
     audit('Actualizó precio de lote','Camara',l.esp+' · Lote '+l.lote+' · Costo '+money(costoAntes)+' → '+money(l.costo)+' · Precio '+money(precioAntes)+' → '+money(l.precio));
@@ -1493,7 +1522,7 @@ function mEntrada(){
       '<div class="field"><label>Proveedor</label><select id="e2"><option value="">Seleccionar...</option>'+pv+'</select></div>'+
       '<div class="field"><label id="e3-lbl">Cantidad recibida</label><input id="e3" type="number" placeholder="0" min="0"></div>'+
       '<div class="field"><label id="e4-lbl">Costo unitario ($)</label><input id="e4" type="number" placeholder="0" min="0"></div>'+
-      '<div class="field"><label>Precio venta ($)</label><input id="e4b" type="number" placeholder="0" min="0"></div>'+
+      precioVentaCampoHTML('e4b','','')+
       '<div class="field"><label>Número de lote</label><input id="e4c" type="text" placeholder="Ej: 5762"></div>'+
       '<div class="field"><label>Condiciones de pago</label><select id="e7"><option value="Crédito">Crédito</option><option value="Contado">Contado</option></select></div>'+
       '<div class="field"><label>Fecha de caducidad</label><input id="e6" type="date" value="'+fechaMas3Meses()+'"></div>'+
@@ -1507,10 +1536,11 @@ function updEntradaUnidad(){
   var u=(prod&&prod.u)||'kg';
   var l3=g('e3-lbl');if(l3)l3.textContent='Cantidad recibida ('+u+')';
   var l4=g('e4-lbl');if(l4)l4.textContent='Costo por '+u+' ($)';
+  toggleCandadoPrecio('e1','e4b');
 }
 function gEntrada(){
   var e=g('e1').value,pr=g('e2').value,k=parseFloat(g('e3').value)||0,c=parseFloat(g('e4').value)||0;
-  var precio=parseFloat(g('e4b').value)||0,loteNum=g('e4c').value.trim(),cad=g('e6').value,cond=g('e7').value;
+  var precio=esSoloProceso(e)?0:(parseFloat(g('e4b').value)||0),loteNum=g('e4c').value.trim(),cad=g('e6').value,cond=g('e7').value;
   if(!e||!pr||!k){alert('Completa los campos requeridos');return;}
   if(cond==='Contado'&&c*k>efectivoDeclarado){
     alert('Efectivo en caja insuficiente: '+money(efectivoDeclarado)+'\nTotal de esta compra: '+money(c*k));return;
@@ -3249,6 +3279,7 @@ function gAddClienteRapido(){
   if(CLIENTES.indexOf(n)<0){
     CLIENTES.push(n);
     audit('Agregó cliente','Notas',n);
+    CATALOGO_SUCIO=true;
     persist();
   }
   nuevaNota.cliente=n;
@@ -3418,7 +3449,7 @@ function mEntradaBodega(){
       '<div class="field"><label>Cantidad</label><input id="b3" type="number" placeholder="0" min="0"></div>'+
       '<div class="field"><label>Unidad</label><select id="b4"><option value="kg">kg</option><option value="pz">pz</option><option value="lt">lt</option><option value="u">u</option></select></div>'+
       '<div class="field"><label>Costo unitario ($)</label><input id="b5" type="number" placeholder="0" min="0"></div>'+
-      '<div class="field"><label>Precio venta ($)</label><input id="b6" type="number" placeholder="0" min="0"></div>'+
+      precioVentaCampoHTML('b6','','')+
       '<div class="field"><label>Número de lote</label><input id="b7" type="text" placeholder="Ej: 5801"></div>'+
       '<div class="field"><label>Fecha entrada</label><input id="b8" type="date" value="'+today()+'"></div>'+
     '</div></div>'+
@@ -3429,6 +3460,7 @@ function updEntradaBodegaUnidad(){
   var esp=g('b1')?g('b1').value:'';
   var prod=PRODUCTOS.find(function(p){return p.n===esp;});
   if(prod&&g('b4'))g('b4').value=prod.u;
+  toggleCandadoPrecio('b1','b6');
 }
 function gEntradaBodega(){
   var e=g('b1').value,pr=g('b2').value,k=parseFloat(g('b3').value)||0;
@@ -3436,7 +3468,7 @@ function gEntradaBodega(){
   var id=uid();
   var bLote=g('b7').value.trim()||('L-'+id),bUnit=g('b4').value;
   bodega.push({id:id,esp:e,lote:bLote,kg:k,unidad:bUnit,
-    costo:parseFloat(g('b5').value)||0,precio:parseFloat(g('b6').value)||0,ent:g('b8').value,prov:pr});
+    costo:parseFloat(g('b5').value)||0,precio:esSoloProceso(e)?0:(parseFloat(g('b6').value)||0),ent:g('b8').value,prov:pr});
   audit('Entrada directa bodega','Bodega',e+' · '+k+' '+bUnit+' · Lote:'+bLote+(pr?' · Prov:'+pr:''));
   persist();cm();nav('bodega');
 }
@@ -3445,12 +3477,12 @@ function mEditBodega(id){
   var po=PRODUCTOS.map(function(p){return '<option value="'+p.n+'"'+(l.esp===p.n?' selected':'')+'>'+p.n+'</option>';}).join('');
   modal('<div class="modal"><div class="modal-hdr"><div class="modal-title">Editar — '+l.esp+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
     '<div class="modal-body"><div class="fg2" style="display:grid;gap:10px">'+
-      '<div class="field"><label>Producto</label><select id="be1">'+po+'</select></div>'+
+      '<div class="field"><label>Producto</label><select id="be1" onchange="toggleCandadoPrecio(\'be1\',\'be6\')">'+po+'</select></div>'+
       '<div class="field"><label>Lote</label><input id="be2" type="text" value="'+l.lote+'"></div>'+
       '<div class="field"><label>Cantidad</label><input id="be3" type="number" value="'+l.kg+'" min="0"></div>'+
       '<div class="field"><label>Unidad</label><select id="be4"><option value="kg"'+(l.unidad==='kg'?' selected':'')+'>kg</option><option value="pz"'+(l.unidad==='pz'?' selected':'')+'>pz</option><option value="lt"'+(l.unidad==='lt'?' selected':'')+'>lt</option><option value="u"'+(l.unidad==='u'?' selected':'')+'>u</option></select></div>'+
       '<div class="field"><label>Costo ($)</label><input id="be5" type="number" value="'+(l.costo||0)+'" min="0"></div>'+
-      '<div class="field"><label>Precio ($)</label><input id="be6" type="number" value="'+(l.precio||0)+'" min="0"></div>'+
+      precioVentaCampoHTML('be6',l.esp,l.precio)+
     '</div></div>'+
     '<div class="modal-footer"><button class="btn" style="margin-right:auto" onclick="moverLote('+id+',\'camara\')">↪ Mover a Cámara</button><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gEditBodega('+id+')">Guardar</button></div>'+
   '</div>');
@@ -3461,7 +3493,7 @@ function gEditBodega(id){
   var costoAntes=l.costo||0,precioAntes=l.precio||0;
   l.esp=g('be1').value;l.lote=g('be2').value.trim();
   l.kg=parseFloat(g('be3').value)||0;l.unidad=g('be4').value;
-  l.costo=parseFloat(g('be5').value)||0;l.precio=parseFloat(g('be6').value)||0;
+  l.costo=parseFloat(g('be5').value)||0;l.precio=esSoloProceso(l.esp)?0:(parseFloat(g('be6').value)||0);
   if(l.costo!==costoAntes||l.precio!==precioAntes){
     audit('Actualizó precio de lote','Bodega',l.esp+' · Lote '+l.lote+' · Costo '+money(costoAntes)+' → '+money(l.costo)+' · Precio '+money(precioAntes)+' → '+money(l.precio));
   }
@@ -4555,6 +4587,7 @@ function saveEditItem(idx){
   if(maxV&&maxV>0)PRODUCTOS[idx].maxStock=maxV;else delete PRODUCTOS[idx].maxStock;
   if(n!==nombreAnterior)renombrarProductoEnTodo(nombreAnterior,n);
   PRODUCTOS.sort(function(a,b){return a.n.localeCompare(b.n,'es');});
+  CATALOGO_SUCIO=true;
   persist();cm();nav('config');
 }
 // Si se renombra un producto, el nombre viejo queda huérfano en todo lo que lo
@@ -4608,6 +4641,7 @@ function saveItem(tipo){
     CLIENTES.push(n);
     audit('Agregó cliente','Configuracion',n);
   }
+  CATALOGO_SUCIO=true;
   persist();cm();nav('config');
 }
 
@@ -4663,6 +4697,7 @@ function saveNuevoProcTipo(){
   PROC_TIPOS.push(n);
   PROC_REGLAS[n]={entradas:entradas,salidas:salidas};
   audit('Agregó tipo de proceso','Configuracion',n+(entradas.length?' · entradas: '+entradas.join(', '):'')+(salidas.length?' · salidas: '+salidas.join(', '):''));
+  CATALOGO_SUCIO=true;
   persist();cm();nav('config');
 }
 function mEditProcTipo(idx){
@@ -4683,6 +4718,7 @@ function saveEditProcTipo(idx){
   if(anterior!==n)delete PROC_REGLAS[anterior];
   PROC_REGLAS[n]={entradas:entradas,salidas:salidas};
   audit('Editó tipo de proceso','Configuracion',anterior+' → '+n);
+  CATALOGO_SUCIO=true;
   persist();cm();nav('config');
 }
 function delItem(tipo,idx){
@@ -4693,6 +4729,7 @@ function delItem(tipo,idx){
     else if(tipo==='proveedor') PROVEEDORES.splice(idx,1);
     else if(tipo==='cliente') CLIENTES.splice(idx,1);
     else if(tipo==='proc_tipo'){delete PROC_REGLAS[PROC_TIPOS[idx]];PROC_TIPOS.splice(idx,1);}
+    CATALOGO_SUCIO=true;
     persist();nav('config');
   },{detalle:nom});
 }
