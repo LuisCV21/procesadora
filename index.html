@@ -791,6 +791,7 @@ var notas=load('notas',[]);
 var NEXT_ID=load('next_id',100);
 var nextFolio=load('next_folio',1890);
 var nuevaNota=null;
+var EDITANDO_NOTA=null;
 var FILTRO_CAM='todos';
 var FILTRO_CAM_Q='';
 var FILTRO_NOTA_CLI='todos';
@@ -982,6 +983,7 @@ var TAB_INFO={
   pedidos:{t:'Pedidos a proveedores',s:'Órdenes de compra y recepciones'},
   notas:{t:'Notas de remisión',s:'Distribución a clientes · folios'},
   'nueva-nota':{t:'Nueva nota de entrega',s:'Captura de partidas · folio automático'},
+  'editar-partidas':{t:'Editar partidas de nota',s:'Corrige cantidades, precios o productos de una nota ya creada'},
   caja:{t:'Caja / Fondos',s:'Efectivo · inventario · cuentas por cobrar · compensaciones'},
   reportes:{t:'Reportes gerenciales',s:'Trazabilidad · costos · análisis'},
   config:{t:'Configuración del sistema',s:'Productos · proveedores · clientes · usuarios'},
@@ -1002,13 +1004,13 @@ function nav(tab){
   CUR_TAB=tab;
   closeSidebar();
   document.querySelectorAll('.nav-item').forEach(function(el){el.classList.remove('active');});
-  var ni=g('ni-'+( tab==='nueva-nota'?'notas':tab));
+  var ni=g('ni-'+( (tab==='nueva-nota'||tab==='editar-partidas')?'notas':tab));
   if(ni)ni.classList.add('active');
   var info=TAB_INFO[tab]||{t:tab,s:''};
   g('page-title').textContent=info.t;
   g('page-sub').textContent=info.s;
   updateBadges();
-  var fns={dashboard:rDash,precios:rPrecios,camara:rCam,bodega:rBodega,procesos:rProc,pedidos:rPed,notas:rNotas,'nueva-nota':rNuevaNota,caja:rCaja,reportes:rRep,config:rConfig};
+  var fns={dashboard:rDash,precios:rPrecios,camara:rCam,bodega:rBodega,procesos:rProc,pedidos:rPed,notas:rNotas,'nueva-nota':rNuevaNota,'editar-partidas':rEditarPartidas,caja:rCaja,reportes:rRep,config:rConfig};
   g('content').innerHTML=fns[tab]?fns[tab]():'';
   g('topbar-act').innerHTML=tbAct(tab);
 }
@@ -2842,7 +2844,10 @@ function renderEdnInfo(){
       '<div style="font-weight:700">Nota #'+n.folio+' — '+n.cliente+'</div>'+
       '<div style="color:var(--text3);font-size:13px;margin-top:2px">'+money(n.total)+' · '+(n.condiciones||'—')+' · '+fmtFecha(n.fecha)+'</div>'+
     '</div>'+
-    '<button class="btn btn-d" onclick="cm();elimNota('+n.id+')">Eliminar esta nota</button>';
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+      '<button class="btn btn-p" onclick="cm();mEditarPartidasNota('+n.id+')">✏ Editar partidas</button>'+
+      '<button class="btn btn-d" onclick="cm();elimNota('+n.id+')">Eliminar esta nota</button>'+
+    '</div>';
 }
 
 function estN(id,e){
@@ -2970,7 +2975,14 @@ function gAbonarNota(id){
 function elimNota(id){
   var n=notas.find(function(x){return x.id===id;});
   confirmarEliminar('¿Eliminar esta nota de remisión? Esta acción no se puede deshacer.',function(){
-    if(n)audit('Eliminó nota','Notas','Nota #'+n.folio+' · '+n.cliente+' · '+money(n.total));
+    if(n){
+      audit('Eliminó nota','Notas','Nota #'+n.folio+' · '+n.cliente+' · '+money(n.total));
+      // Al eliminar se debe devolver el stock que esta nota había descontado de cámara/bodega.
+      (n.partidas||[]).forEach(function(p){
+        var lote=buscarLoteVenta(p.loteId);
+        if(lote)lote.kg=parseFloat((lote.kg+p.cant).toFixed(3));
+      });
+    }
     notas=notas.filter(function(x){return x.id!==id;});
     persist();nav('notas');
   },{palabra:'ELIMINAR',detalle:n?'Nota #'+n.folio+' · '+n.cliente+' · '+money(n.total):''});
@@ -3367,6 +3379,158 @@ function gNota(){
     partidas:parts,total:tot,est:'pendiente',pagada:cond==='Contado'});
   audit('Creó nota de remisión','Notas','Nota #'+folioNuevo+' · '+nuevaNota.cliente+' · '+money(tot));
   persist();initNN();nav('notas');
+}
+
+// Edición de partidas de una nota ya creada (ej. Jannet capturó 15 kg pero
+// solo se enviaron 5). Permite corregir cantidad/precio/producto y reconcilia
+// el inventario: primero "revierte" lo que esta nota había descontado y luego
+// vuelve a descontar según las partidas corregidas, validando stock disponible.
+function mEditarPartidasNota(id){
+  var n=notas.find(function(x){return x.id===id;});if(!n)return;
+  EDITANDO_NOTA={id:id,partidas:n.partidas.map(function(p){
+    return {cant:p.cant,unidad:p.unidad||'kg',loteId:p.loteId,precio:p.precio,importe:p.importe,concepto:p.concepto,lote:p.lote,costo:p.costo,_original:true};
+  })};
+  nav('editar-partidas');
+}
+function rEditarPartidas(){
+  if(!EDITANDO_NOTA)return '<div class="card"><div class="card-body">No hay ninguna nota en edición. <button class="btn" onclick="nav(\'notas\')">Volver</button></div></div>';
+  var n=notas.find(function(x){return x.id===EDITANDO_NOTA.id;});
+  if(!n){EDITANDO_NOTA=null;return '<div class="card"><div class="card-body">Nota no encontrada. <button class="btn" onclick="nav(\'notas\')">Volver</button></div></div>';}
+  var loteOpciones=lotesVentaDisp().map(function(o){
+    var l=o.ref;
+    return {value:l.id,label:l.esp+' — Lote '+l.lote+' ('+l.kg.toFixed(1)+' '+(l.unidad||'kg')+' · costo: '+money(l.costo||0)+'/'+(l.unidad||'kg')+' · '+o.origen+')'};
+  });
+  var tot=EDITANDO_NOTA.partidas.reduce(function(a,p){return a+(parseFloat(p.importe)||0);},0);
+  var filas=EDITANDO_NOTA.partidas.map(function(p,i){
+    var productoCol=p._original?
+      '<div style="padding:8px 9px;font-size:14px;background:var(--bg3);border-radius:var(--r);color:var(--text2)">'+p.concepto+' — Lote '+p.lote+'</div>':
+      buscableHTML('epl'+i,loteOpciones,'Buscar producto o lote...',p.loteId,'epAun',i);
+    return '<div class="part-row" id="eprow'+i+'">'+
+      '<div class="field"><label>Cant.</label><input id="epc'+i+'" type="number" value="'+p.cant+'" min="0" placeholder="0" style="padding:8px 9px;font-size:15px" oninput="epCimp('+i+')"></div>'+
+      '<div class="field" style="grid-column:span 1"><label>Producto / Lote</label>'+productoCol+'</div>'+
+      '<div class="field"><label>Precio $</label><input id="epp'+i+'" type="number" value="'+p.precio+'" min="0" placeholder="0" style="padding:8px 9px;font-size:15px" oninput="epCimp('+i+')"></div>'+
+      '<div class="field"><label>Importe $</label><input id="epi'+i+'" type="number" value="'+p.importe+'" min="0" placeholder="0" style="padding:8px 9px;font-size:15px" oninput="epUpdT()"></div>'+
+      '<button class="btn btn-icon btn-d" style="margin-top:20px" onclick="epElP('+i+')">✕</button>'+
+    '</div>';
+  }).join('');
+  return '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'+
+    '<button class="btn" onclick="cancelarEditarPartidas()">← Cancelar</button>'+
+    '<div style="display:flex;gap:8px"><button class="btn" onclick="epAddP()">+ Agregar renglón</button><button class="btn btn-p" onclick="gEditarPartidas()">Guardar cambios</button></div>'+
+  '</div>'+
+  '<div class="card"><div class="card-hdr"><div class="card-title">Nota #'+n.folio+' — '+n.cliente+'</div></div><div class="card-body">'+
+    '<div style="color:var(--text3);font-size:13px">'+fmtFecha(n.fecha)+' · '+(n.condiciones||'—')+' · Estado: '+n.est+'</div>'+
+  '</div></div>'+
+  '<div class="card"><div class="card-hdr"><div class="card-title">Partidas <span style="font-size:13px;color:var(--text3);font-weight:normal">— Corrige cantidad, precio o producto; el stock disponible ya considera lo reservado por esta nota</span></div></div><div class="card-body">'+
+    '<div style="display:grid;grid-template-columns:70px 1fr 82px 90px 32px;gap:6px;padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:8px">'+
+      ['Cant.','Producto / Lote','Precio $','Importe $',''].map(function(h){return '<span style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase">'+h+'</span>';}).join('')+
+    '</div>'+filas+
+    '<hr class="div">'+
+    '<div style="display:flex;justify-content:flex-end;align-items:baseline;gap:12px">'+
+      '<span style="font-size:13px;color:var(--text3);font-weight:700;text-transform:uppercase">TOTAL</span>'+
+      '<span id="ep-td" style="font-size:24px;font-weight:700;color:var(--accent)">'+money(tot)+'</span>'+
+    '</div>'+
+  '</div></div>';
+}
+function epSync(){
+  if(!EDITANDO_NOTA)return;
+  for(var i=0;i<EDITANDO_NOTA.partidas.length;i++){
+    var c=g('epc'+i);if(c)EDITANDO_NOTA.partidas[i].cant=c.value;
+    var pr=g('epp'+i);if(pr)EDITANDO_NOTA.partidas[i].precio=pr.value;
+    var im=g('epi'+i);if(im)EDITANDO_NOTA.partidas[i].importe=im.value;
+    var lid=g('epl'+i);if(lid)EDITANDO_NOTA.partidas[i].loteId=parseInt(lid.value)||'';
+  }
+}
+function epCimp(i){
+  var c=parseFloat(g('epc'+i)?g('epc'+i).value:0)||0;
+  var p=parseFloat(g('epp'+i)?g('epp'+i).value:0)||0;
+  var imp=c*p;
+  if(g('epi'+i))g('epi'+i).value=imp>0?imp.toFixed(0):'';
+  epUpdT();
+}
+function epUpdT(){
+  epSync();
+  var tot=0;
+  EDITANDO_NOTA.partidas.forEach(function(p){tot+=parseFloat(p.importe)||0;});
+  var el=g('ep-td');if(el)el.textContent=money(tot);
+}
+function epAddP(){
+  epSync();
+  EDITANDO_NOTA.partidas.push({cant:'',unidad:'kg',loteId:'',precio:'',importe:'',_original:false});
+  nav('editar-partidas');
+}
+function epElP(i){
+  epSync();
+  EDITANDO_NOTA.partidas.splice(i,1);
+  nav('editar-partidas');
+}
+function epAun(i){
+  var epl=g('epl'+i);if(!epl)return;
+  var lid=parseInt(epl.value);
+  var lote=buscarLoteVenta(lid);
+  if(lote){
+    EDITANDO_NOTA.partidas[i].loteId=lid;
+    var pr=g('epp'+i);
+    if(pr&&!pr.value)pr.value=lote.precio||'';
+    epCimp(i);
+  }
+}
+function cancelarEditarPartidas(){EDITANDO_NOTA=null;nav('notas');}
+
+function gEditarPartidas(){
+  epSync();
+  var n=notas.find(function(x){return x.id===EDITANDO_NOTA.id;});if(!n)return;
+  // Cuánto tenía reservado (descontado) esta nota, por lote — es lo "disponible extra"
+  // al validar, porque ese stock ya salió de cámara/bodega por esta misma nota.
+  var origPorLote={};
+  n.partidas.forEach(function(p){origPorLote[p.loteId]=(origPorLote[p.loteId]||0)+p.cant;});
+  var nuevas=[],errStock=[],usoNuevo={};
+  EDITANDO_NOTA.partidas.forEach(function(p){
+    var loteId=parseInt(p.loteId)||null;
+    var cant=parseFloat(p.cant)||0;
+    if(!loteId||cant<=0)return;
+    var lote=buscarLoteVenta(loteId);
+    if(!lote){errStock.push('Lote no encontrado (id '+loteId+')');return;}
+    usoNuevo[loteId]=(usoNuevo[loteId]||0)+cant;
+    nuevas.push({cant:cant,unidad:lote.unidad||'kg',concepto:lote.esp,lote:lote.lote,loteId:lote.id,
+      precio:parseFloat(p.precio)||0,importe:parseFloat(p.importe)||0,costo:lote.costo||0});
+  });
+  if(nuevas.length===0){alert('La nota debe tener al menos una partida válida');return;}
+  Object.keys(usoNuevo).forEach(function(loteIdStr){
+    var loteId=parseInt(loteIdStr);
+    var lote=buscarLoteVenta(loteId);
+    var disponible=(lote?lote.kg:0)+(origPorLote[loteId]||0);
+    if(usoNuevo[loteId]>disponible+0.0001){
+      errStock.push((lote?lote.esp+' Lote '+lote.lote:'Lote '+loteId)+': solicitado '+usoNuevo[loteId]+', disponible '+disponible.toFixed(1));
+    }
+  });
+  if(errStock.length>0){alert('Stock insuficiente:\n'+errStock.join('\n'));return;}
+
+  // Revertir el descuento original y aplicar el nuevo, lote por lote.
+  n.partidas.forEach(function(p){
+    var lote=buscarLoteVenta(p.loteId);
+    if(lote)lote.kg=parseFloat((lote.kg+p.cant).toFixed(3));
+  });
+  nuevas.forEach(function(p){
+    var lote=buscarLoteVenta(p.loteId);
+    if(lote)lote.kg=Math.max(0,parseFloat((lote.kg-p.cant).toFixed(3)));
+  });
+
+  var totalAnterior=n.total;
+  var nuevoTotal=nuevas.reduce(function(a,p){return a+p.importe;},0);
+  n.partidas=nuevas;
+  n.total=nuevoTotal;
+  var abonado=n.abonos?n.abonos.reduce(function(a,b){return a+b.monto;},0):0;
+  if(n.condiciones==='Contado'){
+    // El total original ya se había sumado a caja al enviar/crear; solo se ajusta la diferencia.
+    efectivoDeclarado+=(nuevoTotal-totalAnterior);
+    n.pagada=true;
+  }else{
+    n.pagada=nuevoTotal>0&&abonado>=nuevoTotal;
+    if(n.pagada)n.est='pagada';else if(n.est==='pagada')n.est='entregada';
+  }
+  audit('Editó partidas de nota','Notas','Nota #'+n.folio+' · '+n.cliente+' · Total '+money(totalAnterior)+' → '+money(nuevoTotal));
+  EDITANDO_NOTA=null;
+  persist();nav('notas');
 }
 
 // ══════════════════════════════════════════════════════
