@@ -367,7 +367,42 @@ hr.div{border:none;border-top:1px solid var(--border);margin:14px 0}
 // ══════════════════════════════════════════════════════
 var SB_URL='https://rtzabviyigjmulrdxsuh.supabase.co';
 var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ0emFidml5aWdqbXVscmR4c3VoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5OTIxMDYsImV4cCI6MjA5MjU2ODEwNn0.a2aTG0EU2Rtb5PWNcNgSZiquCoVvKBuVZ_RqccfODZg';
-var SB_HEADERS={'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY};
+
+// ── Sesión real de Supabase Auth (RLS exige un JWT autenticado; la anon key
+// sola ya no tiene permisos de lectura/escritura sobre bodega_data/empleados) ──
+var AUTH=null; // {access_token,refresh_token,expires_at,user_id}
+function authHeaders(extra){
+  return Object.assign({'Content-Type':'application/json','apikey':SB_KEY,
+    'Authorization':'Bearer '+(AUTH&&AUTH.access_token?AUTH.access_token:SB_KEY)},extra||{});
+}
+function guardarAuthLocal(){try{if(AUTH)localStorage.setItem('bmp_auth',JSON.stringify(AUTH));else localStorage.removeItem('bmp_auth');}catch(e){}}
+function cargarAuthLocal(){try{var v=localStorage.getItem('bmp_auth');return v?JSON.parse(v):null;}catch(e){return null;}}
+function borrarAuthLocal(){try{localStorage.removeItem('bmp_auth');}catch(e){}}
+// El login sigue pidiendo solo "usuario" (sin correo) — se mapea a un correo
+// interno ficticio que nunca se muestra, solo lo usa Supabase Auth.
+function loginAEmail(u){return u.replace(/[^a-z0-9._-]/g,'')+'@procesadora.local';}
+
+async function refrescarAuth(){
+  if(!AUTH||!AUTH.refresh_token)return false;
+  try{
+    var r=await fetch(SB_URL+'/auth/v1/token?grant_type=refresh_token',{
+      method:'POST',headers:{'Content-Type':'application/json','apikey':SB_KEY},
+      body:JSON.stringify({refresh_token:AUTH.refresh_token})
+    });
+    var d=await r.json();
+    if(!r.ok||!d.access_token)return false;
+    AUTH={access_token:d.access_token,refresh_token:d.refresh_token,expires_at:Date.now()+(d.expires_in*1000),user_id:d.user.id};
+    guardarAuthLocal();
+    return true;
+  }catch(e){return false;}
+}
+// Renueva el token si está por vencer; si no hay sesión, no hace nada (el
+// caller recibe false y debe tratarlo como "sin permisos").
+async function asegurarAuth(){
+  if(!AUTH)return false;
+  if(AUTH.expires_at-Date.now()<120000)return await refrescarAuth();
+  return true;
+}
 
 // localStorage como caché local inmediato
 function saveLocal(key,val){try{localStorage.setItem('bmp_'+key,JSON.stringify(val));}catch(e){}}
@@ -422,11 +457,14 @@ setInterval(reintentarPendientes,8000);
 // Guardar en Supabase (upsert) — si falla, se guarda en la cola de pendientes
 function sbSetReal(key,val){
   var body=JSON.stringify({key:key,value:val});
-  return fetch(SB_URL+'/rest/v1/bodega_data?on_conflict=key&apikey='+SB_KEY,{
-    method:'POST',
-    headers:Object.assign({'Prefer':'resolution=merge-duplicates'},SB_HEADERS),
-    body:body
-  }).then(function(r){sbStatus(r.ok);return r;})
+  return asegurarAuth().then(function(ok){
+    if(!ok)return null;
+    return fetch(SB_URL+'/rest/v1/bodega_data?on_conflict=key&apikey='+SB_KEY,{
+      method:'POST',
+      headers:Object.assign({'Prefer':'resolution=merge-duplicates'},authHeaders()),
+      body:body
+    });
+  }).then(function(r){if(r)sbStatus(r.ok);return r;})
   .catch(function(e){sbStatus(false);console.warn('sbSet error:',key,e);return null;});
 }
 function sbSet(key,val){
@@ -439,18 +477,25 @@ function sbSet(key,val){
 
 // Leer de Supabase
 function sbGet(key){
-  return fetch(SB_URL+'/rest/v1/bodega_data?key=eq.'+encodeURIComponent(key)+'&select=value&apikey='+SB_KEY,{
-    headers:SB_HEADERS
-  }).then(function(r){return r.json();})
+  return asegurarAuth().then(function(ok){
+    if(!ok)return null;
+    return fetch(SB_URL+'/rest/v1/bodega_data?key=eq.'+encodeURIComponent(key)+'&select=value&apikey='+SB_KEY,{
+      headers:authHeaders()
+    });
+  }).then(function(r){return r?r.json():null;})
   .then(function(rows){return rows&&rows.length>0?rows[0].value:null;})
   .catch(function(){return null;});
 }
 
 // Leer todos los datos de una sola vez al arrancar
 function sbGetAll(){
-  return fetch(SB_URL+'/rest/v1/bodega_data?select=key,value&apikey='+SB_KEY,{
-    headers:SB_HEADERS
+  return asegurarAuth().then(function(ok){
+    if(!ok)return null;
+    return fetch(SB_URL+'/rest/v1/bodega_data?select=key,value&apikey='+SB_KEY,{
+      headers:authHeaders()
+    });
   }).then(function(r){
+    if(!r){sbStatus(false);return {};}
     sbStatus(r.ok);
     return r.json();
   }).then(function(rows){
@@ -470,29 +515,23 @@ function load(key,def){
 }
 
 // ══════════════════════════════════════════════════════
-//  USUARIOS / AUTH
+//  USUARIOS / AUTH — Supabase Auth real + tabla empleados
 // ══════════════════════════════════════════════════════
-// Usuario temporal de configuración inicial — reemplazar desde Configuración > Usuarios
-var USERS_DEF=[
-  {id:1,user:'setup',pass:'Setup@BMP2026',nombre:'Configuración inicial',rol:'admin',avatar:'S',color:'#1d9e75'},
-];
-// Limpiar credenciales antiguas del localStorage (sin tocar Supabase)
-var USERS_VER=2;
-if(parseInt(localStorage.getItem('bmp_users_ver')||'1')<USERS_VER){
-  localStorage.removeItem('bmp_users');
-  localStorage.setItem('bmp_users_ver',USERS_VER);
+// La lista de empleados (nombre/usuario/rol) se carga después de iniciar
+// sesión desde la tabla `empleados`, protegida por RLS.
+var EMPLEADOS=[];
+function cargarEmpleados(){
+  return asegurarAuth().then(function(ok){
+    if(!ok)return [];
+    return fetch(SB_URL+'/rest/v1/empleados?select=*',{headers:authHeaders()});
+  }).then(function(r){return r?r.json():[];})
+  .then(function(rows){EMPLEADOS=Array.isArray(rows)?rows:[];return EMPLEADOS;})
+  .catch(function(){return EMPLEADOS;});
 }
-// Supabase es la fuente de verdad para usuarios; USERS_DEF es solo el último recurso
-var USERS=load('users',USERS_DEF);
+
 var SESSION=load('session',null);
 var ROL='gerente';
 var CUR_USER=null;
-
-// ── Seguridad: hash SHA-256 ────────────────────────────
-async function hashPass(s){
-  var buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));
-  return Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,'0');}).join('');
-}
 
 // ── Seguridad: límite de intentos ─────────────────────
 var _lb=JSON.parse(localStorage.getItem('bmp_lb')||'{"n":0,"hasta":0}');
@@ -508,42 +547,74 @@ function _loginBloqueado(){
   return false;
 }
 
+function _loginFallo(){
+  _lb.n++;
+  if(_lb.n>=5){_lb.n=0;_lb.hasta=Date.now()+5*60*1000;}
+  _saveLb();
+  var restantes=Math.max(0,5-_lb.n);
+  g('login-err').textContent='Usuario o contraseña incorrectos.'+(restantes>0?' ('+restantes+' intentos restantes)':'');
+  g('login-err').style.display='block';
+}
+
 async function doLogin(){
   if(_loginBloqueado())return;
   var u=g('li-user').value.trim().toLowerCase();
   var p=g('li-pass').value;
+  if(!u){g('login-err').textContent='Escribe tu usuario.';g('login-err').style.display='block';return;}
   if(!p){g('login-err').textContent='Escribe tu contraseña.';g('login-err').style.display='block';return;}
-  var h=await hashPass(p);
-  // Acepta hash nuevo O texto plano (migración automática)
-  var found=USERS.find(function(x){return x.user===u&&(x.pass===h||x.pass===p);});
-  if(!found){
-    _lb.n++;
-    if(_lb.n>=5){_lb.n=0;_lb.hasta=Date.now()+5*60*1000;}
-    _saveLb();
-    var restantes=Math.max(0,5-_lb.n);
-    g('login-err').textContent='Usuario o contraseña incorrectos.'+(restantes>0?' ('+restantes+' intentos restantes)':'');
+  g('login-err').style.display='none';
+  var res,data;
+  try{
+    res=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{
+      method:'POST',headers:{'Content-Type':'application/json','apikey':SB_KEY},
+      body:JSON.stringify({email:loginAEmail(u),password:p})
+    });
+    data=await res.json();
+  }catch(e){
+    g('login-err').textContent='No se pudo conectar. Revisa tu internet.';
     g('login-err').style.display='block';
     return;
   }
-  // Migrar a hash si aún era texto plano
-  if(found.pass===p&&found.pass!==h){found.pass=h;save('users',USERS);}
+  if(!res.ok||!data.access_token){_loginFallo();return;}
+  AUTH={access_token:data.access_token,refresh_token:data.refresh_token,expires_at:Date.now()+(data.expires_in*1000),user_id:data.user.id};
+  var emp=null;
+  try{
+    var empRes=await fetch(SB_URL+'/rest/v1/empleados?id=eq.'+data.user.id+'&select=*',{headers:authHeaders()});
+    var rows=await empRes.json();
+    emp=rows&&rows[0]?rows[0]:null;
+  }catch(e){emp=null;}
+  if(!emp){
+    // La cuenta existe en Supabase Auth pero no está autorizada como empleado.
+    AUTH=null;
+    _loginFallo();
+    return;
+  }
   _lb.n=0;_lb.hasta=0;_saveLb();
+  guardarAuthLocal();
+  var found={id:emp.id,user:u,nombre:emp.nombre,rol:emp.rol,avatar:emp.avatar,color:emp.color};
   SESSION=found;CUR_USER=found;ROL=found.rol;
   audit('Inició sesión','Sistema','');
   saveLocal('session',Object.assign({},found,{loginTime:Date.now()}));
-  g('login-err').style.display='none';
   g('login-screen').style.display='none';
+  var tieneLocal=!!localStorage.getItem('bmp_camara');
+  if(!tieneLocal)mostrarCargando();
+  await Promise.all([cargarDatosIniciales(),cargarEmpleados()]);
+  ocultarCargando();
   g('app').classList.add('visible');
   updateUserUI();
   if(ROL!=='admin'&&ROL!=='gerente')g('ni-config-wrap').style.display='none';
   if(ROL==='admin')g('ni-precios-wrap').style.display='';
   nav('dashboard');
+  iniciarRealtime();
 }
 
 function doLogout(){
   audit('Cerró sesión','Sistema','');
   persistAuditLog();
-  SESSION=null;saveLocal('session',null);
+  detenerRealtime();
+  SESSION=null;AUTH=null;
+  saveLocal('session',null);
+  borrarAuthLocal();
   location.reload();
 }
 
@@ -4705,18 +4776,18 @@ function rConfig(){
           '<button class="btn btn-xs btn-d" onclick="delItem(\'proc_tipo\','+i+')">Eliminar</button></div></div>';
       }).join('')+'</div>';
   } else if(CFG_TAB==='usuarios'){
-    body='<div class="card-hdr"><div class="card-title">Usuarios del sistema</div><button class="btn btn-p" onclick="mAddUsuario()">+ Agregar usuario</button></div>'+
+    body='<div class="card-hdr"><div class="card-title">Usuarios del sistema</div><div style="display:flex;gap:8px"><button class="btn" onclick="mCambiaMiPass()">Cambiar mi contraseña</button><button class="btn btn-p" onclick="mAddUsuario()">+ Agregar usuario</button></div></div>'+
       '<div class="tw"><table><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Acciones</th></tr></thead><tbody>'+
-      USERS.map(function(u){
+      EMPLEADOS.map(function(u){
         var rolLabel={admin:'Administrador',gerente:'Gerente'}[u.rol]||u.rol;
         var rolPill={admin:'p-ok',gerente:'p-info'}[u.rol]||'p-gray';
-        return '<tr><td class="pr">'+u.nombre+'</td><td class="mn">'+u.user+'</td><td><span class="pill '+rolPill+'">'+rolLabel+'</span></td>'+
+        return '<tr><td class="pr">'+u.nombre+'</td><td class="mn">'+u.user_login+'</td><td><span class="pill '+rolPill+'">'+rolLabel+'</span></td>'+
           '<td><div style="display:flex;gap:3px">'+
-            '<button class="btn btn-xs" onclick="mCambiaPass('+u.id+')">Cambiar contraseña</button>'+
-            (u.id!==1?'<button class="btn btn-xs btn-d" onclick="delUser('+u.id+')">Eliminar</button>':'')+
+            (EMPLEADOS.length>1?'<button class="btn btn-xs btn-d" onclick="delUser(\''+u.id+'\')">Eliminar</button>':'')+
           '</div></td></tr>';
       }).join('')+
-      '</tbody></table></div>';
+      '</tbody></table></div>'+
+      '<div style="font-size:12px;color:var(--text3);margin-top:8px">Cada quien cambia su propia contraseña con el botón de arriba. Para forzar el cambio de la de alguien más, elimínalo y créalo de nuevo.</div>';
   } else if(CFG_TAB==='auditoria'){
     var auFiltU=window._AU_FILT||'todos';
     var ymAud=MES_SEL.auditoria;
@@ -5060,48 +5131,75 @@ function mAddUsuario(){
 async function gUsuario(){
   var n=g('un').value.trim(),u=g('uu').value.trim().toLowerCase(),p=g('up').value,r=g('ur').value;
   if(!n||!u||!p){alert('Completa todos los campos');return;}
-  if(USERS.find(function(x){return x.user===u;})){alert('Ese nombre de usuario ya existe');return;}
+  if(p.length<6){alert('La contraseña debe tener al menos 6 caracteres');return;}
+  if(EMPLEADOS.find(function(x){return x.user_login===u;})){alert('Ese nombre de usuario ya existe');return;}
   var cols={admin:'#1d9e75',gerente:'#388bfd'};
-  var h=await hashPass(p);
-  USERS.push({id:uid(),user:u,pass:h,nombre:n,rol:r,avatar:n[0].toUpperCase(),color:cols[r]||'#388bfd'});
+  var ok=await asegurarAuth();
+  if(!ok){alert('Tu sesión expiró, vuelve a iniciar sesión.');return;}
+  var res,data;
+  try{
+    // El registro usa la anon key (no requiere estar autenticado); crea la
+    // cuenta en Supabase Auth pero NO toca la sesión activa del admin.
+    res=await fetch(SB_URL+'/auth/v1/signup',{
+      method:'POST',headers:{'Content-Type':'application/json','apikey':SB_KEY},
+      body:JSON.stringify({email:loginAEmail(u),password:p})
+    });
+    data=await res.json();
+  }catch(e){alert('No se pudo crear el usuario (sin conexión).');return;}
+  var nuevoId=data&&(data.id||(data.user&&data.user.id));
+  if(!res.ok||!nuevoId){
+    alert('No se pudo crear el usuario: '+((data&&(data.msg||data.error_description))||'error desconocido'));
+    return;
+  }
+  var nuevo={id:nuevoId,user_login:u,nombre:n,rol:r,avatar:n[0].toUpperCase(),color:cols[r]||'#388bfd'};
+  var insRes;
+  try{
+    insRes=await fetch(SB_URL+'/rest/v1/empleados',{
+      method:'POST',headers:Object.assign({'Prefer':'return=representation'},authHeaders()),
+      body:JSON.stringify(nuevo)
+    });
+  }catch(e){insRes=null;}
+  if(!insRes||!insRes.ok){alert('El usuario se creó pero no se pudo registrar su perfil. Contacta soporte.');return;}
+  EMPLEADOS.push(nuevo);
   audit('Creó usuario','Usuarios',n+' ('+u+') · '+r);
-  // uid() avanza NEXT_ID en memoria — hay que guardarlo también, si no la próxima
-  // creación (en otra sesión/dispositivo) reparte el mismo id otra vez.
-  save('users',USERS);save('next_id',NEXT_ID);cm();nav('config');
-}
-// Auto-reparación: si por una carrera entre dispositivos dos usuarios quedaron con el
-// mismo id, USERS.find(id) siempre regresa al primero — así todas las acciones (eliminar,
-// cambiar contraseña) de cualquier usuario terminaban aplicándose al primer usuario duplicado.
-function repararIdsUsuariosDuplicados(){
-  var vistos={};
-  var cambio=false;
-  USERS.forEach(function(u){
-    if(vistos[u.id]){u.id=uid();cambio=true;}
-    vistos[u.id]=true;
-  });
-  if(cambio){save('users',USERS);save('next_id',NEXT_ID);}
+  cm();nav('config');
 }
 
-function mCambiaPass(id){
-  modal('<div class="modal" style="max-width:340px"><div class="modal-hdr"><div class="modal-title">Cambiar contraseña</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+function mCambiaMiPass(){
+  modal('<div class="modal" style="max-width:340px"><div class="modal-hdr"><div class="modal-title">Cambiar mi contraseña</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
     '<div class="modal-body"><div class="field"><label>Nueva contraseña</label><input id="cp" type="password" placeholder="••••••"></div></div>'+
-    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gPass('+id+')">Guardar</button></div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gMiPass()">Guardar</button></div>'+
   '</div>');
 }
-async function gPass(id){
+async function gMiPass(){
   var p=g('cp').value;
-  if(!p||p.length<3){alert('La contraseña debe tener al menos 3 caracteres');return;}
-  var u=USERS.find(function(x){return x.id===id;});
-  if(u)u.pass=await hashPass(p);
-  save('users',USERS);cm();nav('config');
+  if(!p||p.length<6){alert('La contraseña debe tener al menos 6 caracteres');return;}
+  var ok=await asegurarAuth();
+  if(!ok){alert('Tu sesión expiró, vuelve a iniciar sesión.');return;}
+  var r;
+  try{
+    r=await fetch(SB_URL+'/auth/v1/user',{method:'PUT',headers:authHeaders(),body:JSON.stringify({password:p})});
+  }catch(e){r=null;}
+  if(r&&r.ok){audit('Cambió su contraseña','Usuarios','');cm();alert('Contraseña actualizada.');}
+  else{alert('No se pudo cambiar la contraseña.');}
 }
+
 function delUser(id){
-  var u=USERS.find(function(x){return x.id===id;});
-  confirmarEliminar('¿Eliminar este usuario?',function(){
-    if(u)audit('Eliminó usuario','Usuarios',u.nombre+' ('+u.user+') · '+u.rol);
-    USERS=USERS.filter(function(x){return x.id!==id;});
-    save('users',USERS);nav('config');
-  },{detalle:u?u.nombre+' ('+u.user+') · '+u.rol:''});
+  var u=EMPLEADOS.find(function(x){return x.id===id;});
+  confirmarEliminar('¿Eliminar este usuario? Ya no podrá iniciar sesión.',function(){
+    asegurarAuth().then(function(ok){
+      if(!ok)return null;
+      return fetch(SB_URL+'/rest/v1/empleados?id=eq.'+id,{method:'DELETE',headers:authHeaders()});
+    }).then(function(r){
+      if(r&&r.ok){
+        if(u)audit('Eliminó usuario','Usuarios',u.nombre+' ('+u.user_login+') · '+u.rol);
+        EMPLEADOS=EMPLEADOS.filter(function(x){return x.id!==id;});
+        nav('config');
+      } else {
+        alert('No se pudo eliminar el usuario.');
+      }
+    });
+  },{detalle:u?u.nombre+' ('+u.user_login+') · '+u.rol:''});
 }
 
 // ══════════════════════════════════════════════════════
@@ -5193,7 +5291,6 @@ function aplicarDatos(data){
   if(data.temp_logs)tempLogs=data.temp_logs;
   if(data.vales)vales=data.vales;
   if(data.auditLog)auditLog=mergeAuditPorId(auditLog,data.auditLog);
-  if(data.users){USERS=data.users;repararIdsUsuariosDuplicados();}
   if(data.meta_patrimonio!==undefined&&data.meta_patrimonio!==null)metaPatrimonio=data.meta_patrimonio;
   if(data.gastos)gastos=data.gastos;
   if(data.saldo_inicial_caja)saldoInicialCaja=data.saldo_inicial_caja;
@@ -5219,23 +5316,53 @@ function ocultarCargando(){
 }
 
 var SESSION_MAX=8*60*60*1000; // 8 horas
-function arrancar(){
+
+// Trae el catálogo/movimientos de bodega_data — requiere sesión de Supabase Auth
+// vigente (RLS bloquea todo lo demás). Se usa tanto al restaurar sesión como
+// justo después de un login exitoso.
+function cargarDatosIniciales(){
+  return asegurarAuth().then(function(ok){
+    if(!ok)return null;
+    return fetch(SB_URL+'/rest/v1/bodega_data?select=key,value&apikey='+SB_KEY,{headers:authHeaders()});
+  }).then(function(r){
+    if(!r)return;
+    return r.json().then(function(rows){
+      if(Array.isArray(rows)&&rows.length>0){
+        var data={};
+        rows.forEach(function(row){data[row.key]=row.value;});
+        aplicarDatos(data);
+        sbStatus(true);
+        if(CUR_TAB)nav(CUR_TAB);
+      }
+    });
+  }).catch(function(){sbStatus(false);});
+}
+
+// Restaura una sesión ya iniciada (recarga de página); si no hay una sesión
+// de Supabase Auth utilizable, se queda en la pantalla de login — ya no se
+// descarga ningún dato sin haber iniciado sesión.
+async function iniciarApp(){
   initNN();
+  AUTH=cargarAuthLocal();
   var session=loadLocal('session',null);
-  if(session){
-    if(Date.now()-(session.loginTime||0)>SESSION_MAX){
-      saveLocal('session',null);
-      session=null;
-    } else {
-      SESSION=session;CUR_USER=session;ROL=session.rol;
-      g('login-screen').style.display='none';
-      g('app').classList.add('visible');
-      updateUserUI();
-      if(ROL!=='admin'&&ROL!=='gerente')g('ni-config-wrap').style.display='none';
-      if(ROL==='admin')g('ni-precios-wrap').style.display='';
-      nav('dashboard');
-    }
+  var sesionVigente=session&&(Date.now()-(session.loginTime||0)<=SESSION_MAX);
+  if(!AUTH||!sesionVigente){
+    AUTH=null;borrarAuthLocal();
+    saveLocal('session',null);
+    return;
   }
+  var ok=await asegurarAuth();
+  if(!ok){
+    AUTH=null;borrarAuthLocal();saveLocal('session',null);
+    return;
+  }
+  SESSION=session;CUR_USER=session;ROL=session.rol;
+  g('login-screen').style.display='none';
+  g('app').classList.add('visible');
+  updateUserUI();
+  if(ROL!=='admin'&&ROL!=='gerente')g('ni-config-wrap').style.display='none';
+  if(ROL==='admin')g('ni-precios-wrap').style.display='';
+  nav('dashboard');
   // Verificar expiración cada minuto
   setInterval(function(){
     var s=loadLocal('session',null);
@@ -5244,6 +5371,10 @@ function arrancar(){
       doLogout();
     }
   },60000);
+  var tieneLocal=!!localStorage.getItem('bmp_camara');
+  if(!tieneLocal)mostrarCargando();
+  await Promise.all([cargarDatosIniciales(),cargarEmpleados()]);
+  ocultarCargando();
   iniciarRealtime();
   reintentarPendientes();
   actualizarBadgePendientes();
@@ -5261,15 +5392,19 @@ function iniciarRealtime(){
   _rtActivo=true;
   // Polling cada 8 segundos — detecta cambios de otros dispositivos
   _rtTimer=setInterval(function(){
+    if(!AUTH)return;
     // Solo sincronizar si han pasado al menos 5 segundos desde el último persist propio
     var ahora=Date.now();
     if(ahora-_rtUltimaSync<5000)return;
-    fetch(SB_URL+'/rest/v1/bodega_data?select=key,value&apikey='+SB_KEY,{headers:SB_HEADERS})
-      .then(function(r){return r.json();})
-      .then(function(rows){
+    asegurarAuth().then(function(ok){
+      if(!ok)return null;
+      return fetch(SB_URL+'/rest/v1/bodega_data?select=key,value&apikey='+SB_KEY,{headers:authHeaders()});
+    }).then(function(r){
+      if(!r)return;
+      return r.json().then(function(rows){
         if(!Array.isArray(rows)||rows.length===0)return;
         var data={};
-        rows.forEach(function(r){data[r.key]=r.value;});
+        rows.forEach(function(r2){data[r2.key]=r2.value;});
         var cambio=false;
         // Verificar si hay cambios respecto a lo local
         Object.keys(data).forEach(function(k){
@@ -5285,8 +5420,14 @@ function iniciarRealtime(){
           mostrarNotifSync();
         }
         sbStatus(true);
-      }).catch(function(){sbStatus(false);});
+      });
+    }).catch(function(){sbStatus(false);});
   },8000);
+}
+
+function detenerRealtime(){
+  if(_rtTimer){clearInterval(_rtTimer);_rtTimer=null;}
+  _rtActivo=false;
 }
 
 function mostrarNotifSync(){
@@ -5309,47 +5450,10 @@ persist=function(){
   _origPersist();
 };
 
-// Si hay datos locales arranca de inmediato, si no muestra pantalla de carga
-var _tieneLocal=!!localStorage.getItem('bmp_camara');
-if(_tieneLocal){
-  arrancar();
-} else {
-  mostrarCargando();
-}
-
-var _arrancado=false;
-function arrancarUnaVez(){
-  if(_arrancado)return;
-  _arrancado=true;
-  ocultarCargando();
-  arrancar();
-}
-
-// Timeout de seguridad — si Supabase no responde en 5s, arranca con datos vacíos
-var _timeoutArranque=setTimeout(function(){arrancarUnaVez();},5000);
-
-// Sincronizar con Supabase
-fetch(SB_URL+'/rest/v1/bodega_data?select=key,value&apikey='+SB_KEY,{headers:SB_HEADERS})
-  .then(function(r){return r.json();})
-  .then(function(rows){
-    clearTimeout(_timeoutArranque);
-    if(Array.isArray(rows)&&rows.length>0){
-      var data={};
-      rows.forEach(function(r){data[r.key]=r.value;});
-      aplicarDatos(data);
-      sbStatus(true);
-      if(_tieneLocal){
-        // Ya estaba arrancado — solo refrescar la vista si hubo cambios
-        mostrarNotifSync();
-        if(CUR_TAB)nav(CUR_TAB);
-      }
-    }
-    arrancarUnaVez(); // para usuarios sin datos locales
-  })
-  .catch(function(){
-    sbStatus(false);
-    arrancarUnaVez();
-  });
+// Al cargar la página: si había una sesión de Supabase Auth vigente la
+// restaura y sincroniza datos; si no, se queda en la pantalla de login sin
+// descargar nada (RLS lo impediría de todos modos).
+iniciarApp();
 </script>
 </body>
 </html>
