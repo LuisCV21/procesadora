@@ -2619,7 +2619,7 @@ function buscableHTML(id,opciones,placeholder,valorInicial,onchangeFn,onchangeAr
   var esc=function(s){return String(s).replace(/"/g,'&quot;');};
   return '<div style="position:relative">'+
     '<input type="text" id="'+id+'-t" value="'+esc(labelInicial)+'" placeholder="'+esc(placeholder||'Buscar...')+'" autocomplete="off" '+
-      'oninput="buscFiltrar(\''+id+'\')" onfocus="buscFiltrar(\''+id+'\')" onblur="setTimeout(function(){buscCerrar(\''+id+'\')},180)">'+
+      'oninput="buscFiltrar(\''+id+'\')" onfocus="buscFiltrar(\''+id+'\')" onblur="buscResolver(\''+id+'\');setTimeout(function(){buscCerrar(\''+id+'\')},180)">'+
     '<input type="hidden" id="'+id+'" value="'+esc(valorInicial||'')+'">'+
     '<div id="'+id+'-l" class="busc-list" style="display:none"></div>'+
   '</div>';
@@ -2653,6 +2653,26 @@ function buscElegir(id,value,label){
   if(list)list.style.display='none';
   var cfg=_BUSC[id];
   if(cfg&&cfg.onchange&&typeof window[cfg.onchange]==='function')window[cfg.onchange](cfg.arg);
+}
+// Si el usuario escribió el nombre completo de un producto pero nunca tocó la
+// sugerencia de la lista (ej. le dio directo a "Guardar" en el celular), el
+// campo oculto se queda vacío y el formulario rechaza el renglón aunque se vea
+// lleno. Al perder el foco, si el texto coincide exacto con una opción (sin
+// importar mayúsculas/acentos), se autocompleta — se ejecuta ANTES del cierre
+// de la lista (que sí espera 180ms) para ganarle a un botón "Guardar" que se
+// toque justo después.
+function buscResolver(id){
+  var hid=g(id),txt=g(id+'-t');
+  if(!hid||!txt||hid.value)return;
+  var qn=buscNorm(txt.value.trim());
+  if(!qn)return;
+  var cfg=_BUSC[id];if(!cfg)return;
+  var match=cfg.opciones.find(function(o){return buscNorm(o.label)===qn;});
+  if(match){
+    hid.value=match.value;
+    txt.value=match.label;
+    if(cfg.onchange&&typeof window[cfg.onchange]==='function')window[cfg.onchange](cfg.arg);
+  }
 }
 function buscCerrar(id){var list=g(id+'-l');if(list)list.style.display='none';}
 // Si el usuario hace scroll (ej. dentro del modal) mientras una lista está
