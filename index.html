@@ -834,6 +834,10 @@ var saldoInicialCaja=load('saldo_inicial_caja',{monto:0,fecha:today()});
 var ADMIN_RECIBE=load('admin_puede_recibir',false);
 function puedeRecibir(){return ROL==='gerente'||(ROL==='admin'&&ADMIN_RECIBE);}
 function puedeCobrar(){return ROL==='gerente'||ROL==='admin';}
+// Admin puede corregir partidas de una nota en cualquier estado (incluso ya
+// entregada/pagada, reconciliando caja). Gerente solo mientras siga pendiente
+// de envío — una vez enviada, ya salió mercancía y el ajuste debe pasar por admin.
+function puedeEditarPartidasNota(n){return ROL==='admin'||(ROL==='gerente'&&n.est==='pendiente');}
 
 function persist(){
   save('camara',camara);save('procesos',procesos);save('pedidos',pedidos);save('notas',notas);
@@ -2806,7 +2810,7 @@ function rNotas(){
       '<select style="background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:7px 10px;border-radius:var(--r);font-size:14px" onchange="setFNC(this.value)">'+cliOpts+'</select>'+
       '<button class="btn" onclick="impReporte()">⎙ Imprimir reporte</button>'+
       '<button class="btn" onclick="mRelacionVenta()">📊 Relación de venta</button>'+
-      (isAdmin?'<button class="btn" onclick="mEditarNota()">✏ Editar</button>':'')+
+      ((isAdmin||ROL==='gerente')?'<button class="btn" onclick="mEditarNota()">✏ Editar</button>':'')+
       '<button class="btn btn-p" onclick="nav(\'nueva-nota\')">+ Nueva nota de entrega</button>'+
     '</div>'+
   '</div><div class="tw"><table><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Partidas</th><th>Total</th><th>Condición</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>'+
@@ -2831,6 +2835,7 @@ function rNotas(){
       '<td><span style="font-size:11px;color:var(--text3)">'+(n.condiciones||'—')+'</span></td>'+
       '<td>'+pillEstado+'</td>'+
       '<td onclick="event.stopPropagation()"><div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center">'+
+        (puedeEditarPartidasNota(n)?'<button class="btn btn-xs" onclick="mEditarPartidasNota('+n.id+')">✏ Editar partidas</button>':'')+
         (n.est==='pendiente'?'<button class="btn btn-xs" style="border-color:var(--info);color:var(--info)" onclick="mEnviarNota('+n.id+')">📦 Marcar enviada</button>':'')+
         (esCredito&&(n.est==='entregada'||n.est==='pagada')&&!n.pagada&&puedeCobrar()?'<button class="btn btn-xs" style="border-color:var(--accent-glow);color:var(--accent)" onclick="mAbonarNota('+n.id+')">Registrar cobro</button>':'')+
       '</div></td>'+
@@ -2865,8 +2870,8 @@ function renderEdnInfo(){
       '<div style="color:var(--text3);font-size:13px;margin-top:2px">'+money(n.total)+' · '+(n.condiciones||'—')+' · '+fmtFecha(n.fecha)+'</div>'+
     '</div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
-      '<button class="btn btn-p" onclick="cm();mEditarPartidasNota('+n.id+')">✏ Editar partidas</button>'+
-      '<button class="btn btn-d" onclick="cm();elimNota('+n.id+')">Eliminar esta nota</button>'+
+      (puedeEditarPartidasNota(n)?'<button class="btn btn-p" onclick="cm();mEditarPartidasNota('+n.id+')">✏ Editar partidas</button>':'<div style="font-size:13px;color:var(--text3)">Ya fue enviada — solo el administrador puede corregirla.</div>')+
+      (ROL==='admin'?'<button class="btn btn-d" onclick="cm();elimNota('+n.id+')">Eliminar esta nota</button>':'')+
     '</div>';
 }
 
@@ -3168,7 +3173,9 @@ function verNota(id){
   var html=buildNotaHTML(n);
   modal('<div class="modal modal-wide"><div class="modal-hdr"><div class="modal-title">Nota de remisión #'+n.folio+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
     '<div class="modal-body" style="overflow-y:auto">'+html+'</div>'+
-    '<div class="modal-footer"><button class="btn" onclick="cm()">Cerrar</button><button class="btn btn-p" onclick="printNota('+n.id+')">Imprimir / PDF</button></div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cerrar</button>'+
+      (puedeEditarPartidasNota(n)?'<button class="btn" style="border-color:var(--border2);color:var(--text2)" onclick="cm();mEditarPartidasNota('+n.id+')">✏ Editar partidas</button>':'')+
+      '<button class="btn btn-p" onclick="printNota('+n.id+')">Imprimir / PDF</button></div>'+
   '</div>');
 }
 
@@ -3407,6 +3414,7 @@ function gNota(){
 // vuelve a descontar según las partidas corregidas, validando stock disponible.
 function mEditarPartidasNota(id){
   var n=notas.find(function(x){return x.id===id;});if(!n)return;
+  if(!puedeEditarPartidasNota(n)){alert('Esta nota ya fue enviada — solo el administrador puede corregirla.');return;}
   EDITANDO_NOTA={id:id,partidas:n.partidas.map(function(p){
     return {cant:p.cant,unidad:p.unidad||'kg',loteId:p.loteId,precio:p.precio,importe:p.importe,concepto:p.concepto,lote:p.lote,costo:p.costo,_original:true};
   })};
@@ -3499,6 +3507,7 @@ function cancelarEditarPartidas(){EDITANDO_NOTA=null;nav('notas');}
 function gEditarPartidas(){
   epSync();
   var n=notas.find(function(x){return x.id===EDITANDO_NOTA.id;});if(!n)return;
+  if(!puedeEditarPartidasNota(n)){alert('Esta nota ya fue enviada — solo el administrador puede corregirla.');EDITANDO_NOTA=null;nav('notas');return;}
   // Cuánto tenía reservado (descontado) esta nota, por lote — es lo "disponible extra"
   // al validar, porque ese stock ya salió de cámara/bodega por esta misma nota.
   var origPorLote={};
