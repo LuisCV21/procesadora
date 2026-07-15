@@ -654,7 +654,7 @@ var UMBRAL_MERMA_LIMPIEZA=15;
 var PRODUCTOS=load('productos',PRODS_DEF);
 // Categorías cuyo producto normalmente se guarda en bodega (seco/abarrotes/bebidas), no en cámara.
 // Se usa para que las alertas de stock mínimo de cada módulo solo muestren lo que le corresponde.
-var CATS_BODEGA=['abarrote','Abarrote','bebida','cerveza','oficina','empaque','limpieza','lacteo','verdura'];
+var CATS_BODEGA=['abarrote','Abarrote','bebida','cerveza','oficina','empaque','limpieza','lacteo'];
 function esProductoBodega(pr){return CATS_BODEGA.indexOf(pr.cat)!==-1;}
 var PROVEEDORES=load('proveedores',PROVS_DEF);
 var CLIENTES=load('clientes',CLIENTES_DEF);
@@ -1383,7 +1383,7 @@ function rCam(){
   '</div></div>':'')+
   '<div class="card"><div class="card-hdr" style="flex-wrap:wrap;gap:8px"><div class="card-title">Stock en cámara</div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
-      '<input type="text" placeholder="🔍 Buscar producto o lote..." value="'+FILTRO_CAM_Q+'" oninput="setFCQ(this.value)" style="background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:7px 12px;border-radius:var(--r);font-size:14px;width:220px">'+
+      '<input type="text" id="cam-search" placeholder="🔍 Buscar producto o lote..." value="'+FILTRO_CAM_Q+'" oninput="setFCQ(this.value)" style="background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:7px 12px;border-radius:var(--r);font-size:14px;width:220px">'+
       '<div class="chips">'+['todos','ok','warn','danger'].map(function(f){return '<button class="chip'+(FILTRO_CAM===f?' active':'')+'" onclick="setFC(\''+f+'\')">'+(f==='todos'?'Todos':f==='ok'?'OK':f==='warn'?'Por vencer':'Vence hoy')+'</button>';}).join('')+'</div>'+
       '<button class="btn" onclick="imprimirInventario(\'camara\')">🖨 Imprimir solo cámara</button>'+
       '<button class="btn" onclick="imprimirInventario(\'ambos\')">🖨 Imprimir cámara + bodega</button>'+
@@ -1406,7 +1406,13 @@ function toggleCamExp(esp){
   CAM_EXPAND[esp]=!CAM_EXPAND[esp];nav('camara');
 }
 function setFC(f){FILTRO_CAM=f;nav('camara');}
-function setFCQ(v){FILTRO_CAM_Q=v;nav('camara');}
+function setFCQ(v){
+  FILTRO_CAM_Q=v;nav('camara');
+  // nav() reemplaza todo el HTML del contenido, así que el input de búsqueda
+  // es un elemento nuevo y pierde el foco tras cada letra — se restaura aquí.
+  var el=g('cam-search');
+  if(el){el.focus();var p=el.value.length;el.setSelectionRange(p,p);}
+}
 function actualizarCaducidades(){
   if(!confirm('¿Actualizar la fecha de caducidad de TODOS los lotes en cámara a 3 meses desde su fecha de entrada?\n\nEsto sobreescribirá las fechas actuales.'))return;
   camara.forEach(function(item){
@@ -3653,7 +3659,7 @@ function rBodega(){
   '</div></div>':'')+
   '<div class="card"><div class="card-hdr" style="flex-wrap:wrap;gap:8px"><div class="card-title">Inventario de bodega</div>'+
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
-      '<input type="text" placeholder="🔍 Buscar..." value="'+(window._BOD_Q||'')+'" oninput="setBodQ(this.value)" style="background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:7px 12px;border-radius:var(--r);font-size:14px;width:200px">'+
+      '<input type="text" id="bod-search" placeholder="🔍 Buscar..." value="'+(window._BOD_Q||'')+'" oninput="setBodQ(this.value)" style="background:var(--bg2);border:2px solid var(--border);color:var(--text);padding:7px 12px;border-radius:var(--r);font-size:14px;width:200px">'+
       '<button class="btn" onclick="imprimirInventario(\'bodega\')">🖨 Imprimir solo bodega</button>'+
       '<button class="btn" onclick="imprimirInventario(\'ambos\')">🖨 Imprimir cámara + bodega</button>'+
       (canEdit?'<button class="btn btn-p" onclick="mEntradaBodega()">+ Entrada a bodega</button>':'')+
@@ -3756,7 +3762,11 @@ function toggleBodExp(esp){
   if(!window._BOD_EXP)window._BOD_EXP={};
   window._BOD_EXP[esp]=!window._BOD_EXP[esp];nav('bodega');
 }
-function setBodQ(v){window._BOD_Q=v;nav('bodega');}
+function setBodQ(v){
+  window._BOD_Q=v;nav('bodega');
+  var el=g('bod-search');
+  if(el){el.focus();var p=el.value.length;el.setSelectionRange(p,p);}
+}
 
 function mEntradaBodega(){
   var po=PRODUCTOS.map(function(p){return '<option>'+p.n+'</option>';}).join('');
