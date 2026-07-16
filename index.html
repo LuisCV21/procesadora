@@ -822,6 +822,7 @@ var camara=load('camara',[
   {id:66,esp:'Sargo gr.',lote:'5768',kg:22,temp:-18,ent:'2026-04-18',cad:'2026-05-18',est:'ok',costo:55.63,precio:70},
   {id:67,esp:'Sargo med.',lote:'5775',kg:58,temp:-18,ent:'2026-04-18',cad:'2026-05-18',est:'ok',costo:51.39,precio:60},
 ]);
+normalizarLotesAgotados(camara);
 
 var procesos=load('procesos',[]);
 var pedidos=load('pedidos',[]);
@@ -854,6 +855,7 @@ function accMenu(key,actionsHtml){
 
 // Bodega (productos sin refrigeración)
 var bodega=load('bodega',[]);
+normalizarLotesAgotados(bodega);
 var efectivoDeclarado=load('efectivo_declarado',0);
 var movTransferencias=load('mov_tarjeta',[]);
 var saldoTransferencias=load('saldo_tarjeta',0);
@@ -902,6 +904,18 @@ function cm(){g('mr').innerHTML='';}
 function uid(){return ++NEXT_ID;}
 function money(v){return '$'+parseFloat(v||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function pcomma(v){return parseFloat(v||0).toLocaleString('es-MX');}
+// Resta kg de un lote y evita que quede un residuo de redondeo (ej. 0.002) que
+// nunca llega a 0 exacto pero se muestra como "0.0" (1 decimal) — ese residuo
+// hace que el lote nunca desaparezca de las vistas que filtran kg>0.
+function restarKg(actual,cant){
+  var r=Math.max(0,parseFloat((actual-cant).toFixed(3)));
+  return r<0.05?0:r;
+}
+// Normaliza a 0 exacto los lotes con residuo de redondeo por debajo de la
+// precisión mostrada (1 decimal), para autolimpiar datos ya afectados.
+function normalizarLotesAgotados(arr){
+  arr.forEach(function(l){if(l.kg>0&&l.kg<0.05)l.kg=0;});
+}
 // Productos marcados "solo se procesa" (ej. bistec que siempre se convierte en
 // milanesa) nunca se venden tal cual, así que no deben pedir/marcar precio de venta.
 function esSoloProceso(esp){
@@ -2057,7 +2071,7 @@ function gProceso(){
   }
 
   // Descontar del lote original
-  loteOrig.kg=Math.max(0,parseFloat((loteOrig.kg-kgE).toFixed(3)));
+  loteOrig.kg=restarKg(loteOrig.kg,kgE);
 
   // Crear/actualizar lotes de salida — mismo lote que el original
   salidas.forEach(function(s){
@@ -2132,7 +2146,7 @@ function revertirProceso(p){
       if(loteSalida.kg<s.kg-0.001){
         avisos.push('"'+s.esp+'" tenía menos existencia ('+loteSalida.kg.toFixed(2)+') de la que generó este proceso ('+s.kg.toFixed(2)+') — parte ya se vendió o movió. Se dejó en 0.');
       }
-      loteSalida.kg=Math.max(0,parseFloat((loteSalida.kg-s.kg).toFixed(3)));
+      loteSalida.kg=restarKg(loteSalida.kg,s.kg);
     } else {
       avisos.push('No se encontró el lote de salida "'+s.esp+'" (Lote '+p.lote+') para quitarlo — puede que ya lo hayan eliminado por separado.');
     }
@@ -3496,7 +3510,7 @@ function gNota(){
   var cond=nuevaNota.condiciones||'Crédito';
   parts.forEach(function(p){
     var lote=buscarLoteVenta(p.loteId);
-    if(lote)lote.kg=Math.max(0,parseFloat((lote.kg-p.cant).toFixed(3)));
+    if(lote)lote.kg=restarKg(lote.kg,p.cant);
   });
   var folioNuevo=nextFolio;
   nextFolio++;
@@ -3640,7 +3654,7 @@ function gEditarPartidas(){
   });
   nuevas.forEach(function(p){
     var lote=buscarLoteVenta(p.loteId);
-    if(lote)lote.kg=Math.max(0,parseFloat((lote.kg-p.cant).toFixed(3)));
+    if(lote)lote.kg=restarKg(lote.kg,p.cant);
   });
 
   var totalAnterior=n.total;
@@ -5285,7 +5299,7 @@ function aplicarDatos(data){
   var pend=getPendientes();
   Object.keys(pend).forEach(function(k){delete data[k];});
 
-  if(data.camara)camara=data.camara;
+  if(data.camara){camara=data.camara;normalizarLotesAgotados(camara);}
   if(data.procesos)procesos=data.procesos;
   if(data.pedidos)pedidos=data.pedidos;
   if(data.notas)notas=data.notas;
@@ -5298,7 +5312,7 @@ function aplicarDatos(data){
   if(data.proc_tipos)PROC_TIPOS=data.proc_tipos;
   if(data.proc_reglas)PROC_REGLAS=data.proc_reglas;
   if(data.catalogo_seeds_vistos)CATALOGO_SEEDS_VISTOS=data.catalogo_seeds_vistos;
-  if(data.bodega)bodega=data.bodega;
+  if(data.bodega){bodega=data.bodega;normalizarLotesAgotados(bodega);}
   if(data.efectivo_declarado!==undefined&&data.efectivo_declarado!==null)efectivoDeclarado=data.efectivo_declarado;
   if(data.mov_tarjeta)movTransferencias=data.mov_tarjeta;
   if(data.compensaciones)compensaciones=data.compensaciones;
