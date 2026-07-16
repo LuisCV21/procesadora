@@ -1859,7 +1859,7 @@ function onProcTipoChange(){
   if(hint)hint.textContent=esTalla?
     'Registra cada talla (chico/mediano/grande): cuántas piezas salieron y cuánto pesaron juntas en la báscula — el peso por pieza se calcula solo. La suma de los pesos debe dar el total de entrada.':
     esRobalo?
-    'Registra la cabeza y cada posta: cuántas piezas salieron y su peso por pieza. Del valor que le tocaría a la cabeza por su peso, el '+(PCT_TRANSFER_CABEZA_ROBALO*100)+'% se transfiere al costo de las postas — así se calcula solo.':
+    'Cabeza: cuántas piezas salieron y su peso por pieza directo (ej. medio kilo). Postas: cuántas piezas y el peso total que marcó la báscula — el peso por pieza se calcula solo. Del valor que le tocaría a la cabeza por su peso, el '+(PCT_TRANSFER_CABEZA_ROBALO*100)+'% se transfiere al costo de las postas.':
     lista.length===1?
     'La salida es siempre "'+lista[0].n+'" — se selecciona sola.':
     'Define los productos resultantes. La merma se calcula automáticamente (entrada − suma de salidas).';
@@ -1895,6 +1895,13 @@ function updProcSalidaUnidad(i){
   var esPieza=u!=='kg';
   var lbl=g('pskl'+i);
   if(lbl)lbl.textContent=(u==='kg'?'Peso':'Cantidad')+' ('+u+')';
+  var tipo=g('p1')?g('p1').value:'';
+  var esp=g('psp'+i)?g('psp'+i).value:'';
+  // La cabeza es una sola pieza consistente (~medio kilo): se estima el peso
+  // x pieza directo. Las postas, en cambio, se pesan juntas en la báscula —
+  // ahí lo que se ocupa es el peso total, y el peso x pieza se calcula solo.
+  var esCabezaRobalo=tipo===TIPO_ROBALO_CABEZA&&esp==='Cabeza de robalo';
+  var esPostaRobalo=tipo===TIPO_ROBALO_CABEZA&&esPieza&&!esCabezaRobalo;
   // El peso x pieza es lo que permite convertir piezas a kg equivalentes y así
   // calcular la merma real (ej. 123 filetes de 230g vs los kg que entraron).
   var pesoInput=g('pspg'+i);
@@ -1903,14 +1910,15 @@ function updProcSalidaUnidad(i){
     else {pesoInput.disabled=true;pesoInput.placeholder='N/A';pesoInput.value='';}
   }
   var pesoGw=g('pspgw'+i);
-  if(pesoGw)pesoGw.style.display=esPieza?'':'none';
+  // En las postas de Robalo el peso x pieza no se captura a mano: se oculta el
+  // campo (sigue calculándose por dentro a partir del peso total ÷ piezas).
+  if(pesoGw)pesoGw.style.display=(esPieza&&!esPostaRobalo)?'':'none';
   // "Peso total (kg)" es lo que Janet realmente lee de la báscula (ej. 12
   // piezas que juntas pesaron 3.635 kg) — a partir de eso se calcula solo el
   // peso x pieza, en vez de pedirle que haga la división a mano. En "Ordenado"
-  // y en el corte de Robalo no aplica: ahí solo importa la cantidad y el peso
+  // y en la cabeza de Robalo no aplica: ahí solo importa la cantidad y el peso
   // x pieza directo (ej. 500g por orden de media cabeza).
-  var tipo=g('p1')?g('p1').value:'';
-  var mostrarTotal=esPieza&&tipo!=='Ordenado'&&tipo!==TIPO_ROBALO_CABEZA;
+  var mostrarTotal=esPieza&&tipo!=='Ordenado'&&!esCabezaRobalo;
   var totw=g('psptw'+i);
   if(totw)totw.style.display=mostrarTotal?'':'none';
   if(!mostrarTotal){var totInp=g('pspt'+i);if(totInp)totInp.value='';}
@@ -1977,7 +1985,14 @@ function gProceso(){
     var pesoUnitG=null,kgEquiv;
     if(unidadSal!=='kg'){
       pesoUnitG=parseFloat(g('pspg'+i)?g('pspg'+i).value:0)||0;
-      if(pesoUnitG<=0){alert('Indica el peso por pieza (g) de "'+esp+'" para poder calcular la merma');return;}
+      if(pesoUnitG<=0){
+        // En las postas de Robalo el campo "Peso x pieza" está oculto (se
+        // calcula solo desde Peso total ÷ piezas) — el aviso debe apuntar al
+        // campo que sí ve la usuaria.
+        var esPostaRobaloErr=t===TIPO_ROBALO_CABEZA&&esp!=='Cabeza de robalo';
+        alert(esPostaRobaloErr?'Indica el peso total (kg) de "'+esp+'" para poder calcular su peso por pieza':'Indica el peso por pieza (g) de "'+esp+'" para poder calcular la merma');
+        return;
+      }
       kgEquiv=kg*pesoUnitG/1000;
     } else {
       kgEquiv=kg;
