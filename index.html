@@ -1859,7 +1859,7 @@ function onProcTipoChange(){
   if(hint)hint.textContent=esTalla?
     'Registra cada talla (chico/mediano/grande): cuántas piezas salieron y cuánto pesaron juntas en la báscula — el peso por pieza se calcula solo. La suma de los pesos debe dar el total de entrada.':
     esRobalo?
-    'Registra la cabeza (piezas de medio kilo) y cada posta (piezas y peso en báscula). Del valor que le tocaría a la cabeza por su peso, el '+(PCT_TRANSFER_CABEZA_ROBALO*100)+'% se transfiere al costo de las postas — así se calcula solo.':
+    'Registra la cabeza y cada posta: cuántas piezas salieron y su peso por pieza. Del valor que le tocaría a la cabeza por su peso, el '+(PCT_TRANSFER_CABEZA_ROBALO*100)+'% se transfiere al costo de las postas — así se calcula solo.':
     lista.length===1?
     'La salida es siempre "'+lista[0].n+'" — se selecciona sola.':
     'Define los productos resultantes. La merma se calcula automáticamente (entrada − suma de salidas).';
@@ -1907,9 +1907,10 @@ function updProcSalidaUnidad(i){
   // "Peso total (kg)" es lo que Janet realmente lee de la báscula (ej. 12
   // piezas que juntas pesaron 3.635 kg) — a partir de eso se calcula solo el
   // peso x pieza, en vez de pedirle que haga la división a mano. En "Ordenado"
-  // no aplica: ahí solo importa la cantidad y el peso x pieza directo.
+  // y en el corte de Robalo no aplica: ahí solo importa la cantidad y el peso
+  // x pieza directo (ej. 500g por orden de media cabeza).
   var tipo=g('p1')?g('p1').value:'';
-  var mostrarTotal=esPieza&&tipo!=='Ordenado';
+  var mostrarTotal=esPieza&&tipo!=='Ordenado'&&tipo!==TIPO_ROBALO_CABEZA;
   var totw=g('psptw'+i);
   if(totw)totw.style.display=mostrarTotal?'':'none';
   if(!mostrarTotal){var totInp=g('pspt'+i);if(totInp)totInp.value='';}
