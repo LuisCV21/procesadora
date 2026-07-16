@@ -609,7 +609,7 @@ var PRODS_DEF=[
   {id:19,n:'Papa',u:'kg',cat:'verdura'},{id:20,n:'Pikin árbol',u:'kg',cat:'abarrote'},{id:21,n:'Pimienta',u:'kg',cat:'abarrote'},
   {id:22,n:'Pipián',u:'kg',cat:'abarrote'},{id:23,n:'Queso manchego',u:'kg',cat:'lacteo'},{id:24,n:'Repuesto trapeador',u:'pz',cat:'limpieza'},
   {id:25,n:'Tocino',u:'kg',cat:'carne'},{id:26,n:'Tomillo',u:'kg',cat:'abarrote'},{id:27,n:'Victoria',u:'pz',cat:'cerveza'},
-  {id:28,n:'Almeja',u:'kg',cat:'marisco'},{id:29,n:'Arrachera',u:'kg',cat:'carne'},{id:30,n:'Cabeza de robalo',u:'kg',cat:'robalo'},
+  {id:28,n:'Almeja',u:'kg',cat:'marisco'},{id:29,n:'Arrachera',u:'kg',cat:'carne'},{id:30,n:'Cabeza de robalo',u:'pz',cat:'robalo'},
   {id:31,n:'Calamar picado',u:'kg',cat:'calamar'},{id:32,n:'Callo de acha',u:'kg',cat:'marisco'},{id:33,n:'Camarón crudo',u:'kg',cat:'camaron'},
   {id:34,n:'Camarón macuil',u:'kg',cat:'camaron'},{id:35,n:'Camarón macuil gr.',u:'kg',cat:'camaron'},{id:36,n:'Camarón macuil med.',u:'kg',cat:'camaron'},
   {id:37,n:'Camarón pelado',u:'kg',cat:'camaron'},{id:38,n:'Camarón sin cabeza',u:'kg',cat:'camaron'},{id:39,n:'Caracol',u:'kg',cat:'marisco'},
@@ -619,8 +619,8 @@ var PRODS_DEF=[
   {id:49,n:'Jaiba entera',u:'kg',cat:'marisco'},{id:50,n:'Jaibón',u:'kg',cat:'marisco'},{id:51,n:'Jaibón cocido',u:'kg',cat:'marisco'},
   {id:52,n:'Lomo de robalo gr.',u:'kg',cat:'robalo'},{id:53,n:'Lomo de robalo med.',u:'kg',cat:'robalo'},{id:54,n:'Lonja de calamar',u:'kg',cat:'calamar'},
   {id:55,n:'Manos de cangrejo',u:'kg',cat:'marisco'},{id:56,n:'Milanesa de res',u:'kg',cat:'carne'},{id:57,n:'Milanesa res ch.',u:'kg',cat:'carne'},
-  {id:58,n:'Posta ch.',u:'kg',cat:'robalo'},{id:59,n:'Posta de robalo ch.',u:'kg',cat:'robalo'},{id:60,n:'Posta de robalo gr.',u:'kg',cat:'robalo'},
-  {id:61,n:'Posta de robalo jumbo',u:'kg',cat:'robalo'},{id:62,n:'Posta de robalo med.',u:'kg',cat:'robalo'},{id:63,n:'Pulpa de jaiba',u:'kg',cat:'marisco'},
+  {id:58,n:'Posta ch.',u:'kg',cat:'robalo'},{id:59,n:'Posta de robalo ch.',u:'pz',cat:'robalo'},{id:60,n:'Posta de robalo gr.',u:'pz',cat:'robalo'},
+  {id:61,n:'Posta de robalo jumbo',u:'pz',cat:'robalo'},{id:62,n:'Posta de robalo med.',u:'pz',cat:'robalo'},{id:63,n:'Pulpa de jaiba',u:'kg',cat:'marisco'},
   {id:64,n:'Pulpo',u:'kg',cat:'pulpo'},{id:65,n:'Salmón',u:'kg',cat:'pescado'},{id:66,n:'Saragalla',u:'kg',cat:'marisco'},
   {id:67,n:'Sargo ch.',u:'kg',cat:'pescado'},{id:68,n:'Sargo gr.',u:'kg',cat:'pescado'},{id:69,n:'Sargo med.',u:'kg',cat:'pescado'},
   {id:70,n:'Tintas',u:'pz',cat:'oficina'},
@@ -634,18 +634,27 @@ var PRODS_DEF=[
   // — flujo de limpieza/clasificación de Sargo (recepción → limpio → tallas) —
   {id:83,n:'Sargo S/Ordenar',u:'kg',cat:'pescado',soloProceso:true},
   {id:84,n:'Sargo Limpio',u:'kg',cat:'pescado',soloProceso:true},
+  // — flujo de corte de Robalo (entero → cabeza + postas), ver TIPO_ROBALO_CABEZA —
+  {id:85,n:'Robalo',u:'kg',cat:'robalo',soloProceso:true},
+  {id:86,n:'Posta de robalo para caldo',u:'pz',cat:'robalo'},
 ];
 
 var PROVS_DEF=['Pescadería Hernández','Mariscos del Golfo S.A.','Exportadores Veracruz','Mariscos Tuxpan'];
 var CLIENTES_DEF=['Mar Bravo — Centro','El Barco — Bulevard','Marisquería La Punta','El Delfín — Col. Petrolera','Puebla','Petromex','Florida','Sra. Angelia'];
-var PROC_TIPOS_DEF=['Limpieza de pescado','Clasificación por talla'];
+var TIPO_ROBALO_CABEZA='Robalo (cabeza + postas)';
+// Del valor que le tocaría a la cabeza de robalo por su peso, este % se
+// transfiere al costo de las postas — así se calcula el corte en la
+// procesadora (ver reparto de costo en gProceso).
+var PCT_TRANSFER_CABEZA_ROBALO=0.30;
+var PROC_TIPOS_DEF=['Limpieza de pescado','Clasificación por talla',TIPO_ROBALO_CABEZA];
 // Qué productos puede tomar como entrada y devolver como salida cada tipo de
 // proceso — configurable desde Configuración → Tipos de proceso. Si un tipo no
 // tiene reglas (arrays vacíos), se comporta como antes: cualquier lote marcado
 // "solo proceso" sirve de entrada y cualquier producto puede ser salida.
 var PROC_REGLAS_DEF={
   'Limpieza de pescado':{entradas:['Sargo S/Ordenar'],salidas:['Sargo Limpio']},
-  'Clasificación por talla':{entradas:['Sargo Limpio'],salidas:['Sargo ch.','Sargo med.','Sargo gr.']}
+  'Clasificación por talla':{entradas:['Sargo Limpio'],salidas:['Sargo ch.','Sargo med.','Sargo gr.']},
+  'Robalo (cabeza + postas)':{entradas:['Robalo'],salidas:['Cabeza de robalo','Posta de robalo ch.','Posta de robalo med.','Posta de robalo gr.','Posta de robalo jumbo','Posta de robalo para caldo']}
 };
 // Merma esperada al limpiar pescado (desvenado/destripado) — arriba de esto se
 // avisa a los admins en el dashboard para que revisen si algo salió mal.
@@ -1817,10 +1826,13 @@ function onProcTipoChange(){
   actualizarEntradaAuto();
   var tipo=g('p1')?g('p1').value:'';
   var esTalla=tipo==='Clasificación por talla';
+  var esRobalo=tipo===TIPO_ROBALO_CABEZA;
   var lista=productosSalidaParaTipo(tipo);
   var hint=g('proc-salidas-hint');
   if(hint)hint.textContent=esTalla?
     'Registra cada talla (chico/mediano/grande): cuántas piezas salieron y cuánto pesaron juntas en la báscula — el peso por pieza se calcula solo. La suma de los pesos debe dar el total de entrada.':
+    esRobalo?
+    'Registra la cabeza (piezas de medio kilo) y cada posta (piezas y peso en báscula). Del valor que le tocaría a la cabeza por su peso, el '+(PCT_TRANSFER_CABEZA_ROBALO*100)+'% se transfiere al costo de las postas — así se calcula solo.':
     lista.length===1?
     'La salida es siempre "'+lista[0].n+'" — se selecciona sola.':
     'Define los productos resultantes. La merma se calcula automáticamente (entrada − suma de salidas).';
@@ -1958,10 +1970,28 @@ function gProceso(){
   // una talla grande (pocas piezas pesadas) saldría con el mismo costo unitario
   // que una chica (muchas piezas ligeras), lo cual no refleja cuánto pesó cada una.
   var costoTotalEntrada=kgE*(loteOrig.costo||0);
-  salidas.forEach(function(s){
-    var costoAsignado=kgEquivTotal>0?costoTotalEntrada*(s.kgEquiv/kgEquivTotal):0;
-    s.costoPorUnidad=s.kg>0?costoAsignado/s.kg:(loteOrig.costo||0);
-  });
+  var cabezaRobalo=t===TIPO_ROBALO_CABEZA?salidas.find(function(s){return s.esp==='Cabeza de robalo';}):null;
+  if(cabezaRobalo){
+    // La cabeza no se queda con todo el valor que le tocaría por su peso: en la
+    // procesadora se le transfiere un % de ese valor a las postas (ej. pescado
+    // de $100, cabeza pesa 20% → $20 de valor natural, se transfieren $6 (30%)
+    // → cabeza cuesta $14 y las postas se reparten los $86 restantes por peso).
+    var valorNaturalCabeza=kgEquivTotal>0?costoTotalEntrada*(cabezaRobalo.kgEquiv/kgEquivTotal):0;
+    var valorCabezaFinal=valorNaturalCabeza*(1-PCT_TRANSFER_CABEZA_ROBALO);
+    cabezaRobalo.costoPorUnidad=cabezaRobalo.kg>0?valorCabezaFinal/cabezaRobalo.kg:0;
+    var kgEquivPostas=kgEquivTotal-cabezaRobalo.kgEquiv;
+    var valorPostas=costoTotalEntrada-valorCabezaFinal;
+    salidas.forEach(function(s){
+      if(s===cabezaRobalo)return;
+      var costoAsignado=kgEquivPostas>0?valorPostas*(s.kgEquiv/kgEquivPostas):0;
+      s.costoPorUnidad=s.kg>0?costoAsignado/s.kg:(loteOrig.costo||0);
+    });
+  } else {
+    salidas.forEach(function(s){
+      var costoAsignado=kgEquivTotal>0?costoTotalEntrada*(s.kgEquiv/kgEquivTotal):0;
+      s.costoPorUnidad=s.kg>0?costoAsignado/s.kg:(loteOrig.costo||0);
+    });
+  }
 
   // Descontar del lote original
   loteOrig.kg=Math.max(0,parseFloat((loteOrig.kg-kgE).toFixed(3)));
