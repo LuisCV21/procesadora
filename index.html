@@ -720,7 +720,34 @@ function mergeCatalogosNuevos(){
   if(cambioReglas)save('proc_reglas',PROC_REGLAS);
   if(cambioVistos)save('catalogo_seeds_vistos',CATALOGO_SEEDS_VISTOS);
 }
+// Migración puntual para instalaciones que ya tenían datos guardados antes de
+// que existiera el proceso de Robalo (mergeCatalogosNuevos solo agrega tipos
+// de proceso nuevos en la primerísima corrida, ver comentario arriba) — da de
+// alta los productos y el tipo de proceso que le faltan sin tocar lo demás.
+function configurarProcesoRobalo(){
+  var cambioProd=false,cambioTipos=false;
+  [{n:'Robalo',u:'kg',cat:'robalo',soloProceso:true},
+   {n:'Posta de robalo para caldo',u:'pz',cat:'robalo'}].forEach(function(np){
+    if(!PRODUCTOS.some(function(p){return p.n===np.n;})){
+      var maxId=PRODUCTOS.reduce(function(a,p){return Math.max(a,p.id||0);},0);
+      PRODUCTOS.push(Object.assign({id:maxId+1},np));
+      cambioProd=true;
+    }
+  });
+  ['Cabeza de robalo','Posta de robalo ch.','Posta de robalo med.','Posta de robalo gr.','Posta de robalo jumbo'].forEach(function(n){
+    var p=PRODUCTOS.find(function(x){return x.n===n;});
+    if(p&&p.u!=='pz'){p.u='pz';cambioProd=true;}
+  });
+  if(PROC_TIPOS.indexOf(TIPO_ROBALO_CABEZA)===-1){PROC_TIPOS.push(TIPO_ROBALO_CABEZA);cambioTipos=true;}
+  var cambioReglas=false;
+  if(!PROC_REGLAS[TIPO_ROBALO_CABEZA]){PROC_REGLAS[TIPO_ROBALO_CABEZA]=PROC_REGLAS_DEF[TIPO_ROBALO_CABEZA];cambioReglas=true;}
+  if(cambioProd)save('productos',PRODUCTOS);
+  if(cambioTipos)save('proc_tipos',PROC_TIPOS);
+  if(cambioReglas)save('proc_reglas',PROC_REGLAS);
+  if(cambioProd||cambioTipos)audit('Configuró catálogo de Robalo','Configuracion','Robalo · Cabeza de robalo · postas ch/med/gr/jumbo/para caldo');
+}
 mergeCatalogosNuevos();
+configurarProcesoRobalo();
 
 // Cámara: cada entrada es un LOTE — mismo producto puede tener múltiples lotes
 var camara=load('camara',[
@@ -5252,6 +5279,7 @@ function aplicarDatos(data){
   // Los datos que acaban de llegar de Supabase pueden ser de antes de que
   // existieran productos/tipos de proceso nuevos — completar con lo del código.
   mergeCatalogosNuevos();
+  configurarProcesoRobalo();
 }
 
 function mostrarCargando(){
