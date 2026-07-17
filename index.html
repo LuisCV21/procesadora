@@ -3110,6 +3110,14 @@ function gAbonarNota(id){
   persist();cm();nav('notas');
 }
 
+// Cuánto efectivo real ha entrado por esta nota — mismo criterio que usa
+// getMovsCaja() para reconstruir el estado de cuenta, así ambos coinciden.
+function efectivoDeNota(n){
+  var tot=0,tieneEfectivo=false;
+  (n.abonos||[]).forEach(function(a){if(a.forma==='efectivo'){tieneEfectivo=true;tot+=a.monto;}});
+  if(n.condiciones==='Contado'&&n.pagada&&n.est==='entregada'&&!tieneEfectivo)tot+=n.total;
+  return tot;
+}
 function elimNota(id){
   var n=notas.find(function(x){return x.id===id;});
   confirmarEliminar('¿Eliminar esta nota de remisión? Esta acción no se puede deshacer.',function(){
@@ -3120,6 +3128,11 @@ function elimNota(id){
         var lote=buscarLoteVenta(p.loteId);
         if(lote)lote.kg=parseFloat((lote.kg+p.cant).toFixed(3));
       });
+      // Y el efectivo que esta nota ya había sumado (abonos en efectivo o venta de
+      // contado ya entregada) — si no, el efectivo real queda con dinero de una
+      // nota que ya no existe, sin forma de explicarlo en Movimientos.
+      var efNota=efectivoDeNota(n);
+      if(efNota>0)efectivoDeclarado=Math.max(0,efectivoDeclarado-efNota);
     }
     notas=notas.filter(function(x){return x.id!==id;});
     persist();nav('notas');
@@ -3969,7 +3982,7 @@ function getMovsCaja(){
         movs.push({fecha:a.fecha,hora:a.hora||'00:00',cat:CAT_CAJA.nota,tipo:'abono',concepto:'Cobro nota #'+n.folio+' — '+n.cliente,monto:a.monto,ref:'Nota #'+n.folio});
       }
     });
-    if(n.condiciones==='Contado'&&n.pagada&&!tieneEfectivo){
+    if(n.condiciones==='Contado'&&n.pagada&&n.est==='entregada'&&!tieneEfectivo){
       movs.push({fecha:n.fecha,hora:'00:00',cat:CAT_CAJA.nota,tipo:'abono',concepto:'Venta de contado nota #'+n.folio+' — '+n.cliente,monto:n.total,ref:'Nota #'+n.folio});
     }
   });
@@ -4010,6 +4023,10 @@ function getMovsCaja(){
         movs.push({fecha:h.fecha,hora:'00:00',cat:CAT_CAJA.valeNuevo,tipo:'cargo',concepto:(h.tipo==='aumento'?'Aumento de vale a ':'Vale a ')+v.negocio+(h.concepto?' — '+h.concepto:''),monto:h.monto,ref:'Vale #'+v.id});
       } else if(h.tipo==='abono'){
         movs.push({fecha:h.fecha,hora:'00:00',cat:CAT_CAJA.valeCobro,tipo:'abono',concepto:'Cobro de vale — '+v.negocio,monto:h.monto,ref:'Vale #'+v.id});
+      } else if(h.tipo==='reversion'&&h.efectivo){
+        // Compensa el/los abono(s) ya contados arriba, porque ese efectivo salió
+        // de caja de nuevo al revertir el vale.
+        movs.push({fecha:h.fecha,hora:'00:00',cat:CAT_CAJA.valeCobro,tipo:'cargo',concepto:'Reversión de vale — '+v.negocio,monto:h.monto,ref:'Vale #'+v.id});
       }
     });
   });
@@ -4441,6 +4458,11 @@ function acreditarValeEfectivo(id){
   var v=vales.find(function(x){return x.id===id;});
   if(!v)return;
   if(!confirm('¿Acreditar '+money(v.monto)+' al efectivo en caja?\nEsto suma el monto al fondo (vale de '+v.negocio+').'))return;
+  // Se registra en el historial real (antes solo se asumía en la reconstrucción
+  // de getMovsCaja) para que, si este vale se revierte después, la reversión
+  // tenga un abono real que compensar y no descuadre el estado de cuenta.
+  ensureHistorialVale(v);
+  v.historial.push({tipo:'abono',monto:v.monto,fecha:today()});
   v.efectivoSumado=true;
   efectivoDeclarado+=v.monto;
   audit('Acreditó vale cobrado al efectivo','Caja',v.negocio+' · '+money(v.monto)+' (cobrado el '+fmtFecha(v.fechaCobro)+')');
@@ -4453,10 +4475,13 @@ function revertirVale(id){
   var msg='¿Revertir este vale a PENDIENTE?\n'+v.negocio+' · '+money(montoRevertir);
   if(v.efectivoSumado)msg+='\n\nATENCIÓN: Se restará '+money(montoRevertir)+' del efectivo en caja.';
   if(!confirm(msg))return;
-  if(v.efectivoSumado)efectivoDeclarado=Math.max(0,efectivoDeclarado-montoRevertir);
-  audit('Revirtió vale a pendiente','Caja',v.negocio+' · '+money(montoRevertir)+(v.efectivoSumado?' — descontado del efectivo':' — sin cargo al efectivo'));
+  var seDescontoEfectivo=!!v.efectivoSumado;
+  if(seDescontoEfectivo)efectivoDeclarado=Math.max(0,efectivoDeclarado-montoRevertir);
+  audit('Revirtió vale a pendiente','Caja',v.negocio+' · '+money(montoRevertir)+(seDescontoEfectivo?' — descontado del efectivo':' — sin cargo al efectivo'));
   ensureHistorialVale(v);
-  v.historial.push({tipo:'reversion',monto:montoRevertir,fecha:today()});
+  // efectivo:true marca que esto sí le quitó dinero real a caja, para que
+  // getMovsCaja() lo reste del estado de cuenta igual que aquí.
+  v.historial.push({tipo:'reversion',monto:montoRevertir,fecha:today(),efectivo:seDescontoEfectivo});
   v.monto=montoRevertir;
   v.est='pendiente';v.fechaCobro=null;v.efectivoSumado=false;
   persist();nav('caja');
