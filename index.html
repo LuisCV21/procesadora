@@ -3676,8 +3676,10 @@ function gEditarPartidas(){
   n.total=nuevoTotal;
   var abonado=n.abonos?n.abonos.reduce(function(a,b){return a+b.monto;},0):0;
   if(n.condiciones==='Contado'){
-    // El total original ya se había sumado a caja al enviar/crear; solo se ajusta la diferencia.
-    efectivoDeclarado+=(nuevoTotal-totalAnterior);
+    // El efectivo real solo entra a caja hasta que la nota se marca "entregada"
+    // (ver estN/gEnviarNota) — si sigue pendiente (ej. el gerente ajustando
+    // cantidades antes de enviar), aún no hay nada que ajustar en caja.
+    if(n.est==='entregada')efectivoDeclarado+=(nuevoTotal-totalAnterior);
     n.pagada=true;
   }else{
     n.pagada=nuevoTotal>0&&abonado>=nuevoTotal;
