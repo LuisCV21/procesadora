@@ -696,10 +696,17 @@ var CATALOGO_SEEDS_VISTOS=load('catalogo_seeds_vistos',null);
 // posición en el arreglo, que se vuelve inválida en cuanto llega una
 // sincronización en tiempo real mientras el modal de edición sigue abierto)
 // no tenían id — se lo asigna aquí para que sigan siendo editables.
+// Id propio del catálogo (1,2,3...), no el contador global uid() — ese ya
+// va por miles por los lotes/pedidos/notas. Se ignoran ids >1000 al calcular
+// el siguiente porque son justo los que se reasignan abajo (venían del
+// contador global por el bug ya corregido) — si no, contaminarían el conteo
+// y el siguiente producto también saldría con un id de miles.
+function siguienteIdProducto(){
+  return PRODUCTOS.reduce(function(a,p){return (p.id&&p.id<=1000)?Math.max(a,p.id):a;},0)+1;
+}
 function asegurarIdsProductos(){
-  var maxId=PRODUCTOS.reduce(function(a,p){return Math.max(a,p.id||0);},0);
   var cambio=false;
-  PRODUCTOS.forEach(function(p){if(!p.id){p.id=++maxId;cambio=true;}});
+  PRODUCTOS.forEach(function(p){if(!p.id||p.id>1000){p.id=siguienteIdProducto();cambio=true;}});
   if(cambio)save('productos',PRODUCTOS);
 }
 function mergeCatalogosNuevos(){
@@ -5122,7 +5129,7 @@ function saveItem(tipo){
   if(tipo==='producto'){
     var u=g('ai-u')?.value||'kg',c=readCatSelect();
     var soloProceso=!!(g('ai-sp')&&g('ai-sp').checked);
-    PRODUCTOS.push({id:uid(),n:n,u:u,cat:c,soloProceso:soloProceso});
+    PRODUCTOS.push({id:siguienteIdProducto(),n:n,u:u,cat:c,soloProceso:soloProceso});
     PRODUCTOS.sort(function(a,b){return a.n.localeCompare(b.n,'es');});
     audit('Agregó producto','Configuracion',n+' · '+u+' · cat:'+c+(soloProceso?' · solo proceso':''));
   } else if(tipo==='proveedor'){
