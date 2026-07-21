@@ -3363,11 +3363,19 @@ function initNN(){
     partidas:[{cant:'',unidad:'kg',loteId:'',precio:'',importe:''},{cant:'',unidad:'kg',loteId:'',precio:'',importe:''},{cant:'',unidad:'kg',loteId:'',precio:'',importe:''}]};
 }
 
+// Orden alfabético por producto (y por lote como desempate) dentro de cada
+// área — sin esto, un lote nuevo aparece al final porque solo sigue el
+// orden en que se fue agregando al arreglo, no el nombre del producto.
+function ordenarLotesVenta(lotes){
+  return lotes.slice().sort(function(a,b){
+    return a.esp.localeCompare(b.esp,'es')||a.lote.localeCompare(b.lote,'es');
+  });
+}
 function lotesVentaDisp(){
   // Los productos marcados "siempre se va a procesar" (ej. Bistec de res) no se
   // venden tal cual — no deben aparecer como opción al armar una nota de venta.
-  return camara.filter(function(l){return l.kg>0&&!esSoloProceso(l.esp);}).map(function(l){return {ref:l,origen:'Cámara'};})
-    .concat(bodega.filter(function(l){return l.kg>0&&!esSoloProceso(l.esp);}).map(function(l){return {ref:l,origen:'Bodega'};}));
+  return ordenarLotesVenta(camara.filter(function(l){return l.kg>0&&!esSoloProceso(l.esp);})).map(function(l){return {ref:l,origen:'Cámara'};})
+    .concat(ordenarLotesVenta(bodega.filter(function(l){return l.kg>0&&!esSoloProceso(l.esp);})).map(function(l){return {ref:l,origen:'Bodega'};}));
 }
 function buscarLoteVenta(id){
   return camara.find(function(x){return x.id===id;})||bodega.find(function(x){return x.id===id;});
