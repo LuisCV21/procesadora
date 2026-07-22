@@ -3302,7 +3302,7 @@ function buildNotaHTML(n,marca){
     '<div class="nota-grid">'+
       campos.map(function(c){return '<div class="nota-field"><b>'+c.l+':</b><span>'+c.v+'</span></div>';}).join('')+
     '</div>'+
-    tablasHTML+
+    (cols===2?'<div class="nota-tabla-area">'+tablasHTML+'</div>':tablasHTML)+
     '<div class="nota-total-bar"><span>TOTAL</span><span>'+money(n.total)+'</span></div>'+
     '<div class="nota-firmas">'+
       '<div class="nota-firma"><div class="nota-firma-line">FORMULÓ</div></div>'+
@@ -3330,7 +3330,19 @@ function printNota(id){
   win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Nota #'+n.folio+'</title><style>'+
     '@page{size:215.9mm 279.4mm;margin:8mm}'+
     'body{font-family:Arial,sans-serif;margin:0;padding:0;background:#fff;color:#000}'+
-    '.nota-wrap{width:100%;font-size:11px}'+
+    // Con MUCHAS partidas (>NOTA_FILAS_POR_COLUMNA, ver buildNotaHTML) se
+    // reparten en 2 columnas — ese es el caso que se quería "a lo largo de
+    // toda la hoja": se reparte el alto real de la página (279.4mm - 2×8mm
+    // de margen) entre encabezado/datos (tamaño fijo) y las columnas de
+    // productos (flex:1), así se estiran para llenar la hoja en vez de
+    // dejar todo el resto en blanco. Con pocas partidas (1 columna) se deja
+    // el alto natural y compacto de siempre — no tiene sentido estirar 4-5
+    // renglones para llenar la hoja completa.
+    '.nota-wrap{width:100%;height:263.4mm;font-size:11px;display:flex;flex-direction:column}'+
+    '.nota-tabla-area{flex:1;min-height:0;display:flex;flex-direction:column}'+
+    '.nota-tabla-area>.nota-cols{flex:1;min-height:0}'+
+    '.nota-tabla-area .nota-col{min-height:0;display:flex;flex-direction:column}'+
+    '.nota-tabla-area .nota-col>.nota-tbl{height:100%}'+
     '.nota-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;border-bottom:2px solid #1a3a6b;padding-bottom:8px}'+
     '.nota-brand-name{font-size:17px;font-weight:700;color:#1a3a6b;line-height:1.3}'+
     '.nota-brand-sub{font-size:10px;color:#000;margin-top:2px}'+
