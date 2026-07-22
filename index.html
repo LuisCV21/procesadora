@@ -3332,13 +3332,20 @@ function printNota(id){
     'body{font-family:Arial,sans-serif;margin:0;padding:0;background:#fff;color:#000}'+
     // Con MUCHAS partidas (>NOTA_FILAS_POR_COLUMNA, ver buildNotaHTML) se
     // reparten en 2 columnas — ese es el caso que se quería "a lo largo de
-    // toda la hoja": se reparte el alto real de la página (279.4mm - 2×8mm
-    // de margen) entre encabezado/datos (tamaño fijo) y las columnas de
-    // productos (flex:1), así se estiran para llenar la hoja en vez de
-    // dejar todo el resto en blanco. Con pocas partidas (1 columna) se deja
-    // el alto natural y compacto de siempre — no tiene sentido estirar 4-5
-    // renglones para llenar la hoja completa.
-    '.nota-wrap{width:100%;height:263.4mm;font-size:11px;display:flex;flex-direction:column}'+
+    // toda la hoja": se reparte el alto de la página entre encabezado/datos
+    // (tamaño fijo) y las columnas de productos (flex:1), así se estiran
+    // para llenar la hoja en vez de dejar todo el resto en blanco. Con
+    // pocas partidas (1 columna) se deja el alto natural y compacto de
+    // siempre — no tiene sentido estirar 4-5 renglones a toda la hoja.
+    // El alto útil real de carta con 8mm de margen es 263.4mm, pero se deja
+    // un colchón amplio (235mm) porque el margen/encabezado que aplica el
+    // propio diálogo de impresión al imprimir de verdad (distinto por
+    // navegador/impresora, y más chico aún si "Encabezados y pies de
+    // página" sigue activado) puede comerse ese sobrante — si se usa el
+    // alto exacto, cualquier diferencia empuja las firmas a una página 2.
+    // Prioridad: que SIEMPRE quepa en una sola hoja, aunque sobre un poco
+    // de espacio en blanco, antes que arriesgar el salto de página.
+    '.nota-wrap{width:100%;height:235mm;font-size:11px;display:flex;flex-direction:column}'+
     '.nota-tabla-area{flex:1;min-height:0;display:flex;flex-direction:column}'+
     '.nota-tabla-area>.nota-cols{flex:1;min-height:0}'+
     '.nota-tabla-area .nota-col{min-height:0;display:flex;flex-direction:column}'+
