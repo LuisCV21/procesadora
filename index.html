@@ -410,7 +410,8 @@ function reintentarPendientes(){
   var keys=Object.keys(p);
   if(keys.length===0)return;
   keys.forEach(function(k){
-    sbSetReal(k,p[k].val).then(function(r){
+    var accion=p[k].val===PENDING_DELETE?sbDeleteReal(k):sbSetReal(k,p[k].val);
+    accion.then(function(r){
       if(r&&r.ok)quitarPendiente(k);
     });
   });
@@ -436,6 +437,26 @@ function sbSet(key,val){
     return r;
   });
 }
+
+// Borrar una fila de Supabase (ej. un producto/proveedor/cliente/tipo de
+// proceso eliminado del catálogo). Sentinel PENDING_DELETE reutiliza la misma
+// cola de pendientes que sbSet — reintentarPendientes distingue por valor.
+var PENDING_DELETE='__DELETE__';
+function sbDeleteReal(key){
+  return fetch(SB_URL+'/rest/v1/bodega_data?key=eq.'+encodeURIComponent(key)+'&apikey='+SB_KEY,{
+    method:'DELETE',headers:SB_HEADERS
+  }).then(function(r){sbStatus(r.ok);return r;})
+  .catch(function(e){sbStatus(false);console.warn('sbDelete error:',key,e);return null;});
+}
+function sbDelete(key){
+  return sbDeleteReal(key).then(function(r){
+    if(r&&r.ok){quitarPendiente(key);}
+    else{marcarPendiente(key,PENDING_DELETE);}
+    return r;
+  });
+}
+function removeLocal(key){try{localStorage.removeItem('bmp_'+key);}catch(e){}}
+function remove(key){removeLocal(key);return sbDelete(key);}
 
 // Leer de Supabase
 function sbGet(key){
@@ -663,30 +684,64 @@ var PROC_REGLAS_DEF={
 // avisa a los admins en el dashboard para que revisen si algo salió mal.
 var UMBRAL_MERMA_LIMPIEZA=15;
 
-var PRODUCTOS=load('productos',PRODS_DEF);
+// ══════════════════════════════════════════════════════
+//  CATÁLOGO — productos/proveedores/clientes/tipos de proceso
+// ══════════════════════════════════════════════════════
+// Cada item vive en su PROPIA fila de Supabase (producto_<id>, proveedor_
+// <nombre>, cliente_<nombre>, proctipo_<nombre>) en vez de un array completo
+// bajo una sola clave ('productos','proveedores',...). Antes, editar UN
+// cliente desde "Nueva nota" subía TODO el catálogo con lo que hubiera en
+// memoria — si ese dispositivo tenía una copia vieja de PRODUCTOS (otro
+// dispositivo agregó uno hace segundos y el polling de 8s aún no lo traía),
+// esa copia vieja pisaba la de Supabase y borraba en silencio lo que el otro
+// dispositivo acababa de agregar. Con una fila por item, agregar un cliente
+// solo puede tocar esa fila — nunca puede pisar lo que pasó con productos.
+function kProducto(id){return 'producto_'+id;}
+function kProveedor(n){return 'proveedor_'+n;}
+function kCliente(n){return 'cliente_'+n;}
+function kProcTipo(n){return 'proctipo_'+n;}
+function guardarProducto(p){save(kProducto(p.id),p);}
+function eliminarProducto(id){remove(kProducto(id));}
+function guardarProveedor(n){save(kProveedor(n),n);}
+function eliminarProveedor(n){remove(kProveedor(n));}
+function guardarCliente(n){save(kCliente(n),n);}
+function eliminarCliente(n){remove(kCliente(n));}
+function guardarProcTipo(n){save(kProcTipo(n),PROC_REGLAS[n]||{entradas:[],salidas:[]});}
+function eliminarProcTipo(n){remove(kProcTipo(n));}
+
+// Reconstruye PRODUCTOS/PROVEEDORES/CLIENTES/PROC_TIPOS/PROC_REGLAS a partir
+// de las filas individuales bmp_producto_*, bmp_proveedor_*, etc. en
+// localStorage — permite arrancar de inmediato sin esperar a Supabase.
+function cargarCatalogoLocal(){
+  var out={productos:[],proveedores:[],clientes:[],proc_tipos:[],proc_reglas:{}};
+  for(var i=0;i<localStorage.length;i++){
+    var k=localStorage.key(i);
+    if(!k||k.indexOf('bmp_')!==0)continue;
+    var kk=k.substring(4),v;
+    if(kk.indexOf('producto_')===0){try{v=JSON.parse(localStorage.getItem(k));}catch(e){}if(v)out.productos.push(v);}
+    else if(kk.indexOf('proveedor_')===0){try{v=JSON.parse(localStorage.getItem(k));}catch(e){}if(v)out.proveedores.push(v);}
+    else if(kk.indexOf('cliente_')===0){try{v=JSON.parse(localStorage.getItem(k));}catch(e){}if(v)out.clientes.push(v);}
+    else if(kk.indexOf('proctipo_')===0){
+      var nombre=kk.substring('proctipo_'.length);
+      try{out.proc_reglas[nombre]=JSON.parse(localStorage.getItem(k));}catch(e){}
+      out.proc_tipos.push(nombre);
+    }
+  }
+  return out;
+}
+// Instalaciones que todavía no se migraron al esquema de filas individuales
+// (ver migrarCatalogoAFilas, que corre en cuanto responde Supabase) arrancan
+// con el blob viejo mientras tanto — nada más se pierde en la transición.
+var _catalogoLocal=cargarCatalogoLocal();
+var PRODUCTOS=_catalogoLocal.productos.length?_catalogoLocal.productos:load('productos',PRODS_DEF);
 // Categorías cuyo producto normalmente se guarda en bodega (seco/abarrotes/bebidas), no en cámara.
 // Se usa para que las alertas de stock mínimo de cada módulo solo muestren lo que le corresponde.
 var CATS_BODEGA=['abarrote','Abarrote','bebida','cerveza','oficina','empaque','limpieza','lacteo'];
 function esProductoBodega(pr){return CATS_BODEGA.indexOf(pr.cat)!==-1;}
-var PROVEEDORES=load('proveedores',PROVS_DEF);
-var CLIENTES=load('clientes',CLIENTES_DEF);
-var PROC_TIPOS=load('proc_tipos',PROC_TIPOS_DEF);
-var PROC_REGLAS=load('proc_reglas',PROC_REGLAS_DEF);
-// persist() se llama en CASI toda acción del sistema (recibir pedido, asignar
-// precio, editar lote, etc.), no solo al tocar Configuración. Si guardara el
-// catálogo (productos/proveedores/clientes/proc_tipos) sin condición, cualquier
-// dispositivo con una copia vieja en memoria lo pisaría en Supabase al hacer
-// cualquier otra cosa, borrando en silencio (sin auditoría) lo que otro
-// dispositivo acababa de agregar en Configuración. Esta bandera hace que el
-// catálogo solo se vuelva a subir cuando de verdad se editó en esta sesión.
-//
-// Es un objeto (una bandera por lista) y NO un solo booleano a propósito: si
-// editas clientes desde "Nueva nota" mientras tu copia en memoria de PRODUCTOS
-// está desactualizada (otro dispositivo agregó un producto hace segundos y el
-// polling de 8s aún no te lo trajo), un solo flag compartido habría subido tu
-// PRODUCTOS viejo también, borrando en Supabase lo que el otro dispositivo
-// acababa de agregar. Cada lista sube solo cuando ELLA MISMA se tocó.
-var CATALOGO_SUCIO={productos:false,proveedores:false,clientes:false,proc_tipos:false,proc_reglas:false};
+var PROVEEDORES=_catalogoLocal.proveedores.length?_catalogoLocal.proveedores:load('proveedores',PROVS_DEF);
+var CLIENTES=_catalogoLocal.clientes.length?_catalogoLocal.clientes:load('clientes',CLIENTES_DEF);
+var PROC_TIPOS=_catalogoLocal.proc_tipos.length?_catalogoLocal.proc_tipos:load('proc_tipos',PROC_TIPOS_DEF);
+var PROC_REGLAS=_catalogoLocal.proc_tipos.length?_catalogoLocal.proc_reglas:load('proc_reglas',PROC_REGLAS_DEF);
 
 // Instalaciones que ya tenían datos guardados (en Supabase o localStorage) nunca
 // ven los productos/tipos de proceso nuevos que se agregan al código, porque
@@ -712,9 +767,9 @@ function siguienteIdProducto(){
   return PRODUCTOS.reduce(function(a,p){return (p.id&&p.id<=1000)?Math.max(a,p.id):a;},0)+1;
 }
 function asegurarIdsProductos(){
-  var cambio=false;
-  PRODUCTOS.forEach(function(p){if(!p.id||p.id>1000){p.id=siguienteIdProducto();cambio=true;}});
-  if(cambio)save('productos',PRODUCTOS);
+  var nuevos=[];
+  PRODUCTOS.forEach(function(p){if(!p.id||p.id>1000){p.id=siguienteIdProducto();nuevos.push(p);}});
+  nuevos.forEach(guardarProducto);
 }
 function mergeCatalogosNuevos(){
   asegurarIdsProductos();
@@ -722,30 +777,30 @@ function mergeCatalogosNuevos(){
   if(primeraVez)CATALOGO_SEEDS_VISTOS={productos:[],proc_tipos:[]};
   var vistosProd=CATALOGO_SEEDS_VISTOS.productos;
   var vistosTipo=CATALOGO_SEEDS_VISTOS.proc_tipos;
-  var cambioCatalogo=false,cambioVistos=false;
+  var cambioVistos=false,prodsNuevos=[],tiposNuevos=[];
   PRODS_DEF.forEach(function(pd){
     if(vistosProd.indexOf(pd.n)!==-1)return;
     vistosProd.push(pd.n);cambioVistos=true;
     // Solo se agrega si es la primera vez que este código corre contra esta
     // base de datos — después de eso, si no está, es porque se borró a propósito.
     if(primeraVez&&!PRODUCTOS.some(function(p){return p.n===pd.n;})){
-      PRODUCTOS.push(Object.assign({},pd));cambioCatalogo=true;
+      var np=Object.assign({id:siguienteIdProducto()},pd);
+      PRODUCTOS.push(np);prodsNuevos.push(np);
     }
   });
   PROC_TIPOS_DEF.forEach(function(t){
     if(vistosTipo.indexOf(t)!==-1)return;
     vistosTipo.push(t);cambioVistos=true;
-    if(primeraVez&&PROC_TIPOS.indexOf(t)===-1){PROC_TIPOS.push(t);cambioCatalogo=true;}
+    if(primeraVez&&PROC_TIPOS.indexOf(t)===-1){PROC_TIPOS.push(t);tiposNuevos.push(t);}
   });
   // Las reglas de entrada/salida sí se pueden completar sin tombstone: si el
   // usuario ya definió reglas para un tipo (aunque sea vacías a propósito) se
   // respetan; solo se rellena lo que nunca se ha configurado.
-  var cambioReglas=false;
   Object.keys(PROC_REGLAS_DEF).forEach(function(t){
-    if(!PROC_REGLAS[t]){PROC_REGLAS[t]=PROC_REGLAS_DEF[t];cambioReglas=true;}
+    if(!PROC_REGLAS[t]){PROC_REGLAS[t]=PROC_REGLAS_DEF[t];if(tiposNuevos.indexOf(t)===-1)tiposNuevos.push(t);}
   });
-  if(cambioCatalogo){save('productos',PRODUCTOS);save('proc_tipos',PROC_TIPOS);}
-  if(cambioReglas)save('proc_reglas',PROC_REGLAS);
+  prodsNuevos.forEach(guardarProducto);
+  tiposNuevos.forEach(guardarProcTipo);
   if(cambioVistos)save('catalogo_seeds_vistos',CATALOGO_SEEDS_VISTOS);
 }
 // Migración puntual para instalaciones que ya tenían datos guardados antes de
@@ -753,26 +808,24 @@ function mergeCatalogosNuevos(){
 // de proceso nuevos en la primerísima corrida, ver comentario arriba) — da de
 // alta los productos y el tipo de proceso que le faltan sin tocar lo demás.
 function configurarProcesoRobalo(){
-  var cambioProd=false,cambioTipos=false;
+  var prodsTocados=[],tipoNuevo=false;
   [{n:'Robalo',u:'kg',cat:'robalo',soloProceso:true},
    {n:'Posta de robalo para caldo',u:'pz',cat:'robalo'}].forEach(function(np){
     if(!PRODUCTOS.some(function(p){return p.n===np.n;})){
-      var maxId=PRODUCTOS.reduce(function(a,p){return Math.max(a,p.id||0);},0);
-      PRODUCTOS.push(Object.assign({id:maxId+1},np));
-      cambioProd=true;
+      var p=Object.assign({id:siguienteIdProducto()},np);
+      PRODUCTOS.push(p);prodsTocados.push(p);
     }
   });
   ['Cabeza de robalo','Posta de robalo ch.','Posta de robalo med.','Posta de robalo gr.','Posta de robalo jumbo'].forEach(function(n){
     var p=PRODUCTOS.find(function(x){return x.n===n;});
-    if(p&&p.u!=='pz'){p.u='pz';cambioProd=true;}
+    if(p&&p.u!=='pz'){p.u='pz';prodsTocados.push(p);}
   });
-  if(PROC_TIPOS.indexOf(TIPO_ROBALO_CABEZA)===-1){PROC_TIPOS.push(TIPO_ROBALO_CABEZA);cambioTipos=true;}
-  var cambioReglas=false;
-  if(!PROC_REGLAS[TIPO_ROBALO_CABEZA]){PROC_REGLAS[TIPO_ROBALO_CABEZA]=PROC_REGLAS_DEF[TIPO_ROBALO_CABEZA];cambioReglas=true;}
-  if(cambioProd)save('productos',PRODUCTOS);
-  if(cambioTipos)save('proc_tipos',PROC_TIPOS);
-  if(cambioReglas)save('proc_reglas',PROC_REGLAS);
-  if(cambioProd||cambioTipos)audit('Configuró catálogo de Robalo','Configuracion','Robalo · Cabeza de robalo · postas ch/med/gr/jumbo/para caldo');
+  if(PROC_TIPOS.indexOf(TIPO_ROBALO_CABEZA)===-1){PROC_TIPOS.push(TIPO_ROBALO_CABEZA);tipoNuevo=true;}
+  var reglaNueva=false;
+  if(!PROC_REGLAS[TIPO_ROBALO_CABEZA]){PROC_REGLAS[TIPO_ROBALO_CABEZA]=PROC_REGLAS_DEF[TIPO_ROBALO_CABEZA];reglaNueva=true;}
+  prodsTocados.forEach(guardarProducto);
+  if(tipoNuevo||reglaNueva)guardarProcTipo(TIPO_ROBALO_CABEZA);
+  if(prodsTocados.length||tipoNuevo)audit('Configuró catálogo de Robalo','Configuracion','Robalo · Cabeza de robalo · postas ch/med/gr/jumbo/para caldo');
 }
 mergeCatalogosNuevos();
 configurarProcesoRobalo();
@@ -906,13 +959,12 @@ function puedeCobrar(){return ROL==='gerente'||ROL==='admin';}
 function puedeEditarPartidasNota(n){return ROL==='admin'||(ROL==='gerente'&&n.est==='pendiente');}
 
 function persist(){
+  // El catálogo (productos/proveedores/clientes/tipos de proceso) NO se guarda
+  // aquí — cada item se sube a su propia fila en cuanto se agrega/edita/borra
+  // (ver guardarProducto/guardarProveedor/guardarCliente/guardarProcTipo y sus
+  // pares eliminarX), así que nunca hay un array completo viejo que pisar.
   save('camara',camara);save('procesos',procesos);save('pedidos',pedidos);save('notas',notas);
   save('next_id',NEXT_ID);save('next_folio',nextFolio);
-  if(CATALOGO_SUCIO.productos){save('productos',PRODUCTOS);CATALOGO_SUCIO.productos=false;}
-  if(CATALOGO_SUCIO.proveedores){save('proveedores',PROVEEDORES);CATALOGO_SUCIO.proveedores=false;}
-  if(CATALOGO_SUCIO.clientes){save('clientes',CLIENTES);CATALOGO_SUCIO.clientes=false;}
-  if(CATALOGO_SUCIO.proc_tipos){save('proc_tipos',PROC_TIPOS);CATALOGO_SUCIO.proc_tipos=false;}
-  if(CATALOGO_SUCIO.proc_reglas){save('proc_reglas',PROC_REGLAS);CATALOGO_SUCIO.proc_reglas=false;}
   save('bodega',bodega);save('efectivo_declarado',efectivoDeclarado);
   save('mov_tarjeta',movTransferencias);save('saldo_tarjeta',saldoTransferencias);
   save('compensaciones',compensaciones);save('temp_logs',tempLogs);
@@ -3540,8 +3592,7 @@ function gAddClienteRapido(){
   if(CLIENTES.indexOf(n)<0){
     CLIENTES.push(n);
     audit('Agregó cliente','Notas',n);
-    CATALOGO_SUCIO.clientes=true;
-    persist();
+    guardarCliente(n);
   }
   nuevaNota.cliente=n;
   cm();nav('nueva-nota');
@@ -4891,10 +4942,10 @@ function rConfig(){
       '</tbody></table></div>';
   } else if(CFG_TAB==='proveedores'){
     body='<div class="card-hdr"><div class="card-title">Proveedores</div><button class="btn btn-p" onclick="mAddItem(\'proveedor\')">+ Agregar proveedor</button></div>'+
-      '<div>'+PROVEEDORES.map(function(p,i){return {p:p,i:i};}).sort(function(a,b){return a.p.localeCompare(b.p,'es');}).map(function(x){return '<div class="list-item"><span>'+x.p+'</span>'+(isAdmin?'<button class="btn btn-xs btn-d" onclick="delItem(\'proveedor\','+x.i+')">Eliminar</button>':'')+'</div>';}).join('')+'</div>';
+      '<div>'+PROVEEDORES.slice().sort(function(a,b){return a.localeCompare(b,'es');}).map(function(p){var pEsc=p.replace(/'/g,"\\'");return '<div class="list-item"><span>'+p+'</span>'+(isAdmin?'<button class="btn btn-xs btn-d" onclick="delItem(\'proveedor\',\''+pEsc+'\')">Eliminar</button>':'')+'</div>';}).join('')+'</div>';
   } else if(CFG_TAB==='clientes'){
     body='<div class="card-hdr"><div class="card-title">Clientes</div><button class="btn btn-p" onclick="mAddItem(\'cliente\')">+ Agregar cliente</button></div>'+
-      '<div>'+CLIENTES.map(function(c,i){return '<div class="list-item"><span>'+c+'</span><button class="btn btn-xs btn-d" onclick="delItem(\'cliente\','+i+')">Eliminar</button></div>';}).join('')+'</div>';
+      '<div>'+CLIENTES.map(function(c){var cEsc=c.replace(/'/g,"\\'");return '<div class="list-item"><span>'+c+'</span><button class="btn btn-xs btn-d" onclick="delItem(\'cliente\',\''+cEsc+'\')">Eliminar</button></div>';}).join('')+'</div>';
   } else if(CFG_TAB==='proc_tipos'){
     body='<div class="card-hdr"><div class="card-title">Tipos de proceso de planta</div><button class="btn btn-p" onclick="mAddProcTipo()">+ Agregar tipo</button></div>'+
       '<div>'+PROC_TIPOS.map(function(t,i){
@@ -5109,7 +5160,7 @@ function saveEditItem(id){
   if(maxV&&maxV>0)p.maxStock=maxV;else delete p.maxStock;
   if(n!==nombreAnterior)renombrarProductoEnTodo(nombreAnterior,n);
   PRODUCTOS.sort(function(a,b){return a.n.localeCompare(b.n,'es');});
-  CATALOGO_SUCIO.productos=true;
+  guardarProducto(p);
   persist();cm();nav('config');
 }
 // Si se renombra un producto, el nombre viejo queda huérfano en todo lo que lo
@@ -5134,8 +5185,10 @@ function renombrarProductoEnTodo(anterior,nuevo){
   Object.keys(PROC_REGLAS).forEach(function(t){
     var r=PROC_REGLAS[t];
     if(!r)return;
-    if(r.entradas)r.entradas=r.entradas.map(function(e){return e===anterior?nuevo:e;});
-    if(r.salidas)r.salidas=r.salidas.map(function(s){return s===anterior?nuevo:s;});
+    var cambio=false;
+    if(r.entradas&&r.entradas.indexOf(anterior)!==-1){r.entradas=r.entradas.map(function(e){return e===anterior?nuevo:e;});cambio=true;}
+    if(r.salidas&&r.salidas.indexOf(anterior)!==-1){r.salidas=r.salidas.map(function(s){return s===anterior?nuevo:s;});cambio=true;}
+    if(cambio)guardarProcTipo(t);
   });
   audit('Renombró producto en todos los registros','Configuracion',anterior+' → '+nuevo);
 }
@@ -5163,20 +5216,21 @@ function saveItem(tipo){
   if(tipo==='producto'){
     var u=g('ai-u')?.value||'kg',c=readCatSelect();
     var soloProceso=!!(g('ai-sp')&&g('ai-sp').checked);
-    PRODUCTOS.push({id:siguienteIdProducto(),n:n,u:u,cat:c,soloProceso:soloProceso});
+    var p={id:siguienteIdProducto(),n:n,u:u,cat:c,soloProceso:soloProceso};
+    PRODUCTOS.push(p);
     PRODUCTOS.sort(function(a,b){return a.n.localeCompare(b.n,'es');});
     audit('Agregó producto','Configuracion',n+' · '+u+' · cat:'+c+(soloProceso?' · solo proceso':''));
-    CATALOGO_SUCIO.productos=true;
+    guardarProducto(p);
   } else if(tipo==='proveedor'){
     PROVEEDORES.push(n);
     audit('Agregó proveedor','Configuracion',n);
-    CATALOGO_SUCIO.proveedores=true;
+    guardarProveedor(n);
   } else if(tipo==='cliente'){
     CLIENTES.push(n);
     audit('Agregó cliente','Configuracion',n);
-    CATALOGO_SUCIO.clientes=true;
+    guardarCliente(n);
   }
-  persist();cm();nav('config');
+  cm();nav('config');
 }
 
 // Checklist con buscador para elegir qué productos puede tomar/devolver un
@@ -5231,8 +5285,8 @@ function saveNuevoProcTipo(){
   PROC_TIPOS.push(n);
   PROC_REGLAS[n]={entradas:entradas,salidas:salidas};
   audit('Agregó tipo de proceso','Configuracion',n+(entradas.length?' · entradas: '+entradas.join(', '):'')+(salidas.length?' · salidas: '+salidas.join(', '):''));
-  CATALOGO_SUCIO.proc_tipos=true;CATALOGO_SUCIO.proc_reglas=true;
-  persist();cm();nav('config');
+  guardarProcTipo(n);
+  cm();nav('config');
 }
 // Se identifica por nombre (único, ver saveNuevoProcTipo) en vez de posición
 // en el arreglo — igual que en mEditItem, una sincronización en tiempo real
@@ -5255,25 +5309,34 @@ function saveEditProcTipo(anterior){
   if(anterior!==n)delete PROC_REGLAS[anterior];
   PROC_REGLAS[n]={entradas:entradas,salidas:salidas};
   audit('Editó tipo de proceso','Configuracion',anterior+' → '+n);
-  CATALOGO_SUCIO.proc_tipos=true;CATALOGO_SUCIO.proc_reglas=true;
-  persist();cm();nav('config');
+  if(anterior!==n)eliminarProcTipo(anterior);
+  guardarProcTipo(n);
+  cm();nav('config');
 }
-// clave: id de producto para 'producto', nombre para 'proc_tipo' (estables
-// frente a una sincronización en tiempo real que reemplace el arreglo
-// mientras el diálogo de confirmación sigue abierto); posición en el
-// arreglo para 'proveedor'/'cliente' (listas simples de texto, sin id).
+// clave: id de producto para 'producto', nombre para 'proveedor'/'cliente'/
+// 'proc_tipo' — todos estables frente a una sincronización en tiempo real que
+// reemplace el arreglo mientras el diálogo de confirmación sigue abierto (una
+// posición en el arreglo ya no serviría en ese caso).
 function delItem(tipo,clave){
-  var nom=tipo==='producto'?(function(){var p=PRODUCTOS.find(function(x){return x.id===clave;});return p?p.n:'';})():
-    tipo==='proveedor'?(PROVEEDORES[clave]||''):
-    tipo==='cliente'?(CLIENTES[clave]||''):
-    tipo==='proc_tipo'?clave:'';
+  var nom=tipo==='producto'?(function(){var p=PRODUCTOS.find(function(x){return x.id===clave;});return p?p.n:'';})():clave;
   confirmarEliminar('¿Eliminar este registro del catálogo?',function(){
     audit('Eliminó de catálogo','Configuración',tipo+': '+nom);
-    if(tipo==='producto'){var pi=PRODUCTOS.findIndex(function(x){return x.id===clave;});if(pi!==-1)PRODUCTOS.splice(pi,1);CATALOGO_SUCIO.productos=true;}
-    else if(tipo==='proveedor'){PROVEEDORES.splice(clave,1);CATALOGO_SUCIO.proveedores=true;}
-    else if(tipo==='cliente'){CLIENTES.splice(clave,1);CATALOGO_SUCIO.clientes=true;}
-    else if(tipo==='proc_tipo'){delete PROC_REGLAS[clave];var ti=PROC_TIPOS.indexOf(clave);if(ti!==-1)PROC_TIPOS.splice(ti,1);CATALOGO_SUCIO.proc_tipos=true;CATALOGO_SUCIO.proc_reglas=true;}
-    persist();nav('config');
+    if(tipo==='producto'){
+      var pi=PRODUCTOS.findIndex(function(x){return x.id===clave;});
+      if(pi!==-1)PRODUCTOS.splice(pi,1);
+      eliminarProducto(clave);
+    } else if(tipo==='proveedor'){
+      var vi=PROVEEDORES.indexOf(clave);if(vi!==-1)PROVEEDORES.splice(vi,1);
+      eliminarProveedor(clave);
+    } else if(tipo==='cliente'){
+      var ci=CLIENTES.indexOf(clave);if(ci!==-1)CLIENTES.splice(ci,1);
+      eliminarCliente(clave);
+    } else if(tipo==='proc_tipo'){
+      delete PROC_REGLAS[clave];
+      var ti=PROC_TIPOS.indexOf(clave);if(ti!==-1)PROC_TIPOS.splice(ti,1);
+      eliminarProcTipo(clave);
+    }
+    nav('config');
   },{detalle:nom});
 }
 
@@ -5378,10 +5441,26 @@ function _importarDatosArchivo(file){
       if(d.compensaciones)compensaciones=d.compensaciones;
       if(d.movTransferencias)movTransferencias=d.movTransferencias;
       if(d.tempLogs)tempLogs=d.tempLogs;
+      // El catálogo se sube fila por fila (ver sección CATÁLOGO) — antes de
+      // reemplazar los arreglos en memoria, se guardan las filas viejas para
+      // borrar las que ya no queden después de importar (si no, quedarían
+      // productos/proveedores/clientes fantasma que el import debía quitar).
+      var prodsViejos=PRODUCTOS.slice(),provsViejos=PROVEEDORES.slice(),
+        clisViejos=CLIENTES.slice(),tiposViejos=PROC_TIPOS.slice();
       if(d.PRODUCTOS)PRODUCTOS=d.PRODUCTOS;
       if(d.PROVEEDORES)PROVEEDORES=d.PROVEEDORES;
       if(d.CLIENTES)CLIENTES=d.CLIENTES;
       if(d.PROC_TIPOS)PROC_TIPOS=d.PROC_TIPOS;
+      if(d.PRODUCTOS||d.PROVEEDORES||d.CLIENTES||d.PROC_TIPOS){
+        prodsViejos.forEach(function(p){if(!PRODUCTOS.some(function(x){return x.id===p.id;}))eliminarProducto(p.id);});
+        provsViejos.forEach(function(n){if(PROVEEDORES.indexOf(n)===-1)eliminarProveedor(n);});
+        clisViejos.forEach(function(n){if(CLIENTES.indexOf(n)===-1)eliminarCliente(n);});
+        tiposViejos.forEach(function(t){if(PROC_TIPOS.indexOf(t)===-1)eliminarProcTipo(t);});
+        PRODUCTOS.forEach(guardarProducto);
+        PROVEEDORES.forEach(guardarProveedor);
+        CLIENTES.forEach(guardarCliente);
+        PROC_TIPOS.forEach(guardarProcTipo);
+      }
       if(d.efectivoDeclarado!==undefined)efectivoDeclarado=d.efectivoDeclarado;
       if(d.saldoTransferencias!==undefined)saldoTransferencias=d.saldoTransferencias;
       if(d.NEXT_ID)NEXT_ID=d.NEXT_ID;
@@ -5400,6 +5479,34 @@ function _importarDatosArchivo(file){
 // ══════════════════════════════════════════════════════
 //  INIT — carga datos de Supabase al arrancar
 // ══════════════════════════════════════════════════════
+// Reconstruye PRODUCTOS/PROVEEDORES/CLIENTES/PROC_TIPOS/PROC_REGLAS a partir
+// de las filas individuales producto_*/proveedor_*/cliente_*/proctipo_* que
+// vinieron en este fetch de Supabase (ver comentario grande en la sección
+// CATÁLOGO sobre por qué cada item vive en su propia fila).
+function reconstruirCatalogoDesdeMapa(data){
+  var out={tieneProductos:false,productos:[],tieneProveedores:false,proveedores:[],
+    tieneClientes:false,clientes:[],tieneProcTipos:false,proc_tipos:[],proc_reglas:{}};
+  Object.keys(data).forEach(function(k){
+    if(k.indexOf('producto_')===0){out.productos.push(data[k]);out.tieneProductos=true;}
+    else if(k.indexOf('proveedor_')===0){out.proveedores.push(data[k]);out.tieneProveedores=true;}
+    else if(k.indexOf('cliente_')===0){out.clientes.push(data[k]);out.tieneClientes=true;}
+    else if(k.indexOf('proctipo_')===0){
+      var nombre=k.substring('proctipo_'.length);
+      out.proc_tipos.push(nombre);out.proc_reglas[nombre]=data[k];out.tieneProcTipos=true;
+    }
+  });
+  return out;
+}
+// Quita del caché local cualquier fila de una colección ya migrada que ya no
+// aparezca en el fetch fresco (ej. un producto borrado en otro dispositivo) —
+// sin esto, arrancar sin conexión podría resucitarlo desde el caché viejo
+// hasta el siguiente sync.
+function podarCacheLocal(prefijo,presentes){
+  for(var i=localStorage.length-1;i>=0;i--){
+    var k=localStorage.key(i);
+    if(k&&k.indexOf('bmp_'+prefijo)===0&&presentes.indexOf(k.substring(4))===-1)localStorage.removeItem(k);
+  }
+}
 function aplicarDatos(data){
   // No pisar ninguna key que todavía tenga un cambio local sin confirmar en Supabase
   var pend=getPendientes();
@@ -5412,11 +5519,23 @@ function aplicarDatos(data){
   if(data.next_id)NEXT_ID=data.next_id;
   if(data.next_folio)nextFolio=data.next_folio;
   if(data.next_pedido_num)nextPedidoNum=data.next_pedido_num;
-  if(data.productos)PRODUCTOS=data.productos;
-  if(data.proveedores)PROVEEDORES=data.proveedores;
-  if(data.clientes)CLIENTES=data.clientes;
-  if(data.proc_tipos)PROC_TIPOS=data.proc_tipos;
-  if(data.proc_reglas)PROC_REGLAS=data.proc_reglas;
+
+  var rc=reconstruirCatalogoDesdeMapa(data);
+  var keysData=Object.keys(data);
+  if(rc.tieneProductos){PRODUCTOS=rc.productos;podarCacheLocal('producto_',keysData.filter(function(k){return k.indexOf('producto_')===0;}));}
+  else if(data.productos)PRODUCTOS=data.productos;
+  if(rc.tieneProveedores){PROVEEDORES=rc.proveedores;podarCacheLocal('proveedor_',keysData.filter(function(k){return k.indexOf('proveedor_')===0;}));}
+  else if(data.proveedores)PROVEEDORES=data.proveedores;
+  if(rc.tieneClientes){CLIENTES=rc.clientes;podarCacheLocal('cliente_',keysData.filter(function(k){return k.indexOf('cliente_')===0;}));}
+  else if(data.clientes)CLIENTES=data.clientes;
+  if(rc.tieneProcTipos){
+    PROC_TIPOS=rc.proc_tipos;PROC_REGLAS=rc.proc_reglas;
+    podarCacheLocal('proctipo_',keysData.filter(function(k){return k.indexOf('proctipo_')===0;}));
+  } else {
+    if(data.proc_tipos)PROC_TIPOS=data.proc_tipos;
+    if(data.proc_reglas)PROC_REGLAS=data.proc_reglas;
+  }
+
   if(data.catalogo_seeds_vistos)CATALOGO_SEEDS_VISTOS=data.catalogo_seeds_vistos;
   if(data.bodega){bodega=data.bodega;normalizarLotesAgotados(bodega);}
   if(data.efectivo_declarado!==undefined&&data.efectivo_declarado!==null)efectivoDeclarado=data.efectivo_declarado;
@@ -5436,6 +5555,17 @@ function aplicarDatos(data){
   // existieran productos/tipos de proceso nuevos — completar con lo del código.
   mergeCatalogosNuevos();
   configurarProcesoRobalo();
+  // Migración puntual: instalaciones que todavía guardan el catálogo como un
+  // array completo bajo una sola clave se pasan al esquema de una fila por
+  // item la primera vez que se detecta el blob viejo — de ahí en adelante ya
+  // no queda nada que migrar y este bloque no vuelve a hacer nada.
+  if(data.productos&&!rc.tieneProductos){PRODUCTOS.forEach(guardarProducto);remove('productos');}
+  if(data.proveedores&&!rc.tieneProveedores){PROVEEDORES.forEach(guardarProveedor);remove('proveedores');}
+  if(data.clientes&&!rc.tieneClientes){CLIENTES.forEach(guardarCliente);remove('clientes');}
+  if(data.proc_tipos&&!rc.tieneProcTipos){
+    PROC_TIPOS.forEach(guardarProcTipo);remove('proc_tipos');
+    if(data.proc_reglas)remove('proc_reglas');
+  }
 }
 
 function mostrarCargando(){
