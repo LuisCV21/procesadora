@@ -3609,6 +3609,7 @@ function gNota(){
   if(!nuevaNota.cliente){alert('Selecciona un cliente');return;}
   var parts=[];
   var errStock=[];
+  var errPrecio=[];
   for(var i=0;i<nuevaNota.partidas.length;i++){
     var p=nuevaNota.partidas[i];
     if(!p.loteId||!p.cant)continue;
@@ -3618,9 +3619,12 @@ function gNota(){
     if(cant<=0)continue;
     var unidadLote=lote.unidad||'kg';
     if(lote.kg<cant){errStock.push(lote.esp+' Lote '+lote.lote+': solicitado '+cant+' '+unidadLote+', disponible '+lote.kg.toFixed(1)+' '+unidadLote);continue;}
-    parts.push({cant:cant,unidad:unidadLote,concepto:lote.esp,lote:lote.lote,loteId:lote.id,precio:parseFloat(p.precio)||0,importe:parseFloat(p.importe)||0,costo:lote.costo||0});
+    var precio=parseFloat(p.precio)||0;
+    if(precio<=0){errPrecio.push(lote.esp+' Lote '+lote.lote+': sin precio de venta asignado');continue;}
+    parts.push({cant:cant,unidad:unidadLote,concepto:lote.esp,lote:lote.lote,loteId:lote.id,precio:precio,importe:parseFloat(p.importe)||0,costo:lote.costo||0});
   }
   if(errStock.length>0){alert('Stock insuficiente:\n'+errStock.join('\n'));return;}
+  if(errPrecio.length>0){alert('No se puede vender sin precio asignado — corrígelo en Precios pendientes:\n'+errPrecio.join('\n'));return;}
   if(parts.length===0){alert('Agrega al menos una partida válida');return;}
   var tot=parts.reduce(function(a,p){return a+p.importe;},0);
   var cond=nuevaNota.condiciones||'Crédito';
@@ -3741,18 +3745,21 @@ function gEditarPartidas(){
   // al validar, porque ese stock ya salió de cámara/bodega por esta misma nota.
   var origPorLote={};
   n.partidas.forEach(function(p){origPorLote[p.loteId]=(origPorLote[p.loteId]||0)+p.cant;});
-  var nuevas=[],errStock=[],usoNuevo={};
+  var nuevas=[],errStock=[],errPrecio=[],usoNuevo={};
   EDITANDO_NOTA.partidas.forEach(function(p){
     var loteId=parseInt(p.loteId)||null;
     var cant=parseFloat(p.cant)||0;
     if(!loteId||cant<=0)return;
     var lote=buscarLoteVenta(loteId);
     if(!lote){errStock.push('Lote no encontrado (id '+loteId+')');return;}
+    var precio=parseFloat(p.precio)||0;
+    if(precio<=0){errPrecio.push(lote.esp+' Lote '+lote.lote+': sin precio de venta asignado');return;}
     usoNuevo[loteId]=(usoNuevo[loteId]||0)+cant;
     nuevas.push({cant:cant,unidad:lote.unidad||'kg',concepto:lote.esp,lote:lote.lote,loteId:lote.id,
-      precio:parseFloat(p.precio)||0,importe:parseFloat(p.importe)||0,costo:lote.costo||0});
+      precio:precio,importe:parseFloat(p.importe)||0,costo:lote.costo||0});
   });
   if(nuevas.length===0){alert('La nota debe tener al menos una partida válida');return;}
+  if(errPrecio.length>0){alert('No se puede vender sin precio asignado — corrígelo en Precios pendientes:\n'+errPrecio.join('\n'));return;}
   Object.keys(usoNuevo).forEach(function(loteIdStr){
     var loteId=parseInt(loteIdStr);
     var lote=buscarLoteVenta(loteId);
