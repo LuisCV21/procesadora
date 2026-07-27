@@ -2550,7 +2550,27 @@ function recalcCosto(i,kgPed,costoOrig){
   }
 }
 
+// Antes de aplicar la recepción, verificamos contra Supabase (no solo contra
+// el arreglo local, que puede estar desactualizado) que nadie más la haya
+// recibido ya casi al mismo tiempo. Esto fue justo lo que causó que el lote
+// P-0053 (Corona) perdiera su precio y sus 3 ventas del viernes: dos personas
+// recibieron el mismo pedido con la pantalla desfasada y el segundo guardado
+// (de todo el arreglo completo) borró lo que había hecho el primero.
 function gRecibirPedido(id){
+  var p=pedidos.find(function(x){return x.id===id;});if(!p)return;
+  if(p.est==='recibido'){alert('Este pedido ya fue recibido.');cm();nav('pedidos');return;}
+  sbGet('pedidos').then(function(remoto){
+    var pr=Array.isArray(remoto)&&remoto.find(function(x){return x.id===id;});
+    if(pr&&pr.est==='recibido'){
+      pedidos.length=0;Array.prototype.push.apply(pedidos,remoto);saveLocal('pedidos',remoto);
+      alert('Este pedido ya fue recibido por otro usuario justo ahora. Se actualizó la lista — revísalo en Pedidos.');
+      cm();nav('pedidos');
+      return;
+    }
+    _gRecibirPedidoEjecutar(id);
+  });
+}
+function _gRecibirPedidoEjecutar(id){
   var p=pedidos.find(function(x){return x.id===id;});if(!p)return;
   var loteAuto=p.numPedido||numPedido(nextPedidoNum);
   var parts=p.partidas||[{esp:p.esp,kg:p.kg,costo:p.costo,destino:'camara'}];
