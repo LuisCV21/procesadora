@@ -46,3 +46,33 @@ sube solo lo que tocó.
 Mientras eso no se haga, el riesgo sigue abierto en cualquier pantalla que
 no sea "Recibir pedido" (por ejemplo: dos personas editando Cámara/Bodega,
 o capturando notas, casi al mismo tiempo).
+
+## Variante del mismo problema: colisión de ids dentro del catálogo
+
+- **2026-07-28**: aunque el catálogo ya vive en filas individuales
+  (`producto_<id>`) desde `bccd16b`, `siguienteIdProducto()` seguía
+  calculando el siguiente id como `max(ids en memoria en ESE dispositivo) +
+  1`. Un dispositivo con una copia local incompleta del catálogo (caché
+  parcialmente vaciada, o que agregó un producto antes de terminar de
+  sincronizar con Supabase) podía calcular un id bajo que YA pertenecía a
+  un producto real — y como cada producto vive en su propia fila, guardar
+  el nuevo **pisó en silencio la fila del viejo**. Así desaparecieron 14
+  productos con inventario activo en Bodega (Ajo, Canela, Consomé Nork,
+  Tomillo, Calamar picado, Arrachera, Aceite de oliva, Agua, Café, y las 5
+  cervezas: Corona, Cristal, Modelo lata, Negra, Victoria) — sustituidos
+  por productos con nombres distintos que reusaron sus mismos ids.
+  Se restauraron a mano en Supabase (ids 200-213) y se corrigió
+  `siguienteIdProducto()` para usar un piso persistido (`next_producto_id`)
+  que nunca baja entre sesiones, en vez de confiar solo en la copia local.
+
+- Esto es la misma familia de bug que el resto de este documento (una
+  copia local desactualizada pisando Supabase), pero con un mecanismo
+  distinto: no es "subir el bloque completo", es "reusar un id ya
+  ocupado". El fix de `next_producto_id` reduce mucho el riesgo pero no lo
+  elimina del todo: un dispositivo completamente nuevo (sin caché local)
+  que agregue un producto en la ventana antes de que responda el primer
+  fetch a Supabase todavía podría, en teoría, calcular un id ya usado si
+  esa ventana coincide con la de otro dispositivo haciendo lo mismo. La
+  solución completa sería verificar contra Supabase (no solo el piso
+  local) antes de confirmar cada id nuevo — pendiente si se quiere cerrar
+  el hueco al 100%.

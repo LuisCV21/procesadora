@@ -763,8 +763,22 @@ var CATALOGO_SEEDS_VISTOS=load('catalogo_seeds_vistos',null);
 // el siguiente porque son justo los que se reasignan abajo (venían del
 // contador global por el bug ya corregido) — si no, contaminarían el conteo
 // y el siguiente producto también saldría con un id de miles.
+//
+// NEXT_PRODUCTO_ID es un piso persistido (en vez de calcular el siguiente id
+// SOLO del máximo de PRODUCTOS en memoria en este dispositivo). Se detectó
+// que un dispositivo con una copia local incompleta del catálogo (ej. caché
+// parcialmente vaciada por el navegador, o que arrancó y agregó un producto
+// antes de que terminara de sincronizar con Supabase) podía calcular un id
+// bajo (1,2,3...) que YA pertenecía a un producto real — y como cada
+// producto vive en su propia fila 'producto_<id>', guardar el nuevo pisó en
+// silencio al viejo. El piso persistido nunca baja entre sesiones, así que
+// aunque la copia local esté incompleta, no vuelve a repetir un id ya usado.
+var NEXT_PRODUCTO_ID=load('next_producto_id',200);
 function siguienteIdProducto(){
-  return PRODUCTOS.reduce(function(a,p){return (p.id&&p.id<=1000)?Math.max(a,p.id):a;},0)+1;
+  var maxLocal=PRODUCTOS.reduce(function(a,p){return (p.id&&p.id<=1000)?Math.max(a,p.id):a;},0);
+  NEXT_PRODUCTO_ID=Math.max(NEXT_PRODUCTO_ID,maxLocal)+1;
+  save('next_producto_id',NEXT_PRODUCTO_ID);
+  return NEXT_PRODUCTO_ID;
 }
 function asegurarIdsProductos(){
   var nuevos=[];
@@ -5436,7 +5450,7 @@ function exportarDatos(){
     compensaciones:compensaciones,movTransferencias:movTransferencias,tempLogs:tempLogs,
     PRODUCTOS:PRODUCTOS,PROVEEDORES:PROVEEDORES,CLIENTES:CLIENTES,PROC_TIPOS:PROC_TIPOS,
     efectivoDeclarado:efectivoDeclarado,saldoTransferencias:saldoTransferencias,
-    NEXT_ID:NEXT_ID,nextFolio:nextFolio,
+    NEXT_ID:NEXT_ID,nextFolio:nextFolio,NEXT_PRODUCTO_ID:NEXT_PRODUCTO_ID,
     metaPatrimonio:metaPatrimonio,gastos:gastos,
     usuarios:load('users',null)
   };
@@ -5492,6 +5506,7 @@ function _importarDatosArchivo(file){
       if(d.saldoTransferencias!==undefined)saldoTransferencias=d.saldoTransferencias;
       if(d.NEXT_ID)NEXT_ID=d.NEXT_ID;
       if(d.nextFolio)nextFolio=d.nextFolio;
+      if(d.NEXT_PRODUCTO_ID)NEXT_PRODUCTO_ID=Math.max(NEXT_PRODUCTO_ID,d.NEXT_PRODUCTO_ID);
       if(d.metaPatrimonio!==undefined)metaPatrimonio=d.metaPatrimonio;
       if(d.gastos)gastos=d.gastos;
       if(d.usuarios)save('users',d.usuarios);
@@ -5546,6 +5561,7 @@ function aplicarDatos(data){
   if(data.next_id)NEXT_ID=data.next_id;
   if(data.next_folio)nextFolio=data.next_folio;
   if(data.next_pedido_num)nextPedidoNum=data.next_pedido_num;
+  if(data.next_producto_id)NEXT_PRODUCTO_ID=Math.max(NEXT_PRODUCTO_ID,data.next_producto_id);
 
   var rc=reconstruirCatalogoDesdeMapa(data);
   var keysData=Object.keys(data);
