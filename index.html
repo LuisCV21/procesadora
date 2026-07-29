@@ -5007,7 +5007,9 @@ function movimientosProducto(esp){
 function rMovimientosProducto(){
   var esp=window._REP_PROD||'';
   var po=PRODUCTOS.map(function(p){return '<option value="'+p.n+'"'+(esp===p.n?' selected':'')+'>'+p.n+'</option>';}).join('');
-  var selector='<div class="card" style="margin-top:18px"><div class="card-hdr"><div class="card-title">🔍 Historial de movimientos por producto</div></div>'+
+  var espAttr=esp.replace(/'/g,"\\'");
+  var btnDescarga=esp?'<button class="btn btn-xs" onclick="descargarMovimientosProducto(\''+espAttr+'\')">⬇ Descargar CSV</button>':'';
+  var selector='<div class="card" style="margin-top:18px"><div class="card-hdr"><div class="card-title">🔍 Historial de movimientos por producto</div>'+btnDescarga+'</div>'+
     '<div class="card-body">'+
     '<div class="field" style="max-width:340px"><label>Producto</label><select onchange="window._REP_PROD=this.value;nav(\'reportes\')"><option value="">Seleccionar producto...</option>'+po+'</select></div>';
   if(!esp)return selector+'<div style="color:var(--text3);font-size:13px;margin-top:10px">Elige un producto para ver todo lo que entró, salió o se movió — útil para revisar un conteo físico que no cuadra.</div></div></div>';
@@ -5574,6 +5576,39 @@ function delUser(id){
 // ══════════════════════════════════════════════════════
 //  EXPORTAR / IMPORTAR
 // ══════════════════════════════════════════════════════
+// Descarga en CSV (se abre directo en Excel) el mismo historial que se ve
+// en Reportes > Historial de movimientos por producto, incluida la fila de
+// existencia inicial — útil para imprimir o adjuntar en un cuadre de mes.
+function csvCampo(v){
+  v=String(v==null?'':v);
+  if(/[",\n]/.test(v))v='"'+v.replace(/"/g,'""')+'"';
+  return v;
+}
+function descargarMovimientosProducto(esp){
+  var movs=movimientosProducto(esp);
+  var kgCam=camara.filter(function(i){return i.esp===esp;}).reduce(function(a,i){return a+i.kg;},0);
+  var kgBod=bodega.filter(function(i){return i.esp===esp;}).reduce(function(a,i){return a+i.kg;},0);
+  var stockActual=kgCam+kgBod;
+  var netMovs=movs.reduce(function(a,m){return a+m.signo*m.cant;},0);
+  var existenciaInicial=parseFloat((stockActual-netMovs).toFixed(2));
+  var acumulado=existenciaInicial;
+  var filas=[['Fecha','Tipo','Cantidad','Unidad','Detalle','Acumulado']];
+  filas.push(['—','Existencia inicial',existenciaInicial.toFixed(2),'kg','Antes de los movimientos listados abajo',acumulado.toFixed(2)]);
+  movs.forEach(function(m){
+    acumulado+=m.signo*m.cant;
+    var signoTxt=m.signo>0?'+':m.signo<0?'-':'';
+    filas.push([fmtFecha(m.fecha),m.tipo,signoTxt+m.cant.toFixed(2),m.unidad,m.detalle,acumulado.toFixed(2)]);
+  });
+  filas.push([]);
+  filas.push(['Stock actual real (Cámara '+kgCam.toFixed(2)+' + Bodega '+kgBod.toFixed(2)+')',stockActual.toFixed(2)]);
+  var csv='﻿'+filas.map(function(f){return f.map(csvCampo).join(',');}).join('\r\n');
+  var blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;a.download='movimientos_'+esp.replace(/[^a-zA-Z0-9]+/g,'_')+'_'+today()+'.csv';a.click();
+  URL.revokeObjectURL(url);
+}
+
 function exportarDatos(){
   var datos={
     version:5,fecha:today(),
