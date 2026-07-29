@@ -5012,7 +5012,22 @@ function rMovimientosProducto(){
     '<div class="field" style="max-width:340px"><label>Producto</label><select onchange="window._REP_PROD=this.value;nav(\'reportes\')"><option value="">Seleccionar producto...</option>'+po+'</select></div>';
   if(!esp)return selector+'<div style="color:var(--text3);font-size:13px;margin-top:10px">Elige un producto para ver todo lo que entró, salió o se movió — útil para revisar un conteo físico que no cuadra.</div></div></div>';
   var movs=movimientosProducto(esp);
-  var acumulado=0;
+  var kgCam=camara.filter(function(i){return i.esp===esp;}).reduce(function(a,i){return a+i.kg;},0);
+  var kgBod=bodega.filter(function(i){return i.esp===esp;}).reduce(function(a,i){return a+i.kg;},0);
+  var stockActual=kgCam+kgBod;
+  // El historial rastreado casi nunca cubre TODA la vida del producto (pudo
+  // tener existencia desde antes de que hubiera pedidos/procesos capturados,
+  // o algún movimiento viejo ya salió del límite de 1000 eventos de la
+  // bitácora). Por eso no arranca en 0 — se calcula la existencia inicial
+  // que hace que la columna termine exactamente en el stock real de hoy, en
+  // vez de mostrar un acumulado que puede caer en negativo sin explicación.
+  var netMovs=movs.reduce(function(a,m){return a+m.signo*m.cant;},0);
+  var existenciaInicial=parseFloat((stockActual-netMovs).toFixed(2));
+  var acumulado=existenciaInicial;
+  var filaInicial='<tr style="color:var(--text3)"><td>—</td><td>Existencia inicial</td>'+
+    '<td class="mn">'+existenciaInicial.toFixed(2)+' kg</td>'+
+    '<td style="font-size:13px">Antes de los movimientos listados abajo (no forma parte de este historial)</td>'+
+    '<td class="mn">'+acumulado.toFixed(2)+'</td></tr>';
   var filas=movs.map(function(m){
     acumulado+=m.signo*m.cant;
     var signoTxt=m.signo>0?'+':m.signo<0?'−':'↔';
@@ -5022,20 +5037,17 @@ function rMovimientosProducto(){
       '<td style="color:var(--text3);font-size:13px">'+m.detalle+'</td>'+
       '<td class="mn">'+acumulado.toFixed(2)+'</td></tr>';
   }).join('');
-  var kgCam=camara.filter(function(i){return i.esp===esp;}).reduce(function(a,i){return a+i.kg;},0);
-  var kgBod=bodega.filter(function(i){return i.esp===esp;}).reduce(function(a,i){return a+i.kg;},0);
-  var stockActual=kgCam+kgBod;
-  var diff=parseFloat((stockActual-acumulado).toFixed(2));
   return selector+
     '<div class="tw" style="margin-top:14px"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Cantidad</th><th>Detalle</th><th>Acumulado</th></tr></thead><tbody>'+
+    filaInicial+
     (filas||'<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text3)">Sin movimientos registrados para este producto</td></tr>')+
     '</tbody></table></div>'+
     '<div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">'+
-      '<div><div style="font-size:12px;color:var(--text3)">Acumulado según este historial</div><div style="font-weight:700">'+acumulado.toFixed(2)+' kg</div></div>'+
+      '<div><div style="font-size:12px;color:var(--text3)">Existencia inicial (antes de este historial)</div><div style="font-weight:700;color:'+(existenciaInicial<0?'var(--danger)':'var(--text)')+'">'+existenciaInicial.toFixed(2)+' kg</div></div>'+
+      '<div><div style="font-size:12px;color:var(--text3)">Movimiento neto rastreado</div><div style="font-weight:700">'+(netMovs>=0?'+':'')+netMovs.toFixed(2)+' kg</div></div>'+
       '<div><div style="font-size:12px;color:var(--text3)">Stock actual real (Cámara '+kgCam.toFixed(2)+' + Bodega '+kgBod.toFixed(2)+')</div><div style="font-weight:700">'+stockActual.toFixed(2)+' kg</div></div>'+
-      '<div><div style="font-size:12px;color:var(--text3)">Diferencia sin explicar</div><div style="font-weight:700;color:'+(Math.abs(diff)>0.01?'var(--danger)':'var(--ok, var(--info))')+'">'+diff.toFixed(2)+' kg</div></div>'+
     '</div>'+
-    '<div style="font-size:12px;color:var(--text3);margin-top:10px">Este historial se reconstruye a partir de compras, procesos, ventas y la bitácora de auditoría (Config → Auditoría). La bitácora solo guarda los últimos 1000 eventos de todo el sistema, así que movimientos muy antiguos podrían no aparecer aquí — en ese caso la diferencia de arriba no necesariamente es un faltante real.</div>'+
+    '<div style="font-size:12px;color:var(--text3);margin-top:10px">Este historial se reconstruye a partir de compras, procesos, ventas y la bitácora de auditoría (Config → Auditoría) — no desde el inicio de los tiempos, así que "Existencia inicial" es lo que ya existía antes de esos registros. Si esa existencia inicial es negativa, o mucho más grande de lo que tendría sentido, ahí sí hay algo raro que revisar (por ejemplo, una venta o baja que no corresponde a este producto/lote).</div>'+
     '</div></div>';
 }
 
