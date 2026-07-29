@@ -1573,11 +1573,15 @@ function bajaLote(id,esGrupo){
     // id es el nombre del grupo
     var esp=id;
     confirmarEliminar('¿Dar de baja TODOS los lotes de '+esp+'?',function(){
+      var kgTotal=camara.filter(function(x){return x.esp===esp;}).reduce(function(a,x){return a+x.kg;},0);
+      audit('Baja de cámara (grupo completo)','Camara',esp+' · '+kgTotal.toFixed(2)+' kg (todos los lotes)');
       camara=camara.filter(function(x){return x.esp!==esp;});
       persist();nav('camara');
     },{palabra:'BORRAR'});
   } else {
     confirmarEliminar('¿Dar de baja este lote?',function(){
+      var l=camara.find(function(x){return x.id===id;});
+      if(l)audit('Baja de cámara','Camara',l.esp+' · Lote '+l.lote+' · '+l.kg+' '+(l.unidad||'kg'));
       ACC_OPEN['cam-'+id]=false;
       camara=camara.filter(function(x){return x.id!==id;});
       persist();nav('camara');
@@ -1637,7 +1641,7 @@ function mEditLote(id){
 function saveEditLote(id){
   var l=camara.find(function(x){return x.id===id;});if(!l)return;
   var espAnt=l.esp,loteAnt=l.lote,unidadAnt=l.unidad||'kg';
-  var costoAntes=l.costo||0,precioAntes=l.precio||0;
+  var costoAntes=l.costo||0,precioAntes=l.precio||0,kgAntes=l.kg;
   l.esp=g('el1').value; l.lote=g('el2').value.trim();
   l.kg=parseFloat(g('el3').value)||0; l.unidad=g('el8').value;
   l.costo=parseFloat(g('el4').value)||0;
@@ -1645,6 +1649,9 @@ function saveEditLote(id){
   l.ent=g('el6').value; l.cad=g('el7').value;
   if(l.costo!==costoAntes||l.precio!==precioAntes){
     audit('Actualizó precio de lote','Camara',l.esp+' · Lote '+l.lote+' · Costo '+money(costoAntes)+' → '+money(l.costo)+' · Precio '+money(precioAntes)+' → '+money(l.precio));
+  }
+  if(l.kg!==kgAntes){
+    audit('Corrigió cantidad de lote','Camara',espAnt+' · Lote '+loteAnt+' · '+kgAntes.toFixed(2)+' → '+l.kg.toFixed(2)+' '+(l.unidad||'kg'));
   }
   ACC_OPEN['cam-'+id]=false;
   if(l.unidad!==unidadAnt)sincronizarUnidadProceso(espAnt,loteAnt,l.unidad);
@@ -4085,12 +4092,15 @@ function mEditBodega(id){
 function gEditBodega(id){
   var l=bodega.find(function(x){return x.id===id;});if(!l)return;
   var espAnt=l.esp,loteAnt=l.lote,unidadAnt=l.unidad||'kg';
-  var costoAntes=l.costo||0,precioAntes=l.precio||0;
+  var costoAntes=l.costo||0,precioAntes=l.precio||0,kgAntes=l.kg;
   l.esp=g('be1').value;l.lote=g('be2').value.trim();
   l.kg=parseFloat(g('be3').value)||0;l.unidad=g('be4').value;
   l.costo=parseFloat(g('be5').value)||0;l.precio=esSoloProceso(l.esp)?0:(parseFloat(g('be6').value)||0);
   if(l.costo!==costoAntes||l.precio!==precioAntes){
     audit('Actualizó precio de lote','Bodega',l.esp+' · Lote '+l.lote+' · Costo '+money(costoAntes)+' → '+money(l.costo)+' · Precio '+money(precioAntes)+' → '+money(l.precio));
+  }
+  if(l.kg!==kgAntes){
+    audit('Corrigió cantidad de lote','Bodega',espAnt+' · Lote '+loteAnt+' · '+kgAntes.toFixed(2)+' → '+l.kg.toFixed(2)+' '+(l.unidad||'kg'));
   }
   ACC_OPEN['bod-'+id]=false;
   if(l.unidad!==unidadAnt)sincronizarUnidadProceso(espAnt,loteAnt,l.unidad);
@@ -4917,7 +4927,116 @@ function rRep(){
         (trazRows||'<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text3)">Sin datos</td></tr>')+
         '</tbody></table></div></div>'+
     '</div>'+
+    rMovimientosProducto()+
     rInvTotal();
+}
+
+// Reconstruye el historial de movimientos de un producto combinando todas las
+// fuentes: compras/entradas (pedidos, incluye entrada directa a cámara porque
+// gEntrada también crea un pedido "recibido"), procesos (consumo de insumo y
+// generación de salidas), ventas (notas) y bitácora de auditoría (entrada
+// directa a bodega, transferencias cámara↔bodega, bajas y correcciones
+// manuales de cantidad). Sirve para que el usuario pueda rastrear, producto
+// por producto, todo lo que se movió y detectar de dónde salió una diferencia
+// al hacer un conteo físico.
+function movimientosProducto(esp){
+  var movs=[];
+  pedidos.forEach(function(p){
+    if(p.est!=='recibido'||!p.partidas)return;
+    p.partidas.forEach(function(pt){
+      if(pt.esp!==esp)return;
+      var kg=pt.kgReal!=null?pt.kgReal:parseFloat(pt.kg)||0;
+      if(!kg)return;
+      movs.push({fecha:p.fecha||'',signo:1,cant:kg,unidad:pt.unidad||'kg',
+        tipo:'Compra / entrada',detalle:'Pedido '+(p.numPedido||'#'+p.id)+' · '+p.prov+(pt.lote?' · Lote '+pt.lote:'')});
+    });
+  });
+  procesos.forEach(function(p){
+    if(p.esp===esp){
+      movs.push({fecha:p.fecha||'',signo:-1,cant:p.kgE,unidad:'kg',
+        tipo:'Proceso (insumo)',detalle:'Usado en "'+p.tipo+'" · Lote '+p.lote});
+    }
+    (p.salidas||[]).forEach(function(s){
+      if(s.esp!==esp)return;
+      movs.push({fecha:p.fecha||'',signo:1,cant:s.kg,unidad:s.unidad||'kg',
+        tipo:'Proceso (salida)',detalle:'Generado por "'+p.tipo+'" · Lote '+p.lote});
+    });
+  });
+  notas.forEach(function(n){
+    (n.partidas||[]).forEach(function(p){
+      if(p.concepto!==esp)return;
+      movs.push({fecha:n.fecha||'',signo:-1,cant:p.cant,unidad:p.unidad||'kg',
+        tipo:'Venta',detalle:'Nota #'+n.folio+' · '+n.cliente});
+    });
+  });
+  auditLog.forEach(function(a){
+    var m;
+    if(a.accion==='Entrada directa bodega'){
+      m=/^(.+?) · ([\d.]+) (\S+) · Lote:(\S+)(?: · Prov:(.*))?$/.exec(a.detalle);
+      if(m&&m[1]===esp)movs.push({fecha:a.fecha,signo:1,cant:parseFloat(m[2])||0,unidad:m[3],
+        tipo:'Entrada directa (bodega)',detalle:'Lote '+m[4]+(m[5]?' · Prov:'+m[5]:'')+' · '+a.usuario});
+    } else if(a.accion==='Movió lote de cámara a bodega'||a.accion==='Movió lote de bodega a cámara'){
+      m=/^(.+?) · Lote (\S+) · ([\d.]+) (\S+)$/.exec(a.detalle);
+      if(m&&m[1]===esp)movs.push({fecha:a.fecha,signo:0,cant:parseFloat(m[3])||0,unidad:m[4],
+        tipo:a.accion==='Movió lote de cámara a bodega'?'Transferencia → Bodega':'Transferencia → Cámara',
+        detalle:'Lote '+m[2]+' · '+a.usuario});
+    } else if(a.accion==='Baja de bodega'||a.accion==='Baja de cámara'){
+      m=/^(.+?) · Lote (\S+) · ([\d.]+) (\S+)$/.exec(a.detalle);
+      if(m&&m[1]===esp)movs.push({fecha:a.fecha,signo:-1,cant:parseFloat(m[3])||0,unidad:m[4],
+        tipo:'Baja ('+(a.modulo||'')+')',detalle:'Lote '+m[2]+' · '+a.usuario});
+    } else if(a.accion==='Baja de cámara (grupo completo)'){
+      m=/^(.+?) · ([\d.]+) kg \(todos los lotes\)$/.exec(a.detalle);
+      if(m&&m[1]===esp)movs.push({fecha:a.fecha,signo:-1,cant:parseFloat(m[2])||0,unidad:'kg',
+        tipo:'Baja (grupo completo — Camara)',detalle:'Todos los lotes · '+a.usuario});
+    } else if(a.accion==='Corrigió cantidad de lote'){
+      m=/^(.+?) · Lote (\S+) · ([\d.]+) → ([\d.]+) (\S+)$/.exec(a.detalle);
+      if(m&&m[1]===esp){
+        var antes=parseFloat(m[3])||0,despues=parseFloat(m[4])||0,delta=parseFloat((despues-antes).toFixed(3));
+        movs.push({fecha:a.fecha,signo:delta>=0?1:-1,cant:Math.abs(delta),unidad:m[5],
+          tipo:'Corrección manual ('+(a.modulo||'')+')',
+          detalle:'Lote '+m[2]+' · '+antes.toFixed(2)+' → '+despues.toFixed(2)+' '+m[5]+' · '+a.usuario});
+      }
+    }
+  });
+  movs.sort(function(x,y){
+    if(x.fecha===y.fecha)return 0;
+    return (x.fecha||'')<(y.fecha||'')?-1:1;
+  });
+  return movs;
+}
+function rMovimientosProducto(){
+  var esp=window._REP_PROD||'';
+  var po=PRODUCTOS.map(function(p){return '<option value="'+p.n+'"'+(esp===p.n?' selected':'')+'>'+p.n+'</option>';}).join('');
+  var selector='<div class="card" style="margin-top:18px"><div class="card-hdr"><div class="card-title">🔍 Historial de movimientos por producto</div></div>'+
+    '<div class="card-body">'+
+    '<div class="field" style="max-width:340px"><label>Producto</label><select onchange="window._REP_PROD=this.value;nav(\'reportes\')"><option value="">Seleccionar producto...</option>'+po+'</select></div>';
+  if(!esp)return selector+'<div style="color:var(--text3);font-size:13px;margin-top:10px">Elige un producto para ver todo lo que entró, salió o se movió — útil para revisar un conteo físico que no cuadra.</div></div></div>';
+  var movs=movimientosProducto(esp);
+  var acumulado=0;
+  var filas=movs.map(function(m){
+    acumulado+=m.signo*m.cant;
+    var signoTxt=m.signo>0?'+':m.signo<0?'−':'↔';
+    var color=m.signo>0?'var(--info)':m.signo<0?'var(--danger)':'var(--text3)';
+    return '<tr><td>'+fmtFecha(m.fecha)+'</td><td>'+m.tipo+'</td>'+
+      '<td class="mn" style="color:'+color+';font-weight:700">'+signoTxt+m.cant.toFixed(2)+' '+m.unidad+'</td>'+
+      '<td style="color:var(--text3);font-size:13px">'+m.detalle+'</td>'+
+      '<td class="mn">'+acumulado.toFixed(2)+'</td></tr>';
+  }).join('');
+  var kgCam=camara.filter(function(i){return i.esp===esp;}).reduce(function(a,i){return a+i.kg;},0);
+  var kgBod=bodega.filter(function(i){return i.esp===esp;}).reduce(function(a,i){return a+i.kg;},0);
+  var stockActual=kgCam+kgBod;
+  var diff=parseFloat((stockActual-acumulado).toFixed(2));
+  return selector+
+    '<div class="tw" style="margin-top:14px"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Cantidad</th><th>Detalle</th><th>Acumulado</th></tr></thead><tbody>'+
+    (filas||'<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text3)">Sin movimientos registrados para este producto</td></tr>')+
+    '</tbody></table></div>'+
+    '<div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">'+
+      '<div><div style="font-size:12px;color:var(--text3)">Acumulado según este historial</div><div style="font-weight:700">'+acumulado.toFixed(2)+' kg</div></div>'+
+      '<div><div style="font-size:12px;color:var(--text3)">Stock actual real (Cámara '+kgCam.toFixed(2)+' + Bodega '+kgBod.toFixed(2)+')</div><div style="font-weight:700">'+stockActual.toFixed(2)+' kg</div></div>'+
+      '<div><div style="font-size:12px;color:var(--text3)">Diferencia sin explicar</div><div style="font-weight:700;color:'+(Math.abs(diff)>0.01?'var(--danger)':'var(--ok, var(--info))')+'">'+diff.toFixed(2)+' kg</div></div>'+
+    '</div>'+
+    '<div style="font-size:12px;color:var(--text3);margin-top:10px">Este historial se reconstruye a partir de compras, procesos, ventas y la bitácora de auditoría (Config → Auditoría). La bitácora solo guarda los últimos 1000 eventos de todo el sistema, así que movimientos muy antiguos podrían no aparecer aquí — en ese caso la diferencia de arriba no necesariamente es un faltante real.</div>'+
+    '</div></div>';
 }
 
 function rInvTotal(){
