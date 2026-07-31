@@ -971,6 +971,10 @@ function puedeCobrar(){return ROL==='gerente'||ROL==='admin';}
 // entregada/pagada, reconciliando caja). Gerente solo mientras siga pendiente
 // de envío — una vez enviada, ya salió mercancía y el ajuste debe pasar por admin.
 function puedeEditarPartidasNota(n){return ROL==='admin'||(ROL==='gerente'&&n.est==='pendiente');}
+// Corregir (revertir) una nota ya enviada — ej. se marcó "Contado" cuando era
+// "Crédito". Solo admin, y solo si ya salió de "pendiente" (si sigue pendiente
+// no hay nada que revertir, ya se puede editar directo).
+function puedeCorregirNota(n){return ROL==='admin'&&(n.est==='entregada'||n.est==='pagada');}
 
 function persist(){
   // El catálogo (productos/proveedores/clientes/tipos de proceso) NO se guarda
@@ -2947,7 +2951,8 @@ function buildPedPart(i,opciones){
     '<div class="field"><label>Producto</label>'+buscableHTML('pps'+i,opciones,'Buscar producto...','','updPedUnit',i)+'</div>'+
     '<div class="field"><label id="ppklbl'+i+'">Cantidad</label><input id="ppk'+i+'" type="number" placeholder="0" min="0"></div>'+
     '<div class="field"><label id="ppclbl'+i+'">Costo/u</label><input id="ppc'+i+'" type="number" placeholder="0" min="0"></div>'+
-    (isAdmin?'<div class="field"><label>Precio venta</label><input id="pppv'+i+'" type="number" placeholder="0" min="0" style="color:var(--info)"></div>':'')+
+    (isAdmin?'<div class="field"><label>Precio venta</label><input id="pppv'+i+'" type="number" placeholder="0" min="0" style="color:var(--info)">'+
+      '<div id="pppv-nota'+i+'" style="font-size:11px;color:var(--text3);margin-top:2px;display:none">No aplica — va a proceso</div></div>':'')+
     '<div class="field"><label>Destino</label><select id="ppd'+i+'"><option value="camara">Cámara</option><option value="bodega">Bodega</option></select></div>'+
     (i>0?'<button class="btn btn-icon btn-d" style="margin-top:18px" onclick="remPedPart('+i+')">✕</button>':'<div></div>')+
   '</div>';
@@ -2960,6 +2965,16 @@ function updPedUnit(i){
   var clbl=g('ppclbl'+i);if(clbl)clbl.textContent='Costo/'+u;
   // Si bodega por defecto para no-kg
   if(u!=='kg'){var dest=g('ppd'+i);if(dest)dest.value='bodega';}
+  // Productos "solo proceso" (ej. Lomo de tilapia sin procesar) nunca se venden
+  // tal cual, así que el precio de venta no aplica aquí — mismo criterio que
+  // precioVentaCampoHTML en Entrada a cámara/bodega.
+  var pv=g('pppv'+i);
+  if(pv){
+    var bloqueado=esSoloProceso(esp);
+    pv.disabled=bloqueado;
+    if(bloqueado)pv.value='';
+    var nota=g('pppv-nota'+i);if(nota)nota.style.display=bloqueado?'':'none';
+  }
 }
 function addPedPart(){
   var opciones=PRODUCTOS.map(function(p){return {value:p.n,label:p.n};});
@@ -2992,7 +3007,7 @@ function gPedido(){
     var costo=g('ppc'+i)?parseFloat(g('ppc'+i).value)||0:0;
     var dest=g('ppd'+i)?g('ppd'+i).value:'camara';
     var prod=PRODUCTOS.find(function(pr){return pr.n===esp;});
-    var precioVenta=isAdmin&&g('pppv'+i)?parseFloat(g('pppv'+i).value)||0:0;
+    var precioVenta=isAdmin&&g('pppv'+i)&&!esSoloProceso(esp)?parseFloat(g('pppv'+i).value)||0:0;
     if(esp&&kg>0)parts.push({esp:esp,kg:kg,costo:costo,destino:dest,unidad:prod?prod.u:'kg',precioVenta:precioVenta,lote:''});
   }
   if(parts.length===0){alert('Agrega al menos un producto');return;}
@@ -3069,6 +3084,7 @@ function rNotas(){
         (puedeEditarPartidasNota(n)?'<button class="btn btn-xs" onclick="mEditarPartidasNota('+n.id+')">✏ Editar partidas</button>':'')+
         (n.est==='pendiente'?'<button class="btn btn-xs" style="border-color:var(--info);color:var(--info)" onclick="mEnviarNota('+n.id+')">📦 Marcar enviada</button>':'')+
         (esCredito&&(n.est==='entregada'||n.est==='pagada')&&!n.pagada&&puedeCobrar()?'<button class="btn btn-xs" style="border-color:var(--accent-glow);color:var(--accent)" onclick="mAbonarNota('+n.id+')">Registrar cobro</button>':'')+
+        (puedeCorregirNota(n)?'<button class="btn btn-xs btn-d" onclick="mRevertirNota('+n.id+')">↩ Corregir</button>':'')+
       '</div></td>'+
     '</tr>';
   }).join(''))+
@@ -3102,6 +3118,7 @@ function renderEdnInfo(){
     '</div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
       (puedeEditarPartidasNota(n)?'<button class="btn btn-p" onclick="cm();mEditarPartidasNota('+n.id+')">✏ Editar partidas</button>':'<div style="font-size:13px;color:var(--text3)">Ya fue enviada — solo el administrador puede corregirla.</div>')+
+      (puedeCorregirNota(n)?'<button class="btn btn-d" onclick="cm();mRevertirNota('+n.id+')">↩ Corregir (regresar a pendiente)</button>':'')+
       (ROL==='admin'?'<button class="btn btn-d" onclick="cm();elimNota('+n.id+')">Eliminar esta nota</button>':'')+
     '</div>';
 }
@@ -3141,6 +3158,41 @@ function gEnviarNota(id){
   if(notaAdj)n.notaAjuste=notaAdj;
   if(n.condiciones==='Contado'){n.pagada=true;efectivoDeclarado+=n.total;}
   audit('Marcó nota como enviada','Notas','Nota #'+n.folio+' · '+n.cliente+' · '+money(n.total));
+  persist();cm();nav('notas');
+}
+
+// Corregir una nota que se envió con datos equivocados (ej. se marcó "Contado"
+// y en realidad era "Crédito"). La regresa a "Pendiente de envío" —igual que
+// antes de mandarla— para poder editar condiciones/partidas y volver a
+// enviarla. No toca el inventario (la mercancía ya salió realmente, eso no
+// cambia); solo deshace lo que esta nota ya había sumado a caja.
+function mRevertirNota(id){
+  var n=notas.find(function(x){return x.id===id;});if(!n)return;
+  var efNota=efectivoDeNota(n);
+  var abonos=n.abonos||[];
+  var lineas='';
+  if(efNota>0)lineas+='<li>Se restarán <b>'+money(efNota)+'</b> del efectivo en caja</li>';
+  if(abonos.length>0)lineas+='<li>Se eliminarán los <b>'+abonos.length+' cobro(s)</b> registrados en esta nota</li>';
+  lineas+='<li>La nota regresará a estado <b>Pendiente de envío</b> para corregir condición de pago, partidas, etc.</li>';
+  lineas+='<li>El inventario ya descontado por esta nota <b>no se modifica</b> (la mercancía ya salió)</li>';
+  modal('<div class="modal" style="max-width:480px"><div class="modal-hdr" style="background:var(--danger-dim)"><div class="modal-title" style="color:var(--danger)">↩ Corregir nota #'+n.folio+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div class="alert al-w" style="margin-bottom:14px"><div class="al-dot"></div><b>Solo para correcciones excepcionales.</b> Esta acción revertirá el envío y el cobro.</div>'+
+      '<p style="font-size:14px;color:var(--text2);margin-bottom:10px">Se realizarán los siguientes cambios:</p>'+
+      '<ul style="font-size:14px;color:var(--text2);padding-left:20px;line-height:2">'+lineas+'</ul>'+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-d" onclick="revertirNota('+id+')">Confirmar corrección</button></div>'+
+  '</div>');
+}
+
+function revertirNota(id){
+  var n=notas.find(function(x){return x.id===id;});if(!n)return;
+  var efNota=efectivoDeNota(n);
+  if(efNota>0)efectivoDeclarado=Math.max(0,efectivoDeclarado-efNota);
+  audit('Revirtió nota a pendiente (corrección)','Notas','Nota #'+n.folio+' · '+n.cliente+' · '+money(n.total));
+  n.abonos=[];
+  n.pagada=false;
+  n.est='pendiente';
   persist();cm();nav('notas');
 }
 
@@ -3720,7 +3772,10 @@ function rEditarPartidas(){
     '<div style="display:flex;gap:8px"><button class="btn" onclick="epAddP()">+ Agregar renglón</button><button class="btn btn-p" onclick="gEditarPartidas()">Guardar cambios</button></div>'+
   '</div>'+
   '<div class="card"><div class="card-hdr"><div class="card-title">Nota #'+n.folio+' — '+n.cliente+'</div></div><div class="card-body">'+
-    '<div style="color:var(--text3);font-size:13px">'+fmtFecha(n.fecha)+' · '+(n.condiciones||'—')+' · Estado: '+n.est+'</div>'+
+    '<div style="color:var(--text3);font-size:13px;margin-bottom:'+(n.est==='pendiente'?'10px':'0')+'">'+fmtFecha(n.fecha)+' · Estado: '+n.est+'</div>'+
+    (n.est==='pendiente'?
+      '<div class="field" style="max-width:220px"><label>Condiciones</label><select id="epcond"><option value="Crédito"'+(n.condiciones==='Crédito'?' selected':'')+'>Crédito</option><option value="Contado"'+(n.condiciones==='Contado'?' selected':'')+'>Contado</option></select></div>':
+      '<div style="color:var(--text3);font-size:13px">Condiciones: '+(n.condiciones||'—')+'</div>')+
   '</div></div>'+
   '<div class="card"><div class="card-hdr"><div class="card-title">Partidas <span style="font-size:13px;color:var(--text3);font-weight:normal">— Corrige cantidad, precio o producto; el stock disponible ya considera lo reservado por esta nota</span></div></div><div class="card-body">'+
     '<div style="display:grid;grid-template-columns:70px 1fr 82px 90px 32px;gap:6px;padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:8px">'+
@@ -3782,6 +3837,7 @@ function gEditarPartidas(){
   epSync();
   var n=notas.find(function(x){return x.id===EDITANDO_NOTA.id;});if(!n)return;
   if(!puedeEditarPartidasNota(n)){alert('Esta nota ya fue enviada — solo el administrador puede corregirla.');EDITANDO_NOTA=null;nav('notas');return;}
+  if(n.est==='pendiente'&&g('epcond'))n.condiciones=g('epcond').value;
   // Cuánto tenía reservado (descontado) esta nota, por lote — es lo "disponible extra"
   // al validar, porque ese stock ya salió de cámara/bodega por esta misma nota.
   var origPorLote={};
