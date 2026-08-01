@@ -4515,9 +4515,9 @@ function rCaja(){
       '</tbody></table></div></div>';
   } else if(CAJA_TAB==='corte'){
     var hoy=today();
-    var primerDiaMes=hoy.slice(0,8)+'01';
-    var desde=window._CORTE_DESDE||primerDiaMes;
-    var hasta=window._CORTE_HASTA||hoy;
+    var mesCorte=window._CORTE_MES||hoy.slice(0,7);
+    var desde=mesCorte+'-01';
+    var hasta=ultimoDiaMes(mesCorte);
 
     var ventasPeriodo=notas.filter(function(n){return n.fecha>=desde&&n.fecha<=hasta;}).reduce(function(a,n){return a+(n.total||0);},0);
     var comprasPeriodo=pedidos.filter(function(p){return p.est==='recibido'&&p.fecha>=desde&&p.fecha<=hasta;}).reduce(function(a,p){return a+(p.total||0);},0);
@@ -4530,10 +4530,7 @@ function rCaja(){
     var utilidadPeriodo=ventasPeriodo-comprasPeriodo-gastosPeriodo;
 
     content='<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">Periodo del corte</div></div><div class="card-body">'+
-      '<div class="fg2" style="display:grid;gap:12px;margin-bottom:10px">'+
-        '<div class="field"><label>Desde</label><input id="cor-desde" type="date" value="'+desde+'" onchange="setCortePeriodo()"></div>'+
-        '<div class="field"><label>Hasta</label><input id="cor-hasta" type="date" value="'+hasta+'" onchange="setCortePeriodo()"></div>'+
-      '</div>'+
+      '<div class="field" style="margin-bottom:10px;max-width:220px"><label>Mes</label><input id="cor-mes" type="month" value="'+mesCorte+'" onchange="setCortePeriodo()"></div>'+
       '<button class="btn btn-p" onclick="imprimirCorte(\''+desde+'\',\''+hasta+'\')">🖨 Imprimir corte</button>'+
     '</div></div>'+
     '<div class="stat-grid" style="margin-bottom:18px">'+
@@ -4610,9 +4607,17 @@ function datosCorteDetalle(desde,hasta){
 }
 
 function setCajaTab(t){window._CAJA_TAB=t;nav('caja');}
+function ultimoDiaMes(mesStr){
+  var y=+mesStr.slice(0,4),m=+mesStr.slice(5,7);
+  return mesStr+'-'+String(new Date(y,m,0).getDate()).padStart(2,'0');
+}
+function nombreMes(mesStr){
+  var y=+mesStr.slice(0,4),m=+mesStr.slice(5,7);
+  var t=new Date(y,m-1,1).toLocaleDateString('es-MX',{month:'long',year:'numeric'});
+  return t.charAt(0).toUpperCase()+t.slice(1);
+}
 function setCortePeriodo(){
-  window._CORTE_DESDE=g('cor-desde')?g('cor-desde').value:window._CORTE_DESDE;
-  window._CORTE_HASTA=g('cor-hasta')?g('cor-hasta').value:window._CORTE_HASTA;
+  window._CORTE_MES=g('cor-mes')?g('cor-mes').value:window._CORTE_MES;
   nav('caja');
 }
 
@@ -4872,7 +4877,8 @@ function imprimirCorte(desde,hasta){
   function filaDet(cols){
     return '<tr>'+cols.map(function(c,i){return '<td style="padding:5px 8px;border-bottom:1px solid #eee;'+(i>0?'text-align:right':'')+'">'+c+'</td>';}).join('')+'</tr>';
   }
-  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Corte '+fmtFecha(desde)+' a '+fmtFecha(hasta)+'</title><style>'+
+  var mesLbl=nombreMes(desde.slice(0,7));
+  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Corte '+mesLbl+'</title><style>'+
     'body{font-family:Arial,sans-serif;margin:0;padding:24px;background:#fff;color:#111}'+
     'h1{font-size:20px;margin:0 0 4px}'+
     '.sub{color:#666;font-size:13px;margin-bottom:20px}'+
@@ -4883,7 +4889,7 @@ function imprimirCorte(desde,hasta){
     '@media print{h2{-webkit-print-color-adjust:exact;print-color-adjust:exact}}'+
     '</style></head><body>'+
     '<h1>Bodega de Mariscos y Productos — Corte de periodo</h1>'+
-    '<div class="sub">Periodo: '+fmtFecha(desde)+' a '+fmtFecha(hasta)+' · Generado: '+fmtFecha(today())+'</div>'+
+    '<div class="sub">Periodo: '+mesLbl+' · Generado: '+fmtFecha(today())+'</div>'+
     '<h2>Resultado del periodo</h2>'+
     '<table>'+
       fila('+ Ventas del periodo (notas de venta)',ventasPeriodo,'#1a7a3a')+
