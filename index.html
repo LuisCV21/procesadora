@@ -4628,11 +4628,17 @@ function rCaja(){
 }
 
 function datosCorteDetalle(desde,hasta){
-  var ventasFiltradas=notas.filter(function(n){return n.fecha>=desde&&n.fecha<=hasta;}).slice().sort(function(a,b){return a.fecha===b.fecha?a.folio-b.folio:a.fecha.localeCompare(b.fecha);});
+  // Ordenado por folio/número de pedido (no por fecha) — así se puede verificar
+  // de un vistazo que no falta ningún número, aunque no siga el orden cronológico
+  // exacto del mes (la fecha del pedido no siempre coincide con el orden en que
+  // se fue registrando/numerando).
+  var ventasFiltradas=notas.filter(function(n){return n.fecha>=desde&&n.fecha<=hasta;}).slice().sort(function(a,b){return a.folio-b.folio;});
   var mapaSucursal={};
   ventasFiltradas.forEach(function(n){var k=n.cliente||'Otros';mapaSucursal[k]=(mapaSucursal[k]||0)+(n.total||0);});
   var ventasPorSucursal=Object.keys(mapaSucursal).map(function(k){return{nombre:k,total:mapaSucursal[k]};}).sort(function(a,b){return b.total-a.total;});
-  var comprasDetalle=pedidos.filter(function(p){return p.fecha>=desde&&p.fecha<=hasta;}).slice().sort(function(a,b){return a.fecha.localeCompare(b.fecha);});
+  var comprasDetalle=pedidos.filter(function(p){return p.fecha>=desde&&p.fecha<=hasta;}).slice().sort(function(a,b){
+    return parseInt((a.numPedido||'').replace(/\D/g,''))-parseInt((b.numPedido||'').replace(/\D/g,''));
+  });
   var pendientesProveedor=pedidos.filter(function(p){return p.est==='recibido'&&!p.pagado;}).map(function(p){
     var abonado=p.montoPagado||0;
     return{prov:p.prov,numPedido:p.numPedido,fecha:p.fecha,saldo:Math.max(0,(p.total||p.costo||0)-abonado)};
