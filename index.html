@@ -928,7 +928,8 @@ var FILTRO_CAM='todos';
 var FILTRO_CAM_Q='';
 var FILTRO_NOTA_CLI='todos';
 var CUR_TAB='dashboard';
-var MES_SEL={notas:mesActual(),pedidos:mesActual(),auditoria:mesActual()};
+var MES_SEL={notas:mesActual(),pedidos:mesActual(),auditoria:mesActual(),procesos:mesActual(),
+  compensaciones:mesActual(),vales:mesActual(),gastos:mesActual(),estadocuenta:mesActual()};
 var CFG_TAB='productos';
 var CAM_SORT={col:'esp',dir:1};
 var BOD_SORT={col:'esp',dir:1};
@@ -1070,8 +1071,15 @@ function sumarMes(ym,delta){
   y+=Math.floor(m/12);m=((m%12)+12)%12;
   return y+'-'+(m+1<10?'0':'')+(m+1);
 }
-function cambiarMes(mod,delta){MES_SEL[mod]=sumarMes(MES_SEL[mod],delta);nav(mod==='auditoria'?'config':mod);}
-function irMesActual(mod){MES_SEL[mod]=mesActual();nav(mod==='auditoria'?'config':mod);}
+// Módulos que viven como sub-pestaña dentro de otra pantalla (no son una ruta
+// de nav() por sí mismos) — hay que regresar a la pantalla contenedora.
+function paginaDeMes(mod){
+  if(mod==='auditoria')return 'config';
+  if(mod==='compensaciones'||mod==='vales'||mod==='gastos'||mod==='estadocuenta')return 'caja';
+  return mod;
+}
+function cambiarMes(mod,delta){MES_SEL[mod]=sumarMes(MES_SEL[mod],delta);nav(paginaDeMes(mod));}
+function irMesActual(mod){MES_SEL[mod]=mesActual();nav(paginaDeMes(mod));}
 function selectorMes(mod){
   var ym=MES_SEL[mod];var esActual=ym===mesActual();
   return '<div style="display:flex;align-items:center;gap:6px">'+
@@ -1817,20 +1825,23 @@ function gTempLog(){
 function rProc(){
   var canEdit=ROL==='admin'||ROL==='gerente';
   var canDelete=ROL==='admin';
-  var mT=procesos.reduce(function(a,p){return a+p.merma;},0);
-  var kgP=procesos.reduce(function(a,p){return a+p.kgE;},0);
+  var ymProc=MES_SEL.procesos;
+  var procesosFilt=procesos.filter(function(p){return p.fecha&&p.fecha.slice(0,7)===ymProc;});
+  var mT=procesosFilt.reduce(function(a,p){return a+p.merma;},0);
+  var kgP=procesosFilt.reduce(function(a,p){return a+p.kgE;},0);
   var mp=kgP>0?Math.round(mT/kgP*100):0;
   return '<div class="stat-grid">'+
-    '<div class="stat"><div class="stat-lbl">Procesos registrados</div><div class="stat-val">'+procesos.length+'</div></div>'+
+    '<div class="stat"><div class="stat-lbl">Procesos registrados</div><div class="stat-val">'+procesosFilt.length+'</div></div>'+
     '<div class="stat"><div class="stat-lbl">Kg procesados</div><div class="stat-val c-ok">'+kgP.toFixed(1)+'</div></div>'+
     '<div class="stat"><div class="stat-lbl">Merma total</div><div class="stat-val '+(mp>10?'c-danger':mp>5?'c-warn':'c-ok')+'">'+mT.toFixed(1)+' kg</div><div class="stat-sub">'+mp+'% sobre lo procesado</div></div>'+
   '</div>'+
-  '<div class="card"><div class="card-hdr"><div class="card-title">Registros de procesos</div>'+
+  '<div class="card"><div class="card-hdr" style="flex-wrap:wrap;gap:8px"><div class="card-title">Registros de procesos</div>'+
+    selectorMes('procesos')+
     (canEdit?'<button class="btn btn-p" onclick="mProceso()">+ Registrar proceso</button>':'')+
   '</div><div class="tw"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Entrada</th><th>Kg entrada</th><th>Productos de salida</th><th>Merma</th><th>Notas</th>'+((canEdit||canDelete)?'<th></th>':'')+
   '</tr></thead><tbody>'+
-  (procesos.length===0?'<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text3)">Sin registros</td></tr>':
-  procesos.slice().reverse().map(function(p){
+  (procesosFilt.length===0?'<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text3)">Sin registros en este mes</td></tr>':
+  procesosFilt.slice().reverse().map(function(p){
     var salidasStr=p.salidas&&p.salidas.length>0?p.salidas.map(function(s){return s.kg.toFixed(1)+' '+(s.unidad||'kg')+' '+s.esp+(s.pesoUnitG?' ('+s.pesoUnitG+'g c/u)':'');}).join(', '):p.kgS+' kg (salida)';
     return '<tr><td class="mn">'+fmtFecha(p.fecha)+'</td><td class="pr">'+p.tipo+'</td>'+
       '<td style="font-size:14px">'+p.esp+'<div style="font-size:12px;color:var(--text3)">Lote '+p.lote+'</div></td>'+
@@ -1844,7 +1855,7 @@ function rProc(){
   '</tbody></table></div></div>'+
   '<div class="card" style="margin-top:18px"><div class="card-hdr"><div class="card-title">Merma por tipo de proceso</div></div><div class="card-body">'+
     PROC_TIPOS.map(function(tipo){
-      var ps=procesos.filter(function(p){return p.tipo===tipo;});
+      var ps=procesosFilt.filter(function(p){return p.tipo===tipo;});
       var m=ps.reduce(function(a,p){return a+p.merma;},0);
       var e=ps.reduce(function(a,p){return a+p.kgE;},0);
       var pct=e>0?Math.round(m/e*100):0;
@@ -4362,8 +4373,9 @@ function rCaja(){
         '</div>'+
       '</div></div>';
   } else if(CAJA_TAB==='vales'){
+    var ymVal=MES_SEL.vales;
     var valesPend=vales.filter(function(v){return v.est==='pendiente';});
-    var valesCob=vales.filter(function(v){return v.est==='cobrado';});
+    var valesCob=vales.filter(function(v){return v.est==='cobrado'&&v.fechaCobro&&v.fechaCobro.slice(0,7)===ymVal;});
     content='<div class="card"><div class="card-hdr"><div class="card-title">Vales por cobrar</div>'+
       (canOp?'<button class="btn btn-p" onclick="mAddVale()">+ Agregar vale</button>':'')+
       '</div>'+
@@ -4383,8 +4395,8 @@ function rCaja(){
       '<td class="pr c-warn" style="font-weight:700">'+money(totalVales)+'</td><td></td></tr>'+
       '</tbody></table></div>')+
     '</div>'+
-    (valesCob.length>0?
-    '<div class="card"><div class="card-hdr"><div class="card-title" style="color:var(--text3)">Vales cobrados</div></div>'+
+    '<div class="card"><div class="card-hdr" style="flex-wrap:wrap;gap:8px"><div class="card-title" style="color:var(--text3)">Vales cobrados</div>'+selectorMes('vales')+'</div>'+
+    (valesCob.length===0?'<div class="card-body" style="text-align:center;padding:20px;color:var(--text3)">Sin vales cobrados este mes</div>':
     '<div class="tw"><table><thead><tr><th>Negocio / Cliente</th><th>Concepto</th><th>Fecha</th><th>Monto</th><th>Cobrado</th><th></th>'+
       (ROL==='admin'?'<th>Efectivo</th><th>Acciones</th>':'')+
     '</tr></thead><tbody>'+
@@ -4403,12 +4415,18 @@ function rCaja(){
         :'')+
         '</tr>';
     }).join('')+
-    '</tbody></table></div></div>':'');
+    '</tbody></table></div>')+
+    '</div>';
 
   } else if(CAJA_TAB==='estadocuenta'){
     var movsCaja=getMovsCaja();
     var saldoCalculado=movsCaja.length>0?movsCaja[movsCaja.length-1].saldo:0;
     var diferencia=efectivoDeclarado-saldoCalculado;
+    var ymMov=MES_SEL.estadocuenta;
+    // El saldo se calcula siempre sobre el historial completo (es acumulado, fila
+    // por fila) — nada más se filtran las FILAS que se muestran, para poder ver
+    // el mes que se quiera sin romper la cuenta corrida.
+    var movsCajaFilt=movsCaja.filter(function(m){return m.fecha&&m.fecha.slice(0,7)===ymMov;});
     content=
       '<div style="padding:10px 14px;background:var(--info-dim);border:1px solid rgba(26,110,181,.3);border-radius:var(--r);font-size:13px;color:var(--info);margin-bottom:14px">'+
         'Solo movimientos en <b>efectivo</b> (no incluye transferencias ni compensaciones de sucursales). Se reconstruye a partir de notas, pedidos, vales y gastos — el saldo va cambiando fila por fila, igual que un estado de cuenta bancario.'+
@@ -4418,10 +4436,10 @@ function rCaja(){
         '<div class="stat"><div class="stat-lbl">Efectivo declarado (real)</div><div class="stat-val c-ok">'+money(efectivoDeclarado)+'</div></div>'+
         '<div class="stat" style="border-color:'+(Math.abs(diferencia)<1?'var(--accent-glow)':'rgba(192,57,43,.4)')+'"><div class="stat-lbl">Diferencia sin explicar</div><div class="stat-val" style="color:'+(Math.abs(diferencia)<1?'var(--accent)':'var(--danger)')+'">'+money(diferencia)+'</div></div>'+
       '</div>'+
-      '<div class="card"><div class="card-hdr"><div class="card-title">Estado de cuenta — Efectivo en caja</div></div>'+
+      '<div class="card"><div class="card-hdr" style="flex-wrap:wrap;gap:8px"><div class="card-title">Estado de cuenta — Efectivo en caja</div>'+selectorMes('estadocuenta')+'</div>'+
       '<div class="tw"><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Ref.</th><th>Cargo</th><th>Abono</th><th>Saldo</th></tr></thead><tbody>'+
-      (movsCaja.length===0?'<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text3)">Sin movimientos de efectivo registrados</td></tr>':
-      movsCaja.map(function(m){
+      (movsCajaFilt.length===0?'<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text3)">Sin movimientos de efectivo en este mes</td></tr>':
+      movsCajaFilt.map(function(m){
         return '<tr><td class="mn">'+fmtFecha(m.fecha)+'</td><td class="pr">'+m.concepto+'</td><td style="font-size:12px;color:var(--text3)">'+m.ref+'</td>'+
           '<td class="mn" style="color:var(--danger)">'+(m.tipo==='cargo'?money(m.monto):'')+'</td>'+
           '<td class="mn" style="color:var(--accent)">'+(m.tipo==='abono'?money(m.monto):'')+'</td>'+
@@ -4430,12 +4448,16 @@ function rCaja(){
       '</tbody></table></div></div>';
   } else if(CAJA_TAB==='compensaciones'){
     var sucOpts=SUCURSALES_PROPIAS.map(function(s){return '<option>'+s+'</option>';}).join('');
-    // Calcular saldo disponible por sucursal
+    var ymComp=MES_SEL.compensaciones;
+    var compensacionesFilt=compensaciones.filter(function(c){return c.fecha&&c.fecha.slice(0,7)===ymComp;});
+    // Se compensa mes a mes — al iniciar un mes nuevo nadie ha compensado nada
+    // todavía, así que tanto lo pagado como lo aplicado se calculan solo con lo
+    // que cae dentro del mes seleccionado (no arrastran saldo de meses previos).
     var saldosPorSuc=SUCURSALES_PROPIAS.map(function(s){
-      var totalPagado=compensaciones.filter(function(c){return c.sucursal===s;}).reduce(function(a,c){return a+c.monto;},0);
+      var totalPagado=compensacionesFilt.filter(function(c){return c.sucursal===s;}).reduce(function(a,c){return a+c.monto;},0);
       var totalAplicado=notas.filter(function(n){return n.cliente===s;}).reduce(function(a,n){
         if(!n.abonos)return a;
-        return a+n.abonos.filter(function(b){return b.forma==='compensacion';}).reduce(function(x,b){return x+b.monto;},0);
+        return a+n.abonos.filter(function(b){return b.forma==='compensacion'&&b.fecha&&b.fecha.slice(0,7)===ymComp;}).reduce(function(x,b){return x+b.monto;},0);
       },0);
       var saldo=Math.max(0,totalPagado-totalAplicado);
       var deuda=notas.filter(function(n){return n.cliente===s&&!n.pagada&&n.est==='entregada';}).reduce(function(a,n){
@@ -4444,12 +4466,13 @@ function rCaja(){
       return {nombre:s,totalPagado:totalPagado,totalAplicado:totalAplicado,saldo:saldo,deuda:deuda};
     });
     content=
+      '<div class="card" style="margin-bottom:14px"><div class="card-hdr"><div class="card-title">Mes</div>'+selectorMes('compensaciones')+'</div></div>'+
       '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px">'+
         saldosPorSuc.map(function(s){
           return '<div class="stat" style="border-color:'+(s.saldo>0?'var(--accent-glow)':'var(--border)')+'">'+
             '<div class="stat-lbl">'+s.nombre+'</div>'+
             '<div class="stat-val '+(s.saldo>0?'c-ok':'')+'">'+money(s.saldo)+'</div>'+
-            '<div class="stat-sub">Saldo a favor disponible</div>'+
+            '<div class="stat-sub">Saldo a favor disponible este mes</div>'+
             '<div style="margin-top:6px;font-size:13px;color:var(--warn)">Deuda: '+money(s.deuda)+'</div>'+
           '</div>';
         }).join('')+
@@ -4467,14 +4490,13 @@ function rCaja(){
       '<div class="card"><div class="card-hdr"><div class="card-title">Historial de pagos de sucursales</div></div>'+
       '<div class="tw"><table><thead><tr><th>Fecha</th><th>Sucursal</th><th>Monto registrado</th><th>Aplicado a notas</th><th>Saldo restante</th><th>Ref.</th>'+(isAdmin?'<th></th>':'')+
       '</tr></thead><tbody>'+
-      (compensaciones.length===0?'<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text3)">Sin pagos registrados</td></tr>':
-      compensaciones.slice().reverse().map(function(c){
-        // Calculamos cuánto se ha aplicado en total para esta sucursal vs cuánto se ha pagado
-        // El saldo restante es la diferencia del total pagado menos total aplicado en notas
-        var totalPagadoSuc=compensaciones.filter(function(x){return x.sucursal===c.sucursal;}).reduce(function(a,x){return a+x.monto;},0);
+      (compensacionesFilt.length===0?'<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text3)">Sin pagos registrados en este mes</td></tr>':
+      compensacionesFilt.slice().reverse().map(function(c){
+        // Calculamos cuánto se ha aplicado en total para esta sucursal vs cuánto se ha pagado, dentro del mismo mes
+        var totalPagadoSuc=compensacionesFilt.filter(function(x){return x.sucursal===c.sucursal;}).reduce(function(a,x){return a+x.monto;},0);
         var totalAplicadoSuc=notas.filter(function(n){return n.cliente===c.sucursal;}).reduce(function(a,n){
           if(!n.abonos)return a;
-          return a+n.abonos.filter(function(b){return b.forma==='compensacion';}).reduce(function(x,b){return x+b.monto;},0);
+          return a+n.abonos.filter(function(b){return b.forma==='compensacion'&&b.fecha&&b.fecha.slice(0,7)===ymComp;}).reduce(function(x,b){return x+b.monto;},0);
         },0);
         var saldoRestante=Math.max(0,totalPagadoSuc-totalAplicadoSuc);
         return '<tr><td class="mn">'+fmtFecha(c.fecha)+'</td><td class="pr">'+c.sucursal+'</td>'+
@@ -4500,16 +4522,19 @@ function rCaja(){
       }).join(''))+
       '</tbody></table></div></div>';
   } else if(CAJA_TAB==='gastos'){
-    var totalGastos=gastos.reduce(function(a,gto){return a+gto.monto;},0);
+    var ymGto=MES_SEL.gastos;
+    var gastosFilt=gastos.filter(function(gto){return gto.fecha&&gto.fecha.slice(0,7)===ymGto;});
+    var totalGastos=gastosFilt.reduce(function(a,gto){return a+gto.monto;},0);
     content='<div class="stat-grid" style="margin-bottom:18px">'+
-        '<div class="stat"><div class="stat-lbl">Total de gastos registrados</div><div class="stat-val c-danger">'+money(totalGastos)+'</div><div class="stat-sub">Se descuentan de la utilidad en el corte del periodo</div></div>'+
+        '<div class="stat"><div class="stat-lbl">Total de gastos registrados este mes</div><div class="stat-val c-danger">'+money(totalGastos)+'</div><div class="stat-sub">Se descuentan de la utilidad en el corte del periodo</div></div>'+
       '</div>'+
-      '<div class="card"><div class="card-hdr"><div class="card-title">Gastos de la procesadora</div>'+
+      '<div class="card"><div class="card-hdr" style="flex-wrap:wrap;gap:8px"><div class="card-title">Gastos de la procesadora</div>'+
+        selectorMes('gastos')+
         (canOp?'<button class="btn btn-p" onclick="mAddGasto()">+ Registrar gasto</button>':'')+
       '</div>'+
       '<div class="tw"><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Categoría</th><th>Forma</th><th>Monto</th><th>Registró</th></tr></thead><tbody>'+
-      (gastos.length===0?'<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text3)">Sin gastos registrados</td></tr>':
-      gastos.slice().reverse().map(function(gto){
+      (gastosFilt.length===0?'<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text3)">Sin gastos registrados en este mes</td></tr>':
+      gastosFilt.slice().reverse().map(function(gto){
         return '<tr><td class="mn">'+fmtFecha(gto.fecha)+'</td><td class="pr">'+gto.concepto+'</td><td><span class="tag">'+(gto.categoria||'otro')+'</span></td>'+
           '<td class="mn" style="color:var(--text3)">'+(gto.forma||'—')+'</td>'+
           '<td class="mn" style="color:var(--danger);font-weight:700">'+money(gto.monto)+'</td>'+
