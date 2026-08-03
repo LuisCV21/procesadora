@@ -4606,14 +4606,22 @@ function rCaja(){
         d.gastosDetalle.map(function(gto){return '<tr><td class="pr">'+gto.concepto+'</td><td><span class="tag">'+(gto.categoria||'otro')+'</span></td><td class="mn">'+fmtFecha(gto.fecha)+'</td><td class="mn">'+money(gto.monto)+'</td></tr>';}).join(''))+
         '</tbody></table></div>'+
         '<div class="card-body" style="padding-top:0">'+filaSimple('TOTAL GASTOS',money(d.gastosPeriodo))+'</div></div>'+
-      '<div class="card"><div class="card-hdr"><div class="card-title">Vales pendientes por cobrar ('+d.valesPendientesActuales.length+')</div></div><div class="card-body" style="padding-bottom:0">'+
-        '<div style="font-size:13px;color:var(--text3);margin-bottom:12px">Solo informativo — el dinero de estos vales ya salió de caja y no forma parte del cálculo de utilidad del periodo; se muestran aquí porque siguen sin cobrarse y son el detalle de "Vales por cobrar pendientes" de arriba.</div>'+
+      '<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">Vales pendientes por cobrar ('+d.valesPendientesActuales.length+')</div></div><div class="card-body" style="padding-bottom:0">'+
+        '<div style="font-size:13px;color:var(--text3);margin-bottom:12px">Este dinero sigue sin cobrarse — sí es parte del cálculo (es el detalle de "Vales por cobrar pendientes" de arriba, que suma dentro del capital neto).</div>'+
       '</div>'+
         '<div class="tw"><table><thead><tr><th>Negocio</th><th>Concepto</th><th>Fecha</th><th>Monto</th></tr></thead><tbody>'+
         (d.valesPendientesActuales.length===0?'<tr><td colspan="4" style="text-align:center;padding:16px;color:var(--text3)">Sin vales pendientes</td></tr>':
         d.valesPendientesActuales.map(function(v){return '<tr><td class="pr">'+v.negocio+'</td><td>'+(v.concepto||'—')+'</td><td class="mn">'+fmtFecha(v.fecha)+'</td><td class="mn">'+money(v.monto)+'</td></tr>';}).join(''))+
         '</tbody></table></div>'+
-        '<div class="card-body" style="padding-top:0">'+filaSimple('TOTAL VALES PENDIENTES',money(d.totalVales))+'</div></div>';
+        '<div class="card-body" style="padding-top:0">'+filaSimple('TOTAL VALES PENDIENTES',money(d.totalVales))+'</div></div>'+
+      '<div class="card"><div class="card-hdr"><div class="card-title">Vales cobrados en el periodo ('+d.valesLiquidadosPeriodo.length+') — informativo</div></div><div class="card-body" style="padding-bottom:0">'+
+        '<div style="font-size:13px;color:var(--text3);margin-bottom:12px">Estos vales sí salieron de caja durante el mes, pero ya se cobraron por completo — su ciclo ya cerró y no afectan ningún total de arriba. Se muestran nada más como historial.</div>'+
+      '</div>'+
+        '<div class="tw"><table><thead><tr><th>Negocio</th><th>Concepto</th><th>Fecha</th><th>Monto</th></tr></thead><tbody>'+
+        (d.valesLiquidadosPeriodo.length===0?'<tr><td colspan="4" style="text-align:center;padding:16px;color:var(--text3)">Sin vales cobrados en este periodo</td></tr>':
+        d.valesLiquidadosPeriodo.map(function(v){return '<tr><td class="pr">'+v.negocio+'</td><td>'+(v.concepto||'—')+'</td><td class="mn">'+fmtFecha(v.fecha)+'</td><td class="mn">'+money(v.montoTotal||v.monto)+'</td></tr>';}).join(''))+
+        '</tbody></table></div>'+
+        '<div class="card-body" style="padding-top:0">'+filaSimple('TOTAL VALES COBRADOS',money(d.valesLiquidadosPeriodo.reduce(function(a,v){return a+(v.montoTotal||v.monto);},0)))+'</div></div>';
     })();
   }
   return tabBar+content;
@@ -4662,6 +4670,11 @@ function calcularCortePeriodo(mes){
   notas.forEach(function(n){(n.abonos||[]).forEach(function(a){if(a.fecha>=desde&&a.fecha<=hasta)cobrosClientesPeriodo+=a.monto;});});
   var gastosPeriodo=d.gastosDetalle.reduce(function(a,gto){return a+gto.monto;},0);
   var valesCobradosPeriodo=vales.filter(function(v){return v.est==='cobrado'&&v.fechaCobro>=desde&&v.fechaCobro<=hasta;}).reduce(function(a,v){return a+v.monto;},0);
+  // Vales que salieron de caja Y ya se cobraron por completo — su ciclo ya cerró,
+  // no afectan ningún total actual (ni caja, ni "vales por cobrar"), son puro
+  // historial de lo que pasó en el mes, a diferencia de valesPendientesActuales
+  // que SÍ sigue sumando en capitalNeto.
+  var valesLiquidadosPeriodo=d.valesDetalle.filter(function(v){return v.est==='cobrado';});
   var utilidadPeriodo=ventasPeriodo-comprasPeriodo-gastosPeriodo;
   var utilidadBruta=ventasPeriodo-comprasPeriodo;
   return {
@@ -4675,7 +4688,7 @@ function calcularCortePeriodo(mes){
     ventasFiltradas:d.ventasFiltradas,ventasPorSucursal:d.ventasPorSucursal,
     comprasDetalle:d.comprasDetalle,pendientesProveedor:d.pendientesProveedor,
     totalPendienteProveedor:d.totalPendienteProveedor,valesDetalle:d.valesDetalle,gastosDetalle:d.gastosDetalle,
-    valesPendientesActuales:valesPendientesActuales
+    valesPendientesActuales:valesPendientesActuales,valesLiquidadosPeriodo:valesLiquidadosPeriodo
   };
 }
 // Corte de un mes para mostrar/imprimir: si ya se cerró, regresa el snapshot
@@ -5035,11 +5048,18 @@ function imprimirCorte(mes){
       '<tr class="tot"><td colspan="3" style="padding:8px">TOTAL GASTOS</td><td style="padding:8px;text-align:right">'+money(d.gastosPeriodo)+'</td></tr>'+
     '</tbody></table>'+
     '<h2>Vales pendientes por cobrar ('+d.valesPendientesActuales.length+')</h2>'+
-    '<div class="sub" style="margin-top:-4px">Solo informativo — ese dinero ya salió de caja y no forma parte de la utilidad del periodo; es el detalle de "Vales por cobrar pendientes" de arriba.</div>'+
+    '<div class="sub" style="margin-top:-4px">Este dinero sigue sin cobrarse — sí es parte del cálculo (es el detalle de "Vales por cobrar pendientes" de arriba, que suma dentro del capital neto).</div>'+
     '<table><thead><tr><th>Negocio</th><th>Concepto</th><th>Fecha</th><th style="text-align:right">Monto</th></tr></thead><tbody>'+
       (d.valesPendientesActuales.length===0?'<tr><td colspan="4" style="text-align:center;padding:12px;color:#999">Sin vales pendientes</td></tr>':
       d.valesPendientesActuales.map(function(v){return filaDet([v.negocio,v.concepto||'—',fmtFecha(v.fecha),money(v.monto)]);}).join(''))+
       '<tr class="tot"><td colspan="3" style="padding:8px">TOTAL VALES PENDIENTES</td><td style="padding:8px;text-align:right">'+money(d.totalVales)+'</td></tr>'+
+    '</tbody></table>'+
+    '<h2>Vales cobrados en el periodo ('+d.valesLiquidadosPeriodo.length+') — informativo</h2>'+
+    '<div class="sub" style="margin-top:-4px">Estos vales sí salieron de caja durante el mes, pero ya se cobraron por completo — su ciclo ya cerró y no afectan ningún total de arriba. Se muestran nada más como historial.</div>'+
+    '<table><thead><tr><th>Negocio</th><th>Concepto</th><th>Fecha</th><th style="text-align:right">Monto</th></tr></thead><tbody>'+
+      (d.valesLiquidadosPeriodo.length===0?'<tr><td colspan="4" style="text-align:center;padding:12px;color:#999">Sin vales cobrados en este periodo</td></tr>':
+      d.valesLiquidadosPeriodo.map(function(v){return filaDet([v.negocio,v.concepto||'—',fmtFecha(v.fecha),money(v.montoTotal||v.monto)]);}).join(''))+
+      '<tr class="tot"><td colspan="3" style="padding:8px">TOTAL VALES COBRADOS</td><td style="padding:8px;text-align:right">'+money(d.valesLiquidadosPeriodo.reduce(function(a,v){return a+(v.montoTotal||v.monto);},0))+'</td></tr>'+
     '</tbody></table>'+
     '</body></html>';
   var win=window.open('','_blank');
