@@ -5201,27 +5201,41 @@ function rRep(){
       '<div style="font-size:13px;color:var(--text3);padding-bottom:4px">'+(REP_DESDE||REP_HASTA?'Mostrando: '+(REP_DESDE||'inicio')+' → '+(REP_HASTA||'hoy'):'Mostrando todo el historial')+'</div>'+
     '</div></div></div>';
 
-  return filtroBar+
-    '<div class="stat-grid">'+
+  var REP_TAB=window._REP_TAB||'resumen';
+  var repTabs=[['resumen','Resumen'],['clientes','Ventas por cliente'],['especie','Trazabilidad por especie'],['movimientos','Movimientos por producto'],['inventario','Inventario total']];
+  var tabBar='<div class="config-tabs" style="margin-bottom:16px">'+repTabs.map(function(t){
+    return '<div class="cfg-tab'+(REP_TAB===t[0]?' active':'')+'" onclick="setRepTab(\''+t[0]+'\')">'+t[1]+'</div>';
+  }).join('')+'</div>';
+
+  var content='';
+  var usaFiltroFecha=(REP_TAB==='resumen'||REP_TAB==='clientes'||REP_TAB==='especie');
+  if(REP_TAB==='resumen'){
+    content='<div class="stat-grid">'+
       '<div class="stat"><div class="stat-lbl">Ventas del período</div><div class="stat-val c-ok">'+money(ventaTotal)+'</div><div class="stat-sub">'+notasFilt.length+' notas</div></div>'+
       '<div class="stat"><div class="stat-lbl">Ya cobrado</div><div class="stat-val c-ok">'+money(cobrado)+'</div></div>'+
       '<div class="stat"><div class="stat-lbl">Por cobrar</div><div class="stat-val c-warn">'+money(porCobrar)+'</div></div>'+
       '<div class="stat"><div class="stat-lbl">Compras a proveedores</div><div class="stat-val">'+money(compras)+'</div><div class="stat-sub">'+pedidosFilt.length+' pedidos</div></div>'+
       '<div class="stat"><div class="stat-lbl">Merma del período</div><div class="stat-val '+(mp>10?'c-danger':mp>5?'c-warn':'c-ok')+'">'+mp+'%</div><div class="stat-sub">'+mT.toFixed(1)+' kg perdidos</div></div>'+
-    '</div>'+
-    '<div class="two-col">'+
-      '<div class="card"><div class="card-hdr"><div class="card-title">Ventas por cliente</div></div>'+
-        '<div class="tw"><table><thead><tr><th>Cliente</th><th>Notas</th><th>Total vendido</th><th>Cobrado</th><th>Por cobrar</th></tr></thead><tbody>'+
-        (cliRows||'<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text3)">Sin ventas en el período</td></tr>')+
-        '</tbody></table></div></div>'+
-      '<div class="card"><div class="card-hdr"><div class="card-title">Trazabilidad por especie</div></div>'+
-        '<div class="tw"><table><thead><tr><th>Especie</th><th>En cámara</th><th>Vendido</th><th>Merma</th></tr></thead><tbody>'+
-        (trazRows||'<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text3)">Sin datos</td></tr>')+
-        '</tbody></table></div></div>'+
-    '</div>'+
-    rMovimientosProducto()+
-    rInvTotal();
+    '</div>';
+  } else if(REP_TAB==='clientes'){
+    content='<div class="card"><div class="card-hdr"><div class="card-title">Ventas por cliente</div></div>'+
+      '<div class="tw"><table><thead><tr><th>Cliente</th><th>Notas</th><th>Total vendido</th><th>Cobrado</th><th>Por cobrar</th></tr></thead><tbody>'+
+      (cliRows||'<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text3)">Sin ventas en el período</td></tr>')+
+      '</tbody></table></div></div>';
+  } else if(REP_TAB==='especie'){
+    content='<div class="card"><div class="card-hdr"><div class="card-title">Trazabilidad por especie</div></div>'+
+      '<div class="tw"><table><thead><tr><th>Especie</th><th>En cámara</th><th>Vendido</th><th>Merma</th></tr></thead><tbody>'+
+      (trazRows||'<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text3)">Sin datos</td></tr>')+
+      '</tbody></table></div></div>';
+  } else if(REP_TAB==='movimientos'){
+    content=rMovimientosProducto();
+  } else if(REP_TAB==='inventario'){
+    content=rInvTotal();
+  }
+
+  return (usaFiltroFecha?filtroBar:'')+tabBar+content;
 }
+function setRepTab(t){window._REP_TAB=t;nav('reportes');}
 
 // Reconstruye el historial de movimientos de un producto combinando todas las
 // fuentes: compras/entradas (pedidos, incluye entrada directa a cámara porque
