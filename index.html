@@ -961,6 +961,10 @@ var auditLog=load('auditLog',[]);
 // Utilidad / patrimonio: meta fija y gastos (los vales por cobrar existentes ya cubren lo que se le debe a Janet)
 var metaPatrimonio=load('meta_patrimonio',1000000);
 var gastos=load('gastos',[]);
+// Snapshots de cortes ya cerrados — uno por mes ('YYYY-MM'), congela flujo del
+// periodo y patrimonio al momento del cierre para que reimprimir un corte viejo
+// no cambie según lo que pase después (ver cerrarPeriodo/datosCortePeriodo).
+var cortesCerrados=load('cortes_cerrados',[]);
 // Punto de partida del estado de cuenta de caja: el efectivo que había el día que se empezó a usar el sistema
 var saldoInicialCaja=load('saldo_inicial_caja',{monto:0,fecha:today()});
 // Por defecto solo Gerente recibe pedidos de proveedores; activable desde Configuración
@@ -988,7 +992,7 @@ function persist(){
   save('compensaciones',compensaciones);save('temp_logs',tempLogs);
   save('next_pedido_num',nextPedidoNum);save('vales',vales);persistAuditLog();
   save('meta_patrimonio',metaPatrimonio);save('gastos',gastos);save('saldo_inicial_caja',saldoInicialCaja);
-  save('admin_puede_recibir',ADMIN_RECIBE);
+  save('admin_puede_recibir',ADMIN_RECIBE);save('cortes_cerrados',cortesCerrados);
 }
 
 // ══════════════════════════════════════════════════════
@@ -4516,36 +4520,32 @@ function rCaja(){
   } else if(CAJA_TAB==='corte'){
     var hoy=today();
     var mesCorte=window._CORTE_MES||hoy.slice(0,7);
-    var desde=mesCorte+'-01';
-    var hasta=ultimoDiaMes(mesCorte);
-
-    var ventasPeriodo=notas.filter(function(n){return n.fecha>=desde&&n.fecha<=hasta;}).reduce(function(a,n){return a+(n.total||0);},0);
-    var comprasPeriodo=pedidos.filter(function(p){return p.est==='recibido'&&p.fecha>=desde&&p.fecha<=hasta;}).reduce(function(a,p){return a+(p.total||0);},0);
-    var pagosProvPeriodo=0;
-    pedidos.forEach(function(p){(p.abonos||[]).forEach(function(a){if(a.fecha>=desde&&a.fecha<=hasta)pagosProvPeriodo+=a.monto;});});
-    var cobrosClientesPeriodo=0;
-    notas.forEach(function(n){(n.abonos||[]).forEach(function(a){if(a.fecha>=desde&&a.fecha<=hasta)cobrosClientesPeriodo+=a.monto;});});
-    var gastosPeriodo=gastos.filter(function(gto){return gto.fecha>=desde&&gto.fecha<=hasta;}).reduce(function(a,gto){return a+gto.monto;},0);
-    var valesCobradosPeriodo=vales.filter(function(v){return v.est==='cobrado'&&v.fechaCobro>=desde&&v.fechaCobro<=hasta;}).reduce(function(a,v){return a+v.monto;},0);
-    var utilidadPeriodo=ventasPeriodo-comprasPeriodo-gastosPeriodo;
+    var d0=datosCortePeriodo(mesCorte);
+    var puedeCerrar=isAdmin;
 
     content='<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">Periodo del corte</div></div><div class="card-body">'+
       '<div class="field" style="margin-bottom:10px;max-width:220px"><label>Mes</label><input id="cor-mes" type="month" value="'+mesCorte+'" onchange="setCortePeriodo()"></div>'+
-      '<button class="btn btn-p" onclick="imprimirCorte(\''+desde+'\',\''+hasta+'\')">🖨 Imprimir corte</button>'+
+      (d0.cerrado?
+        '<div style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:rgba(46,204,113,.12);color:var(--accent);font-size:13px">🔒 Periodo cerrado el '+fmtFecha(d0.fechaCierre)+(d0.cerradoPor?' por '+d0.cerradoPor:'')+'. Estos números ya no cambian aunque sigas operando.</div>'
+        :'<div style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:rgba(243,156,18,.12);color:var(--warn);font-size:13px">Periodo abierto — estos números se recalculan en vivo y cambian con la operación de cada día.</div>')+
+      '<div style="display:flex;gap:10px;flex-wrap:wrap">'+
+        '<button class="btn btn-p" onclick="imprimirCorte(\''+mesCorte+'\')">🖨 Imprimir corte</button>'+
+        (puedeCerrar?'<button class="btn '+(d0.cerrado?'':'btn-w')+'" onclick="cerrarPeriodo()">🔒 '+(d0.cerrado?'Volver a cerrar con datos actuales':'Cerrar periodo')+'</button>':'')+
+      '</div>'+
     '</div></div>'+
     '<div class="stat-grid" style="margin-bottom:18px">'+
-      '<div class="stat"><div class="stat-lbl">+ Ventas del periodo</div><div class="stat-val c-ok">'+money(ventasPeriodo)+'</div><div class="stat-sub">Notas de venta</div></div>'+
-      '<div class="stat"><div class="stat-lbl">− Compras del periodo</div><div class="stat-val c-danger">'+money(comprasPeriodo)+'</div><div class="stat-sub">Pedidos recibidos</div></div>'+
-      '<div class="stat"><div class="stat-lbl">− Gastos del periodo</div><div class="stat-val c-danger">'+money(gastosPeriodo)+'</div></div>'+
-      '<div class="stat" style="border-color:'+(utilidadPeriodo>=0?'rgba(46,204,113,.4)':'rgba(192,57,43,.4)')+'"><div class="stat-lbl">UTILIDAD DEL PERIODO</div><div class="stat-val" style="font-size:20px;color:'+(utilidadPeriodo>=0?'var(--accent)':'var(--danger)')+'">'+money(utilidadPeriodo)+'</div><div class="stat-sub">Ventas − compras − gastos</div></div>'+
+      '<div class="stat"><div class="stat-lbl">+ Ventas del periodo</div><div class="stat-val c-ok">'+money(d0.ventasPeriodo)+'</div><div class="stat-sub">Notas de venta</div></div>'+
+      '<div class="stat"><div class="stat-lbl">− Compras del periodo</div><div class="stat-val c-danger">'+money(d0.comprasPeriodo)+'</div><div class="stat-sub">Pedidos recibidos</div></div>'+
+      '<div class="stat"><div class="stat-lbl">− Gastos del periodo</div><div class="stat-val c-danger">'+money(d0.gastosPeriodo)+'</div></div>'+
+      '<div class="stat" style="border-color:'+(d0.utilidadPeriodo>=0?'rgba(46,204,113,.4)':'rgba(192,57,43,.4)')+'"><div class="stat-lbl">UTILIDAD DEL PERIODO</div><div class="stat-val" style="font-size:20px;color:'+(d0.utilidadPeriodo>=0?'var(--accent)':'var(--danger)')+'">'+money(d0.utilidadPeriodo)+'</div><div class="stat-sub">Ventas − compras − gastos</div></div>'+
     '</div>'+
     '<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">Movimientos de efectivo del periodo (informativo)</div></div><div class="card-body">'+
-      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Cobros a clientes</span><span style="color:var(--accent);font-weight:700">'+money(cobrosClientesPeriodo)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Pagos a proveedores</span><span style="color:var(--danger);font-weight:700">'+money(pagosProvPeriodo)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding:8px 0"><span>Vales cobrados en el periodo</span><span style="color:var(--accent);font-weight:700">'+money(valesCobradosPeriodo)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Cobros a clientes</span><span style="color:var(--accent);font-weight:700">'+money(d0.cobrosClientesPeriodo)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Pagos a proveedores</span><span style="color:var(--danger);font-weight:700">'+money(d0.pagosProvPeriodo)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0"><span>Vales cobrados en el periodo</span><span style="color:var(--accent);font-weight:700">'+money(d0.valesCobradosPeriodo)+'</span></div>'+
     '</div></div>'+
     (function(){
-      var d=datosCorteDetalle(desde,hasta);
+      var d=d0;
       var filaSimple=function(a,b){return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:14px"><span>'+a+'</span><span style="font-weight:700">'+b+'</span></div>';};
       return '<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">Ventas por sucursal del periodo</div></div><div class="card-body">'+
         (d.ventasPorSucursal.length===0?'<div style="color:var(--text3);padding:8px 0">Sin ventas en este periodo</div>':
@@ -4573,16 +4573,16 @@ function rCaja(){
         d.gastosDetalle.map(function(gto){return '<tr><td class="pr">'+gto.concepto+'</td><td><span class="tag">'+(gto.categoria||'otro')+'</span></td><td class="mn">'+fmtFecha(gto.fecha)+'</td><td class="mn">'+money(gto.monto)+'</td></tr>';}).join(''))+
         '</tbody></table></div></div>';
     })()+
-    '<div class="card"><div class="card-hdr"><div class="card-title">Patrimonio y utilidad acumulada (a hoy, no depende del periodo)</div></div><div class="card-body">'+
-      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Efectivo en caja</span><span style="font-weight:700">'+money(efectivoDeclarado)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Valor de inventario (cámara + bodega)</span><span style="font-weight:700">'+money(valInv)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Por cobrar (clientes)</span><span style="font-weight:700;color:var(--warn)">'+money(porCobrar)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Vales por cobrar pendientes</span><span style="font-weight:700;color:var(--warn)">'+money(totalVales)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>− Deuda proveedores</span><span style="font-weight:700;color:var(--danger)">'+money(deudaProv)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>− Gastos pagados por transferencia</span><span style="font-weight:700;color:var(--danger)">'+money(gastosNoCaja)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span style="font-weight:700">Capital neto</span><span style="font-weight:700;color:'+(capitalNeto>=0?'var(--accent)':'var(--danger)')+'">'+money(capitalNeto)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Meta (capital base)</span><span style="font-weight:700">'+money(metaPatrimonio)+'</span></div>'+
-      '<div style="display:flex;justify-content:space-between;padding:10px 0;font-size:17px"><span style="font-weight:700">'+(utilidadTotal>=0?'Utilidad acumulada total':'Pérdida acumulada total')+'</span><span style="font-weight:700;color:'+(utilidadTotal>=0?'var(--accent)':'var(--danger)')+'">'+money(utilidadTotal)+'</span></div>'+
+    '<div class="card"><div class="card-hdr"><div class="card-title">Patrimonio y utilidad acumulada ('+(d0.cerrado?'al cierre del periodo':'a hoy, no depende del periodo')+')</div></div><div class="card-body">'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Efectivo en caja</span><span style="font-weight:700">'+money(d0.efectivoCaja)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Valor de inventario (cámara + bodega)</span><span style="font-weight:700">'+money(d0.valInv)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Por cobrar (clientes)</span><span style="font-weight:700;color:var(--warn)">'+money(d0.porCobrar)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Vales por cobrar pendientes</span><span style="font-weight:700;color:var(--warn)">'+money(d0.totalVales)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>− Deuda proveedores</span><span style="font-weight:700;color:var(--danger)">'+money(d0.deudaProv)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>− Gastos pagados por transferencia</span><span style="font-weight:700;color:var(--danger)">'+money(d0.gastosNoCaja)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span style="font-weight:700">Capital neto</span><span style="font-weight:700;color:'+(d0.capitalNeto>=0?'var(--accent)':'var(--danger)')+'">'+money(d0.capitalNeto)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Meta (capital base)</span><span style="font-weight:700">'+money(d0.metaPatrimonio)+'</span></div>'+
+      '<div style="display:flex;justify-content:space-between;padding:10px 0;font-size:17px"><span style="font-weight:700">'+(d0.utilidadAcumulada>=0?'Utilidad acumulada total':'Pérdida acumulada total')+'</span><span style="font-weight:700;color:'+(d0.utilidadAcumulada>=0?'var(--accent)':'var(--danger)')+'">'+money(d0.utilidadAcumulada)+'</span></div>'+
     '</div></div>';
   }
   return tabBar+content;
@@ -4604,6 +4604,68 @@ function datosCorteDetalle(desde,hasta){
   return{ventasFiltradas:ventasFiltradas,ventasPorSucursal:ventasPorSucursal,comprasDetalle:comprasDetalle,
     pendientesProveedor:pendientesProveedor,totalPendienteProveedor:totalPendienteProveedor,
     valesDetalle:valesDetalle,gastosDetalle:gastosDetalle};
+}
+
+// Calcula el corte de un mes SIEMPRE en vivo (ignora si ya está cerrado) —
+// lo usa cerrarPeriodo() para tomar la foto fresca al momento del cierre.
+function calcularCortePeriodo(mes){
+  var desde=mes+'-01',hasta=ultimoDiaMes(mes);
+  var valCamara=camara.reduce(function(a,i){return a+i.kg*(i.costo||0);},0);
+  var valBodega=bodega.reduce(function(a,i){return a+i.kg*(i.costo||0);},0);
+  var valInv=valCamara+valBodega;
+  var porCobrar=notas.filter(function(n){return !n.pagada&&(n.est==='entregada');}).reduce(function(a,n){
+    var ab=n.abonos?n.abonos.reduce(function(x,b){return x+b.monto;},0):0;
+    return a+Math.max(0,n.total-ab);},0);
+  var totalVales=vales.filter(function(v){return v.est==='pendiente';}).reduce(function(a,v){return a+v.monto;},0);
+  var gastosNoCaja=gastos.filter(function(gto){return gto.forma!=='efectivo';}).reduce(function(a,gto){return a+gto.monto;},0);
+  var d=datosCorteDetalle(desde,hasta);
+  var deudaProv=d.totalPendienteProveedor;
+  var capitalNeto=efectivoDeclarado+valInv+porCobrar+totalVales-deudaProv-gastosNoCaja;
+  var utilidadAcumulada=capitalNeto-metaPatrimonio;
+  var ventasPeriodo=d.ventasFiltradas.reduce(function(a,n){return a+(n.total||0);},0);
+  var comprasPeriodo=pedidos.filter(function(p){return p.est==='recibido'&&p.fecha>=desde&&p.fecha<=hasta;}).reduce(function(a,p){return a+(p.total||0);},0);
+  var pagosProvPeriodo=0;
+  pedidos.forEach(function(p){(p.abonos||[]).forEach(function(a){if(a.fecha>=desde&&a.fecha<=hasta)pagosProvPeriodo+=a.monto;});});
+  var cobrosClientesPeriodo=0;
+  notas.forEach(function(n){(n.abonos||[]).forEach(function(a){if(a.fecha>=desde&&a.fecha<=hasta)cobrosClientesPeriodo+=a.monto;});});
+  var gastosPeriodo=d.gastosDetalle.reduce(function(a,gto){return a+gto.monto;},0);
+  var valesCobradosPeriodo=vales.filter(function(v){return v.est==='cobrado'&&v.fechaCobro>=desde&&v.fechaCobro<=hasta;}).reduce(function(a,v){return a+v.monto;},0);
+  var utilidadPeriodo=ventasPeriodo-comprasPeriodo-gastosPeriodo;
+  return {
+    mes:mes,cerrado:false,fechaCierre:null,cerradoPor:null,
+    efectivoCaja:efectivoDeclarado,valInv:valInv,porCobrar:porCobrar,totalVales:totalVales,
+    deudaProv:deudaProv,gastosNoCaja:gastosNoCaja,capitalNeto:capitalNeto,
+    metaPatrimonio:metaPatrimonio,utilidadAcumulada:utilidadAcumulada,
+    ventasPeriodo:ventasPeriodo,comprasPeriodo:comprasPeriodo,gastosPeriodo:gastosPeriodo,
+    utilidadPeriodo:utilidadPeriodo,cobrosClientesPeriodo:cobrosClientesPeriodo,
+    pagosProvPeriodo:pagosProvPeriodo,valesCobradosPeriodo:valesCobradosPeriodo,
+    ventasFiltradas:d.ventasFiltradas,ventasPorSucursal:d.ventasPorSucursal,
+    comprasDetalle:d.comprasDetalle,pendientesProveedor:d.pendientesProveedor,
+    totalPendienteProveedor:d.totalPendienteProveedor,valesDetalle:d.valesDetalle,gastosDetalle:d.gastosDetalle
+  };
+}
+// Corte de un mes para mostrar/imprimir: si ya se cerró, regresa el snapshot
+// congelado (nunca cambia); si no, lo calcula en vivo (cambia con la operación).
+function datosCortePeriodo(mes){
+  var cerrado=cortesCerrados.find(function(c){return c.mes===mes;});
+  return cerrado||calcularCortePeriodo(mes);
+}
+function cerrarPeriodo(){
+  if(ROL!=='admin'){alert('Solo un administrador puede cerrar el periodo.');return;}
+  var mes=window._CORTE_MES||today().slice(0,7);
+  var yaCerrado=cortesCerrados.some(function(c){return c.mes===mes;});
+  var esMesActual=mes===today().slice(0,7);
+  var msg=(yaCerrado?'Este periodo ya estaba cerrado. ¿Volver a cerrarlo con los datos actuales?':'¿Cerrar el periodo de '+nombreMes(mes)+'?')+
+    '\n\nEsto congela ventas, compras, gastos y patrimonio (efectivo, inventario, vales, deuda) de este mes tal como están ahora mismo. El corte impreso de este mes ya no cambiará aunque sigas operando después.'+
+    (esMesActual?'\n\n⚠ Este mes todavía no termina — normalmente se cierra hasta que acabe.':'');
+  if(!confirm(msg))return;
+  var d=calcularCortePeriodo(mes);
+  d.cerrado=true;d.fechaCierre=today();d.cerradoPor=CUR_USER?CUR_USER.nombre:'';
+  cortesCerrados=cortesCerrados.filter(function(c){return c.mes!==mes;});
+  cortesCerrados.push(d);
+  audit('Cerró periodo de caja','Caja',nombreMes(mes)+' · utilidad acumulada '+money(d.utilidadAcumulada));
+  save('cortes_cerrados',cortesCerrados);
+  nav('caja');
 }
 
 function setCajaTab(t){window._CAJA_TAB=t;nav('caja');}
@@ -4847,29 +4909,8 @@ function delGasto(id){
   },{detalle:gto.concepto+' · '+money(gto.monto)});
 }
 
-function imprimirCorte(desde,hasta){
-  var valCamara=camara.reduce(function(a,i){return a+i.kg*(i.costo||0);},0);
-  var valBodega=bodega.reduce(function(a,i){return a+i.kg*(i.costo||0);},0);
-  var valInv=valCamara+valBodega;
-  var porCobrar=notas.filter(function(n){return !n.pagada&&(n.est==='entregada');}).reduce(function(a,n){
-    var ab=n.abonos?n.abonos.reduce(function(x,b){return x+b.monto;},0):0;
-    return a+Math.max(0,n.total-ab);},0);
-  var deudaProv=pedidos.filter(function(p){return p.est==='recibido'&&!p.pagado;}).reduce(function(a,p){
-    var abonado=p.montoPagado||0; return a+Math.max(0,(p.total||p.costo||0)-abonado);},0);
-  var totalVales=vales.filter(function(v){return v.est==='pendiente';}).reduce(function(a,v){return a+v.monto;},0);
-  var gastosNoCaja=gastos.filter(function(gto){return gto.forma!=='efectivo';}).reduce(function(a,gto){return a+gto.monto;},0);
-  var capitalNeto=efectivoDeclarado+valInv+porCobrar+totalVales-deudaProv-gastosNoCaja;
-  var utilidadTotal=capitalNeto-metaPatrimonio;
-  var ventasPeriodo=notas.filter(function(n){return n.fecha>=desde&&n.fecha<=hasta;}).reduce(function(a,n){return a+(n.total||0);},0);
-  var comprasPeriodo=pedidos.filter(function(p){return p.est==='recibido'&&p.fecha>=desde&&p.fecha<=hasta;}).reduce(function(a,p){return a+(p.total||0);},0);
-  var pagosProvPeriodo=0;
-  pedidos.forEach(function(p){(p.abonos||[]).forEach(function(a){if(a.fecha>=desde&&a.fecha<=hasta)pagosProvPeriodo+=a.monto;});});
-  var cobrosClientesPeriodo=0;
-  notas.forEach(function(n){(n.abonos||[]).forEach(function(a){if(a.fecha>=desde&&a.fecha<=hasta)cobrosClientesPeriodo+=a.monto;});});
-  var gastosPeriodo=gastos.filter(function(gto){return gto.fecha>=desde&&gto.fecha<=hasta;}).reduce(function(a,gto){return a+gto.monto;},0);
-  var valesCobradosPeriodo=vales.filter(function(v){return v.est==='cobrado'&&v.fechaCobro>=desde&&v.fechaCobro<=hasta;}).reduce(function(a,v){return a+v.monto;},0);
-  var utilidadPeriodo=ventasPeriodo-comprasPeriodo-gastosPeriodo;
-  var d=datosCorteDetalle(desde,hasta);
+function imprimirCorte(mes){
+  var d=datosCortePeriodo(mes);
 
   function fila(lbl,val,color){
     return '<tr><td style="padding:8px 10px;border-bottom:1px solid #eee">'+lbl+'</td><td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:700;color:'+(color||'#111')+'">'+money(val)+'</td></tr>';
@@ -4877,7 +4918,7 @@ function imprimirCorte(desde,hasta){
   function filaDet(cols){
     return '<tr>'+cols.map(function(c,i){return '<td style="padding:5px 8px;border-bottom:1px solid #eee;'+(i>0?'text-align:right':'')+'">'+c+'</td>';}).join('')+'</tr>';
   }
-  var mesLbl=nombreMes(desde.slice(0,7));
+  var mesLbl=nombreMes(mes);
   var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Corte '+mesLbl+'</title><style>'+
     'body{font-family:Arial,sans-serif;margin:0;padding:24px;background:#fff;color:#111}'+
     'h1{font-size:20px;margin:0 0 4px}'+
@@ -4889,19 +4930,19 @@ function imprimirCorte(desde,hasta){
     '@media print{h2{-webkit-print-color-adjust:exact;print-color-adjust:exact}}'+
     '</style></head><body>'+
     '<h1>Bodega de Mariscos y Productos — Corte de periodo</h1>'+
-    '<div class="sub">Periodo: '+mesLbl+' · Generado: '+fmtFecha(today())+'</div>'+
+    '<div class="sub">Periodo: '+mesLbl+' · Generado: '+fmtFecha(today())+(d.cerrado?' · 🔒 Cerrado el '+fmtFecha(d.fechaCierre)+(d.cerradoPor?' por '+d.cerradoPor:''):' · Periodo abierto (cifras en vivo)')+'</div>'+
     '<h2>Resultado del periodo</h2>'+
     '<table>'+
-      fila('+ Ventas del periodo (notas de venta)',ventasPeriodo,'#1a7a3a')+
-      fila('− Compras del periodo (pedidos recibidos)',comprasPeriodo,'#b8342e')+
-      fila('− Gastos del periodo',gastosPeriodo,'#b8342e')+
-      '<tr class="tot"><td style="padding:10px">UTILIDAD DEL PERIODO</td><td style="padding:10px;text-align:right">'+money(utilidadPeriodo)+'</td></tr>'+
+      fila('+ Ventas del periodo (notas de venta)',d.ventasPeriodo,'#1a7a3a')+
+      fila('− Compras del periodo (pedidos recibidos)',d.comprasPeriodo,'#b8342e')+
+      fila('− Gastos del periodo',d.gastosPeriodo,'#b8342e')+
+      '<tr class="tot"><td style="padding:10px">UTILIDAD DEL PERIODO</td><td style="padding:10px;text-align:right">'+money(d.utilidadPeriodo)+'</td></tr>'+
     '</table>'+
     '<h2>Ventas por sucursal</h2>'+
     '<table><thead><tr><th>Sucursal</th><th style="text-align:right">Total</th></tr></thead><tbody>'+
       (d.ventasPorSucursal.length===0?'<tr><td colspan="2" style="text-align:center;padding:12px;color:#999">Sin ventas en este periodo</td></tr>':
       d.ventasPorSucursal.map(function(s){return filaDet([s.nombre,money(s.total)]);}).join(''))+
-      '<tr class="tot"><td style="padding:8px">TOTAL VENTAS</td><td style="padding:8px;text-align:right">'+money(ventasPeriodo)+'</td></tr>'+
+      '<tr class="tot"><td style="padding:8px">TOTAL VENTAS</td><td style="padding:8px;text-align:right">'+money(d.ventasPeriodo)+'</td></tr>'+
     '</tbody></table>'+
     '<h2>Notas de venta del periodo ('+d.ventasFiltradas.length+')</h2>'+
     '<table><thead><tr><th>Folio</th><th>Sucursal</th><th>Fecha</th><th style="text-align:right">Monto</th></tr></thead><tbody>'+
@@ -4912,7 +4953,7 @@ function imprimirCorte(desde,hasta){
     '<table><thead><tr><th>Pedido</th><th>Proveedor</th><th>Fecha</th><th style="text-align:right">Monto</th></tr></thead><tbody>'+
       (d.comprasDetalle.length===0?'<tr><td colspan="4" style="text-align:center;padding:12px;color:#999">Sin compras en este periodo</td></tr>':
       d.comprasDetalle.map(function(p){return filaDet([p.numPedido,p.prov,fmtFecha(p.fecha),money(p.total)]);}).join(''))+
-      '<tr class="tot"><td colspan="3" style="padding:8px">TOTAL COMPRAS</td><td style="padding:8px;text-align:right">'+money(comprasPeriodo)+'</td></tr>'+
+      '<tr class="tot"><td colspan="3" style="padding:8px">TOTAL COMPRAS</td><td style="padding:8px;text-align:right">'+money(d.comprasPeriodo)+'</td></tr>'+
     '</tbody></table>'+
     '<h2>Notas pendientes por pagar a proveedores</h2>'+
     '<table><thead><tr><th>Pedido</th><th>Proveedor</th><th>Fecha</th><th style="text-align:right">Saldo</th></tr></thead><tbody>'+
@@ -4930,25 +4971,25 @@ function imprimirCorte(desde,hasta){
     '<table><thead><tr><th>Concepto</th><th>Categoría</th><th>Fecha</th><th style="text-align:right">Monto</th></tr></thead><tbody>'+
       (d.gastosDetalle.length===0?'<tr><td colspan="4" style="text-align:center;padding:12px;color:#999">Sin gastos en este periodo</td></tr>':
       d.gastosDetalle.map(function(gto){return filaDet([gto.concepto,gto.categoria||'otro',fmtFecha(gto.fecha),money(gto.monto)]);}).join(''))+
-      '<tr class="tot"><td colspan="3" style="padding:8px">TOTAL GASTOS</td><td style="padding:8px;text-align:right">'+money(gastosPeriodo)+'</td></tr>'+
+      '<tr class="tot"><td colspan="3" style="padding:8px">TOTAL GASTOS</td><td style="padding:8px;text-align:right">'+money(d.gastosPeriodo)+'</td></tr>'+
     '</tbody></table>'+
     '<h2>Movimientos de efectivo del periodo (informativo)</h2>'+
     '<table>'+
-      fila('Cobros a clientes',cobrosClientesPeriodo,'#1a7a3a')+
-      fila('Pagos a proveedores',pagosProvPeriodo,'#b8342e')+
-      fila('Vales cobrados en el periodo',valesCobradosPeriodo,'#1a7a3a')+
+      fila('Cobros a clientes',d.cobrosClientesPeriodo,'#1a7a3a')+
+      fila('Pagos a proveedores',d.pagosProvPeriodo,'#b8342e')+
+      fila('Vales cobrados en el periodo',d.valesCobradosPeriodo,'#1a7a3a')+
     '</table>'+
-    '<h2>Patrimonio y utilidad acumulada (al día de hoy)</h2>'+
+    '<h2>Patrimonio y utilidad acumulada ('+(d.cerrado?'al cierre del periodo':'al día de hoy')+')</h2>'+
     '<table>'+
-      fila('Efectivo en caja',efectivoDeclarado)+
-      fila('Valor de inventario (cámara + bodega)',valInv)+
-      fila('Por cobrar (clientes)',porCobrar)+
-      fila('Vales por cobrar pendientes',totalVales)+
-      fila('Deuda proveedores',deudaProv,'#b8342e')+
-      fila('Gastos pagados por transferencia',gastosNoCaja,'#b8342e')+
-      fila('Capital neto',capitalNeto)+
-      fila('Meta (capital base)',metaPatrimonio)+
-      '<tr class="tot"><td style="padding:10px">'+(utilidadTotal>=0?'UTILIDAD ACUMULADA TOTAL':'PÉRDIDA ACUMULADA TOTAL')+'</td><td style="padding:10px;text-align:right">'+money(utilidadTotal)+'</td></tr>'+
+      fila('Efectivo en caja',d.efectivoCaja)+
+      fila('Valor de inventario (cámara + bodega)',d.valInv)+
+      fila('Por cobrar (clientes)',d.porCobrar)+
+      fila('Vales por cobrar pendientes',d.totalVales)+
+      fila('Deuda proveedores',d.deudaProv,'#b8342e')+
+      fila('Gastos pagados por transferencia',d.gastosNoCaja,'#b8342e')+
+      fila('Capital neto',d.capitalNeto)+
+      fila('Meta (capital base)',d.metaPatrimonio)+
+      '<tr class="tot"><td style="padding:10px">'+(d.utilidadAcumulada>=0?'UTILIDAD ACUMULADA TOTAL':'PÉRDIDA ACUMULADA TOTAL')+'</td><td style="padding:10px;text-align:right">'+money(d.utilidadAcumulada)+'</td></tr>'+
     '</table>'+
     '</body></html>';
   var win=window.open('','_blank');
@@ -5906,6 +5947,7 @@ function aplicarDatos(data){
   if(data.users){USERS=data.users;repararIdsUsuariosDuplicados();}
   if(data.meta_patrimonio!==undefined&&data.meta_patrimonio!==null)metaPatrimonio=data.meta_patrimonio;
   if(data.gastos)gastos=data.gastos;
+  if(data.cortes_cerrados)cortesCerrados=data.cortes_cerrados;
   if(data.saldo_inicial_caja)saldoInicialCaja=data.saldo_inicial_caja;
   if(data.admin_puede_recibir!==undefined&&data.admin_puede_recibir!==null)ADMIN_RECIBE=data.admin_puede_recibir;
   // Actualizar caché local con datos de Supabase
