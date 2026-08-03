@@ -4553,9 +4553,12 @@ function rCaja(){
       (d0.cerrado?
         '<div style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:rgba(46,204,113,.12);color:var(--accent);font-size:13px">🔒 Periodo cerrado el '+fmtFecha(d0.fechaCierre)+(d0.cerradoPor?' por '+d0.cerradoPor:'')+'. Estos números ya no cambian aunque sigas operando.</div>'
         :'<div style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:rgba(243,156,18,.12);color:var(--warn);font-size:13px">Periodo abierto — estos números se recalculan en vivo y cambian con la operación de cada día.</div>')+
+      (d0.cerrado&&d0.utilidadExtraida?
+        '<div style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:rgba(26,110,181,.12);color:var(--info);font-size:13px">💰 Utilidad extraída el '+fmtFecha(d0.fechaExtraccion)+(d0.extraidoPor?' por '+d0.extraidoPor:'')+' — '+money(d0.montoExtraido)+'. El capital operativo volvió a '+money(d0.metaPatrimonio)+'.</div>':'')+
       '<div style="display:flex;gap:10px;flex-wrap:wrap">'+
         '<button class="btn btn-p" onclick="imprimirCorte(\''+mesCorte+'\')">🖨 Imprimir corte</button>'+
         (puedeCerrar?'<button class="btn '+(d0.cerrado?'':'btn-w')+'" onclick="cerrarPeriodo()">🔒 '+(d0.cerrado?'Volver a cerrar con datos actuales':'Cerrar periodo')+'</button>':'')+
+        (puedeCerrar&&d0.cerrado&&!d0.utilidadExtraida?'<button class="btn btn-w" onclick="extraerUtilidadPeriodo()">💰 Extraer utilidad ('+money(d0.utilidadAcumulada)+')</button>':'')+
       '</div>'+
     '</div></div>'+
     (function(){
@@ -4731,19 +4734,49 @@ function datosCortePeriodo(mes){
 function cerrarPeriodo(){
   if(ROL!=='admin'){alert('Solo un administrador puede cerrar el periodo.');return;}
   var mes=window._CORTE_MES||today().slice(0,7);
-  var yaCerrado=cortesCerrados.some(function(c){return c.mes===mes;});
+  var anterior=cortesCerrados.find(function(c){return c.mes===mes;});
   var esMesActual=mes===today().slice(0,7);
-  var msg=(yaCerrado?'Este periodo ya estaba cerrado. ¿Volver a cerrarlo con los datos actuales?':'¿Cerrar el periodo de '+nombreMes(mes)+'?')+
+  var msg=(anterior?'Este periodo ya estaba cerrado. ¿Volver a cerrarlo con los datos actuales?':'¿Cerrar el periodo de '+nombreMes(mes)+'?')+
     '\n\nEsto congela ventas, compras, gastos y patrimonio (efectivo, inventario, vales, deuda) de este mes tal como están ahora mismo. El corte impreso de este mes ya no cambiará aunque sigas operando después.'+
     (esMesActual?'\n\n⚠ Este mes todavía no termina — normalmente se cierra hasta que acabe.':'');
   if(!confirm(msg))return;
   var d=calcularCortePeriodo(mes);
   d.cerrado=true;d.fechaCierre=today();d.cerradoPor=CUR_USER?CUR_USER.nombre:'';
+  // Si ya se había extraído la utilidad de este periodo, no perder ese registro
+  // solo porque se vuelve a cerrar con datos frescos.
+  if(anterior&&anterior.utilidadExtraida){
+    d.utilidadExtraida=true;d.montoExtraido=anterior.montoExtraido;
+    d.fechaExtraccion=anterior.fechaExtraccion;d.extraidoPor=anterior.extraidoPor;
+  }
   cortesCerrados=cortesCerrados.filter(function(c){return c.mes!==mes;});
   cortesCerrados.push(d);
   audit('Cerró periodo de caja','Caja',nombreMes(mes)+' · utilidad acumulada '+money(d.utilidadAcumulada));
   save('cortes_cerrados',cortesCerrados);
   nav('caja');
+}
+// Saca del efectivo operativo la utilidad ya congelada de un periodo cerrado
+// (se supone que ese dinero se le entrega al dueño y deja de ser capital de
+// trabajo de la procesadora) — deja el capital neto exactamente en la meta.
+function extraerUtilidadPeriodo(){
+  if(ROL!=='admin'){alert('Solo un administrador puede extraer utilidad.');return;}
+  var mes=window._CORTE_MES||today().slice(0,7);
+  var c=cortesCerrados.find(function(x){return x.mes===mes;});
+  if(!c||!c.cerrado){alert('Primero tienes que cerrar este periodo antes de extraer su utilidad.');return;}
+  if(c.utilidadExtraida){alert('La utilidad de '+nombreMes(mes)+' ya se extrajo el '+fmtFecha(c.fechaExtraccion)+' ('+money(c.montoExtraido)+').');return;}
+  var monto=Math.round(c.utilidadAcumulada*100)/100;
+  if(monto<=0){alert('No hay utilidad que extraer en '+nombreMes(mes)+' (utilidad acumulada: '+money(monto)+').');return;}
+  if(monto>efectivoDeclarado){
+    alert('No alcanza el efectivo en caja para extraer '+money(monto)+'.\nEfectivo disponible: '+money(efectivoDeclarado)+'.\nCobra algún vale o cuenta pendiente antes de extraer.');
+    return;
+  }
+  if(!confirm('¿Extraer '+money(monto)+' de utilidad de '+nombreMes(mes)+'?\n\nSe resta del efectivo en caja y el capital operativo vuelve a quedar en '+money(metaPatrimonio)+'. Confirma solo si Janet ya se lo entregó (o va a entregarlo) al dueño.'))return;
+  efectivoDeclarado=Math.max(0,efectivoDeclarado-monto);
+  c.utilidadExtraida=true;c.montoExtraido=monto;c.fechaExtraccion=today();c.extraidoPor=CUR_USER?CUR_USER.nombre:'';
+  audit('Extrajo utilidad del periodo — entregada al dueño','Caja',nombreMes(mes)+' · '+money(monto)+' · efectivo restante '+money(efectivoDeclarado));
+  save('cortes_cerrados',cortesCerrados);
+  persist();
+  nav('caja');
+  alert('✅ Se extrajeron '+money(monto)+' de utilidad. El capital operativo vuelve a '+money(metaPatrimonio)+'.');
 }
 
 function setCajaTab(t){window._CAJA_TAB=t;nav('caja');}
