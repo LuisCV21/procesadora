@@ -780,9 +780,25 @@ function siguienteIdProducto(){
   save('next_producto_id',NEXT_PRODUCTO_ID);
   return NEXT_PRODUCTO_ID;
 }
+// El piso persistido (next_producto_id) cierra el caso normal, pero queda un
+// hueco documentado en TODO.md: un dispositivo sin caché local que agrega un
+// producto ANTES de que responda el primer fetch a Supabase todavía calcula
+// su piso desde el valor por defecto (200) y podría chocar con otro
+// dispositivo en la misma situación. Para el alta interactiva desde el botón
+// "Agregar producto" — el único punto donde esto puede pasar por acción
+// directa de una persona — se usa en su lugar un id que no depende de NINGÚN
+// estado compartido (ni local ni de Supabase): timestamp en ms + 3 dígitos
+// random, así no hay cálculo posible que coincida entre dos dispositivos.
+function idProductoUnico(){
+  return Date.now()*1000+Math.floor(Math.random()*1000);
+}
 function asegurarIdsProductos(){
   var nuevos=[];
-  PRODUCTOS.forEach(function(p){if(!p.id||p.id>1000){p.id=siguienteIdProducto();nuevos.push(p);}});
+  // Los ids nuevos de idProductoUnico() son timestamps (billones) — no se
+  // deben tocar, o se les quitaría justo la propiedad que los hace únicos.
+  // Solo se renumeran productos sin id o con un id del bug viejo del
+  // contador global (ese quedaba en el rango de miles/decenas de miles).
+  PRODUCTOS.forEach(function(p){if(!p.id||(p.id>1000&&p.id<1e9)){p.id=siguienteIdProducto();nuevos.push(p);}});
   nuevos.forEach(guardarProducto);
 }
 function mergeCatalogosNuevos(){
@@ -5443,7 +5459,7 @@ function rConfig(){
     body='<div class="card-hdr"><div class="card-title">Catálogo de productos</div>'+(isAdmin?'<button class="btn btn-p" onclick="mAddItem(\'producto\')">+ Agregar producto</button>':'')+'</div>'+
       '<div class="tw"><table><thead><tr><th>#</th><th>Nombre</th><th>Unidad</th><th>Categoría</th><th>Acciones</th></tr></thead><tbody>'+
       PRODUCTOS.map(function(p,i){
-        return '<tr><td class="mn" style="color:var(--text3)">'+(p.id||i+1)+'</td>'+
+        return '<tr><td class="mn" style="color:var(--text3)">'+(i+1)+'</td>'+
           '<td class="pr">'+p.n+'</td>'+
           '<td class="mn">'+p.u+'</td>'+
           '<td><span class="tag">'+p.cat+'</span></td>'+
@@ -5729,7 +5745,7 @@ function saveItem(tipo){
   if(tipo==='producto'){
     var u=g('ai-u')?.value||'kg',c=readCatSelect();
     var soloProceso=!!(g('ai-sp')&&g('ai-sp').checked);
-    var p={id:siguienteIdProducto(),n:n,u:u,cat:c,soloProceso:soloProceso};
+    var p={id:idProductoUnico(),n:n,u:u,cat:c,soloProceso:soloProceso};
     PRODUCTOS.push(p);
     PRODUCTOS.sort(function(a,b){return a.n.localeCompare(b.n,'es');});
     audit('Agregó producto','Configuracion',n+' · '+u+' · cat:'+c+(soloProceso?' · solo proceso':''));

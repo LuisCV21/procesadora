@@ -76,3 +76,18 @@ o capturando notas, casi al mismo tiempo).
   solución completa sería verificar contra Supabase (no solo el piso
   local) antes de confirmar cada id nuevo — pendiente si se quiere cerrar
   el hueco al 100%.
+
+- **2026-08-05: hueco cerrado.** El botón "Agregar producto" (único punto
+  donde una persona da de alta un producto de forma interactiva) ya no usa
+  `siguienteIdProducto()`/`next_producto_id` — usa `idProductoUnico()`
+  (timestamp en ms + 3 dígitos random). No depende de ningún estado
+  compartido (ni copia local ni piso de Supabase), así que no hay cálculo
+  posible que coincida entre dos dispositivos, sin importar qué tan
+  desincronizados estén. `siguienteIdProducto()`/`next_producto_id` se
+  dejaron intactos para los demás usos (seeds del catálogo al sincronizar,
+  migración de ids viejos) porque esos corren justo después de un fetch
+  fresco a Supabase y no por acción directa de una persona — riesgo mucho
+  menor, no valía la pena tocarlos.
+  Verificado contra Supabase el mismo día: los 84 productos base del
+  código y las reglas de proceso de Sargo estaban completos — no había
+  nada que restaurar en ese momento.
