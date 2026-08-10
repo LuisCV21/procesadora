@@ -2594,7 +2594,7 @@ function recibirPedido(id){
       '</div>'+
       rows+
     '</div>'+
-    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gRecibirPedido('+id+')">✓ Confirmar recepción</button></div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button id="btn-confirmar-recepcion" class="btn btn-p" onclick="gRecibirPedido('+id+')">✓ Confirmar recepción</button></div>'+
   '</div>');
 }
 
@@ -2612,18 +2612,47 @@ function recalcCosto(i,kgPed,costoOrig){
 // P-0053 (Corona) perdiera su precio y sus 3 ventas del viernes: dos personas
 // recibieron el mismo pedido con la pantalla desfasada y el segundo guardado
 // (de todo el arreglo completo) borró lo que había hecho el primero.
+//
+// Ese chequeo remoto por sí solo NO basta: es asíncrono, así que un doble
+// clic (o un toque doble en pantalla táctil) en "Confirmar recepción" dispara
+// dos llamadas casi simultáneas que pueden leer ambas "pendiente" antes de
+// que la primera termine de guardar. Esto fue justo lo que duplicó el lote
+// P-0076 (Sra. Obdulia) el 2026-08-07: los 3 productos del pedido quedaron
+// con el doble de kilos en cámara (una copia real que se vendió con
+// normalidad y una copia fantasma nunca tocada). Por eso agregamos un
+// candado SÍNCRONO (_recibiendoIds) que se activa en el primer milisegundo
+// del clic, antes de cualquier espera de red — ese si bloquea el doble clic
+// de verdad.
+var _recibiendoIds={};
 function gRecibirPedido(id){
-  var p=pedidos.find(function(x){return x.id===id;});if(!p)return;
-  if(p.est==='recibido'){alert('Este pedido ya fue recibido.');cm();nav('pedidos');return;}
+  if(_recibiendoIds[id])return;
+  _recibiendoIds[id]=true;
+  var btn=g('btn-confirmar-recepcion');if(btn){btn.disabled=true;btn.textContent='Recibiendo…';}
+  var p=pedidos.find(function(x){return x.id===id;});
+  if(!p){delete _recibiendoIds[id];return;}
+  if(p.est==='recibido'){delete _recibiendoIds[id];alert('Este pedido ya fue recibido.');cm();nav('pedidos');return;}
   sbGet('pedidos').then(function(remoto){
     var pr=Array.isArray(remoto)&&remoto.find(function(x){return x.id===id;});
     if(pr&&pr.est==='recibido'){
       pedidos.length=0;Array.prototype.push.apply(pedidos,remoto);saveLocal('pedidos',remoto);
+      delete _recibiendoIds[id];
       alert('Este pedido ya fue recibido por otro usuario justo ahora. Se actualizó la lista — revísalo en Pedidos.');
       cm();nav('pedidos');
       return;
     }
+    // Verificación final: si por cualquier motivo ya existen lotes con esta
+    // clave en cámara/bodega (ej. reintento tras un fallo a medias), no
+    // volvemos a crearlos por duplicado — avisamos y detenemos.
+    var loteAuto=p.numPedido||numPedido(nextPedidoNum);
+    var yaExiste=camara.some(function(l){return l.lote===loteAuto;})||bodega.some(function(l){return l.lote===loteAuto;});
+    if(yaExiste){
+      delete _recibiendoIds[id];
+      alert('Ya existen lotes con la clave '+loteAuto+' en cámara/bodega. No se volvió a recibir para evitar duplicar el inventario — revísalo manualmente.');
+      cm();nav('pedidos');
+      return;
+    }
     _gRecibirPedidoEjecutar(id);
+    delete _recibiendoIds[id];
   });
 }
 function _gRecibirPedidoEjecutar(id){
