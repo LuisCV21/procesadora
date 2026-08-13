@@ -2552,6 +2552,11 @@ function gEditarPedido(id){
   var formaPago=g('d7')?g('d7').value:'efectivo';
   if(!prov){alert('Selecciona un proveedor');return;}
   audit('Editó pedido','Pedidos',(p.numPedido||'#'+p.id)+' · '+p.prov+' → '+prov);
+  // Conserva el precio de venta que el admin ya haya asignado desde "Precios
+  // pendientes" (pt.precioVenta) mientras la fila siga siendo el mismo
+  // producto — si no, al reconstruir las partidas desde el formulario se
+  // perdía en silencio y la partida volvía a pedir precio al recibirse.
+  var partidasOriginales=p.partidas||[];
   var parts=[];
   for(var i=0;i<_pedParts;i++){
     var esp=g('pps'+i)?g('pps'+i).value:'';
@@ -2559,7 +2564,13 @@ function gEditarPedido(id){
     var costo=g('ppc'+i)?parseFloat(g('ppc'+i).value)||0:0;
     var dest=g('ppd'+i)?g('ppd'+i).value:'camara';
     var prod=PRODUCTOS.find(function(pr){return pr.n===esp;});
-    if(esp&&kg>0)parts.push({esp:esp,kg:kg,costo:costo,destino:dest,unidad:prod?prod.u:'kg',lote:''});
+    var orig=partidasOriginales[i];
+    var precioVenta=(orig&&orig.esp===esp)?orig.precioVenta:undefined;
+    if(esp&&kg>0){
+      var np={esp:esp,kg:kg,costo:costo,destino:dest,unidad:prod?prod.u:'kg',lote:''};
+      if(precioVenta)np.precioVenta=precioVenta;
+      parts.push(np);
+    }
   }
   if(parts.length===0){alert('Agrega al menos un producto');return;}
   p.prov=prov;p.fecha=fecha;p.condiciones=cond;p.formaPago=formaPago;
@@ -5588,9 +5599,12 @@ function rConfig(){
         (nDup?'<button class="btn" style="border-color:var(--warn);color:var(--warn)" onclick="mRevisarDuplicados()">⚠ Revisar duplicados ('+nDup+')</button>':'')+
         '<button class="btn btn-p" onclick="mAddItem(\'producto\')">+ Agregar producto</button>'+
       '</div>':'')+'</div>'+
-      '<div class="tw"><table><thead><tr><th>#</th><th>Nombre</th><th>Unidad</th><th>Categoría</th><th>Acciones</th></tr></thead><tbody>'+
+      '<div style="padding:12px 14px;border-bottom:1px solid var(--border)">'+
+        '<input id="prod-buscar" type="text" placeholder="🔎 Buscar producto por nombre..." oninput="filtrarProductosTabla(this.value)" style="width:100%;padding:9px 12px;border:2px solid var(--border);border-radius:var(--r);font-size:14px;background:var(--bg2);color:var(--text)">'+
+      '</div>'+
+      '<div class="tw"><table><thead><tr><th>#</th><th>Nombre</th><th>Unidad</th><th>Categoría</th><th>Acciones</th></tr></thead><tbody id="prod-tbody">'+
       PRODUCTOS.map(function(p,i){
-        return '<tr><td class="mn" style="color:var(--text3)">'+(i+1)+'</td>'+
+        return '<tr data-nn="'+normNombre(p.n)+'"><td class="mn" style="color:var(--text3)">'+(i+1)+'</td>'+
           '<td class="pr">'+p.n+'</td>'+
           '<td class="mn">'+p.u+'</td>'+
           '<td><span class="tag">'+p.cat+'</span></td>'+
@@ -5599,7 +5613,9 @@ function rConfig(){
             (isAdmin?'<button class="btn btn-xs btn-d" onclick="delItem(\'producto\','+p.id+')">Eliminar</button>':'')+
           '</div></td></tr>';
       }).join('')+
-      '</tbody></table></div>';
+      '</tbody></table>'+
+      '<div id="prod-sin-resultados" style="display:none;text-align:center;padding:24px;color:var(--text3)">Sin resultados</div>'+
+      '</div>';
   } else if(CFG_TAB==='proveedores'){
     body='<div class="card-hdr"><div class="card-title">Proveedores</div><button class="btn btn-p" onclick="mAddItem(\'proveedor\')">+ Agregar proveedor</button></div>'+
       '<div>'+PROVEEDORES.slice().sort(function(a,b){return a.localeCompare(b,'es');}).map(function(p){var pEsc=p.replace(/'/g,"\\'");return '<div class="list-item"><span>'+p+'</span>'+(isAdmin?'<button class="btn btn-xs btn-d" onclick="delItem(\'proveedor\',\''+pEsc+'\')">Eliminar</button>':'')+'</div>';}).join('')+'</div>';
@@ -5726,6 +5742,20 @@ function rConfig(){
 }
 
 function setCfgTab(t){CFG_TAB=t;nav('config');}
+// Filtra la tabla de productos por nombre en vivo, mostrando/ocultando filas
+// en vez de re-renderizar (nav('config') perdería el foco del input en cada letra).
+function filtrarProductosTabla(texto){
+  var q=normNombre(texto);
+  var filas=document.querySelectorAll('#prod-tbody tr');
+  var visibles=0;
+  filas.forEach(function(tr){
+    var coincide=!q||tr.getAttribute('data-nn').indexOf(q)!==-1;
+    tr.style.display=coincide?'':'none';
+    if(coincide)visibles++;
+  });
+  var vacio=g('prod-sin-resultados');
+  if(vacio)vacio.style.display=visibles===0?'':'none';
+}
 function toggleAdminRecibe(v){
   ADMIN_RECIBE=v;
   save('admin_puede_recibir',v);
