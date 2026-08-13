@@ -5828,10 +5828,15 @@ function saveEditItem(id){
   var maxV=g('ai-max')?parseFloat(g('ai-max').value):null;
   if(minV&&minV>0)p.minStock=minV;else delete p.minStock;
   if(maxV&&maxV>0)p.maxStock=maxV;else delete p.maxStock;
-  if(n!==nombreAnterior)renombrarProductoEnTodo(nombreAnterior,n);
+  var huboRenombre=false;
+  if(n!==nombreAnterior){renombrarProductoEnTodo(nombreAnterior,n);huboRenombre=true;}
   PRODUCTOS.sort(function(a,b){return a.n.localeCompare(b.n,'es');});
   guardarProducto(p);
-  persist();cm();nav('config');
+  // Igual que en fusionarGrupo: no se llama a persist() completo — guardarProducto
+  // ya subió esta fila por su cuenta, y cámara/bodega/pedidos/procesos solo se
+  // resuben si de verdad hubo un renombre que los haya tocado.
+  if(huboRenombre){save('camara',camara);save('bodega',bodega);save('pedidos',pedidos);save('procesos',procesos);}
+  cm();nav('config');
 }
 // Si se renombra un producto, el nombre viejo queda huérfano en todo lo que lo
 // referencia por nombre (Cámara, Bodega, Pedidos, Procesos) — esos registros ya
@@ -6142,14 +6147,22 @@ function fusionarGrupo(gi){
   confirmarEliminar(
     'Vas a conservar "'+keeper.n+'" ('+keeper.u+', id '+keeper.id+') y eliminar '+perder.length+' fila(s) duplicada(s) del catálogo. Tu inventario, procesos y pedidos no se ven afectados.',
     function(){
+      var huboRenombre=false;
       perder.forEach(function(p){
-        if(normNombre(p.n)===normNombre(keeper.n)&&p.n!==keeper.n)renombrarProductoEnTodo(p.n,keeper.n);
+        if(normNombre(p.n)===normNombre(keeper.n)&&p.n!==keeper.n){renombrarProductoEnTodo(p.n,keeper.n);huboRenombre=true;}
         var pi=PRODUCTOS.findIndex(function(x){return x.id===p.id;});
         if(pi!==-1)PRODUCTOS.splice(pi,1);
         eliminarProducto(p.id);
       });
       audit('Fusionó productos duplicados','Configuracion','Conservó "'+keeper.n+'" (id '+keeper.id+') · eliminó: '+nombresDetalle);
-      persist();cm();nav('config');
+      // A propósito NO se llama a persist() aquí: eso resubiría notas, pedidos,
+      // gastos, vales... TODO lo que esta pestaña tenga en memoria, y si alguien
+      // más (ej. Jannet) guardó algo distinto mientras tanto, se lo pisaría
+      // completo. eliminarProducto ya guardó su propia fila; solo se resuben
+      // cámara/bodega/pedidos/procesos, y solo si de verdad hubo un renombre
+      // en cascada que los haya tocado.
+      if(huboRenombre){save('camara',camara);save('bodega',bodega);save('pedidos',pedidos);save('procesos',procesos);}
+      cm();nav('config');
     },
     {detalle:nombresDetalle}
   );
