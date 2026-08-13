@@ -696,7 +696,20 @@ var UMBRAL_MERMA_LIMPIEZA=15;
 // esa copia vieja pisaba la de Supabase y borraba en silencio lo que el otro
 // dispositivo acababa de agregar. Con una fila por item, agregar un cliente
 // solo puede tocar esa fila — nunca puede pisar lo que pasó con productos.
-function normNombre(s){return (s||'').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');}
+function normNombre(s){return (s||'').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\.+$/,'').replace(/\s+/g,' ').trim();}
+// SOLO palabras de talla (ch/med/gr/grande...) — a propósito NO incluye
+// palabras de etapa de proceso o preparación (S/Ordenar, Limpio, crudo,
+// entero, picado, variado): esas SÍ describen productos distintos entre sí
+// (ej. "Sargo" vs "Sargo S/Ordenar" vs "Sargo Limpio" son 3 pasos reales del
+// proceso, no el mismo pescado mal escrito) y agruparlas sería un falso
+// positivo. Solo se quitan para comparar la "raíz" y detectar la MISMA talla
+// escrita distinto (ej. "Sargo GDE" y "Sargo gr.") que normNombre no pesca.
+var PALABRAS_TALLA=['ch','chico','chica','med','mediano','mediana','gr','grande','gde','jumbo'];
+function raizNombre(s){
+  var n=normNombre(s);
+  PALABRAS_TALLA.forEach(function(w){n=n.replace(new RegExp('(^|\\s)'+w+'(\\s|$)','g'),' ');});
+  return n.replace(/\s+/g,' ').trim();
+}
 function kProducto(id){return 'producto_'+id;}
 function kProveedor(n){return 'proveedor_'+n;}
 function kCliente(n){return 'cliente_'+n;}
@@ -5551,10 +5564,15 @@ function rConfig(){
   var tabBar='<div class="config-tabs">'+tabs.map(function(t,i){return '<div class="cfg-tab'+(CFG_TAB===t?' active':'')+'" onclick="setCfgTab(\''+t+'\')">'+labels[i]+'</div>';}).join('')+'</div>';
   var body='';
   if(CFG_TAB==='productos'){
-    var nDup=isAdmin?gruposDuplicados().length:0;
+    var nDup=0;
+    if(isAdmin){
+      var _dg=gruposDuplicados();
+      var _idsG={};_dg.forEach(function(gr){gr.forEach(function(p){_idsG[p.id]=true;});});
+      nDup=_dg.length+productosSinUso().filter(function(p){return !_idsG[p.id];}).length;
+    }
     body='<div class="card-hdr"><div class="card-title">Catálogo de productos</div>'+
       (isAdmin?'<div style="display:flex;gap:8px">'+
-        (nDup?'<button class="btn" style="border-color:var(--warn);color:var(--warn)" onclick="mRevisarDuplicados()">⚠ Revisar duplicados ('+nDup+')</button>':'')+
+        (nDup?'<button class="btn" style="border-color:var(--warn);color:var(--warn)" onclick="mRevisarDuplicados()">⚠ Revisar catálogo ('+nDup+')</button>':'')+
         '<button class="btn btn-p" onclick="mAddItem(\'producto\')">+ Agregar producto</button>'+
       '</div>':'')+'</div>'+
       '<div style="padding:12px 14px;border-bottom:1px solid var(--border)">'+
@@ -5802,7 +5820,7 @@ function saveEditItem(id){
   var nombreAnterior=p.n;
   if(normNombre(n)!==normNombre(nombreAnterior)){
     var otro=PRODUCTOS.find(function(x){return x.id!==id&&normNombre(x.n)===normNombre(n);});
-    if(otro){alert('Ya existe otro producto llamado "'+otro.n+'". Usa "🔍 Revisar duplicados" para fusionarlos en vez de renombrar este a un nombre que ya existe.');return;}
+    if(otro){alert('Ya existe otro producto llamado "'+otro.n+'". Usa "⚠ Revisar catálogo" para fusionarlos en vez de renombrar este a un nombre que ya existe.');return;}
   }
   p.n=n;p.u=u;p.cat=c;
   p.soloProceso=!!(g('ai-sp')&&g('ai-sp').checked);
@@ -5862,6 +5880,14 @@ function mAddItem(tipo){
   '</div>');
 }
 
+function _crearProducto(n,u,c,soloProceso){
+  var p={id:idProductoUnico(),n:n,u:u,cat:c,soloProceso:soloProceso};
+  PRODUCTOS.push(p);
+  PRODUCTOS.sort(function(a,b){return a.n.localeCompare(b.n,'es');});
+  audit('Agregó producto','Configuracion',n+' · '+u+' · cat:'+c+(soloProceso?' · solo proceso':''));
+  guardarProducto(p);
+  cm();nav('config');
+}
 function saveItem(tipo){
   var n=(g('ai-n')?.value||'').trim();
   if(!n){alert('Escribe un nombre');return;}
@@ -5870,11 +5896,24 @@ function saveItem(tipo){
     if(existente){alert('Ya existe un producto llamado "'+existente.n+'" ('+existente.u+', '+existente.cat+'). Si necesitas cambiarle algo, edítalo desde la fila en la tabla en vez de crear uno nuevo — así no se duplica.');return;}
     var u=g('ai-u')?.value||'kg',c=readCatSelect();
     var soloProceso=!!(g('ai-sp')&&g('ai-sp').checked);
-    var p={id:idProductoUnico(),n:n,u:u,cat:c,soloProceso:soloProceso};
-    PRODUCTOS.push(p);
-    PRODUCTOS.sort(function(a,b){return a.n.localeCompare(b.n,'es');});
-    audit('Agregó producto','Configuracion',n+' · '+u+' · cat:'+c+(soloProceso?' · solo proceso':''));
-    guardarProducto(p);
+    // Aviso suave (no bloquea) si ya existe algo con la misma "raíz" en la
+    // misma categoría — ej. crear "Sargo GDE" cuando ya existe "Sargo gr." —
+    // para frenar el mismo producto repetido con otra ortografía antes de que
+    // pase, sin impedir productos legítimamente distintos que compartan una
+    // palabra (el admin decide, con la lista de parecidos a la vista).
+    var raiz=raizNombre(n);
+    var parecidos=raiz?PRODUCTOS.filter(function(x){return x.cat===c&&raizNombre(x.n)===raiz;}):[];
+    if(parecidos.length){
+      modal('<div class="modal" style="max-width:420px"><div class="modal-hdr" style="background:var(--warn-dim)"><div class="modal-title" style="color:var(--warn)">⚠ ¿Ya existe algo parecido?</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+        '<div class="modal-body">'+
+          '<div style="margin-bottom:10px">Ya tienes en "'+c+'": <b>'+parecidos.map(function(x){return x.n;}).join(', ')+'</b>. Si "'+n+'" es lo mismo con otro nombre, mejor cancela y usa esa fila — si de verdad es un producto distinto, créalo.</div>'+
+        '</div>'+
+        '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="_crearProducto(\''+n.replace(/'/g,"\\'")+'\',\''+u+'\',\''+c.replace(/'/g,"\\'")+'\','+soloProceso+')">Sí, es distinto — crear</button></div>'+
+      '</div>');
+      return;
+    }
+    _crearProducto(n,u,c,soloProceso);
+    return;
   } else if(tipo==='proveedor'){
     PROVEEDORES.push(n);
     audit('Agregó proveedor','Configuracion',n);
@@ -6018,20 +6057,24 @@ function usoProducto(nombre){
   var lotesCamara=camara.filter(function(l){return l.esp===nombre;});
   var lotesBodega=bodega.filter(function(l){return l.esp===nombre;});
   var enPedidos=pedidos.some(function(p){return p.esp===nombre||(p.partidas||[]).some(function(pt){return pt.esp===nombre;});});
+  var enNotas=notas.some(function(nt){return (nt.partidas||[]).some(function(pt){return pt.concepto===nombre;});});
   return {
     enProceso:enProceso,
     lotesCamara:lotesCamara.length,kgCamara:lotesCamara.reduce(function(a,l){return a+(l.kg||0);},0),
     lotesBodega:lotesBodega.length,kgBodega:lotesBodega.reduce(function(a,l){return a+(l.kg||0);},0),
-    enPedidos:enPedidos
+    enPedidos:enPedidos,enNotas:enNotas
   };
 }
+function sinUsoAlguno(u){return !u.enProceso&&!u.lotesCamara&&!u.lotesBodega&&!u.enPedidos&&!u.enNotas;}
+function productosSinUso(){return PRODUCTOS.filter(function(p){return sinUsoAlguno(usoProducto(p.n));});}
 function badgesUso(u){
   var b=[];
   if(u.enProceso)b.push('<span class="pill p-info" style="font-size:10px">En reglas de proceso</span>');
   if(u.lotesCamara)b.push('<span class="pill p-ok" style="font-size:10px">Cámara: '+u.lotesCamara+' lote(s) · '+u.kgCamara.toFixed(1)+' kg</span>');
   if(u.lotesBodega)b.push('<span class="pill p-ok" style="font-size:10px">Bodega: '+u.lotesBodega+' lote(s) · '+u.kgBodega.toFixed(1)+' kg</span>');
   if(u.enPedidos)b.push('<span class="pill p-gray" style="font-size:10px">En pedidos</span>');
-  if(!b.length)b.push('<span class="pill p-gray" style="font-size:10px">Sin uso registrado</span>');
+  if(u.enNotas)b.push('<span class="pill p-gray" style="font-size:10px">En notas de venta</span>');
+  if(!b.length)b.push('<span class="pill p-warn" style="font-size:10px">Sin ningún movimiento</span>');
   return b.join(' ');
 }
 var _DUP_GRUPOS=null;
@@ -6052,14 +6095,39 @@ function renderGrupoDuplicado(grupo,gi){
     '<div style="margin-top:10px;text-align:right"><button class="btn btn-p btn-xs" onclick="fusionarGrupo('+gi+')">Fusionar — conservar la seleccionada</button></div>'+
   '</div></div>';
 }
+// Dentro de "sin uso", marca cuando el producto comparte "raíz" (mismo nombre
+// base quitando talla/calificativo, ver raizNombre) con otro de la misma
+// categoría — el patrón real visto en Sargo/Chocomite: la versión "buena"
+// (ch./med./gr., con punto) sí tiene ventas; la repetida con otra ortografía
+// (CH, MED, GDE) nunca se usó ni una vez.
+function renderProductoSinUso(p){
+  var uso=usoProducto(p.n);
+  var parecidos=PRODUCTOS.filter(function(o){return o.id!==p.id&&o.cat===p.cat&&raizNombre(o.n)===raizNombre(p.n)&&raizNombre(p.n);});
+  return '<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-radius:6px;border:1px solid var(--border);margin-bottom:8px">'+
+    '<div style="flex:1">'+
+      '<div style="font-weight:600;font-size:13px">'+p.n+' <span style="font-weight:400;color:var(--text3)">— id '+p.id+' · '+p.u+' · '+p.cat+(p.soloProceso?' · solo proceso':'')+'</span></div>'+
+      (parecidos.length?'<div style="font-size:11px;color:var(--warn);margin-top:2px">Parecido a: '+parecidos.map(function(o){return o.n;}).join(', ')+' — probablemente es el mismo producto mal escrito</div>':'')+
+      '<div style="margin-top:4px;display:flex;gap:5px;flex-wrap:wrap">'+badgesUso(uso)+'</div>'+
+    '</div>'+
+    '<button class="btn btn-xs btn-d" onclick="delItem(\'producto\','+p.id+')">Eliminar</button>'+
+  '</div>';
+}
 function mRevisarDuplicados(){
   _DUP_GRUPOS=gruposDuplicados();
-  if(_DUP_GRUPOS.length===0){alert('No se encontraron productos duplicados en el catálogo. 🎉');return;}
-  var html=_DUP_GRUPOS.map(function(grupo,gi){return renderGrupoDuplicado(grupo,gi);}).join('');
-  modal('<div class="modal modal-wide"><div class="modal-hdr"><div class="modal-title">🔍 Revisar duplicados ('+_DUP_GRUPOS.length+')</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+  var idsEnGrupo={};
+  _DUP_GRUPOS.forEach(function(grupo){grupo.forEach(function(p){idsEnGrupo[p.id]=true;});});
+  var sinUso=productosSinUso().filter(function(p){return !idsEnGrupo[p.id];});
+  if(_DUP_GRUPOS.length===0&&sinUso.length===0){alert('No se encontraron duplicados ni productos sin uso en el catálogo. 🎉');return;}
+  var htmlDup=_DUP_GRUPOS.map(function(grupo,gi){return renderGrupoDuplicado(grupo,gi);}).join('');
+  var htmlSinUso=sinUso.map(function(p){return renderProductoSinUso(p);}).join('');
+  modal('<div class="modal modal-wide"><div class="modal-hdr"><div class="modal-title">🔍 Revisar catálogo</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
     '<div class="modal-body" style="overflow-y:auto">'+
-      '<div style="font-size:13px;color:var(--text3);margin-bottom:14px">Elige qué fila quieres conservar en cada grupo — las demás se eliminan del catálogo. Nada de tu inventario, procesos, pedidos o notas se pierde: todo identifica productos por su nombre, no por esta fila, así que solo se limpian las filas repetidas. La unidad de medida de la fila que elijas no se modifica.</div>'+
-      html+
+      (_DUP_GRUPOS.length?'<div style="font-weight:700;margin-bottom:8px">Nombres repetidos ('+_DUP_GRUPOS.length+')</div>'+
+      '<div style="font-size:13px;color:var(--text3);margin-bottom:14px">Elige qué fila quieres conservar en cada grupo — las demás se eliminan del catálogo. Nada de tu inventario, procesos, pedidos o notas se pierde: todo identifica productos por su nombre, no por esta fila. La unidad de medida de la fila que elijas no se modifica.</div>'+
+      htmlDup:'')+
+      (sinUso.length?'<div style="font-weight:700;margin-bottom:8px;margin-top:'+(_DUP_GRUPOS.length?'22px':'0')+'">Sin ningún movimiento ('+sinUso.length+')</div>'+
+      '<div style="font-size:13px;color:var(--text3);margin-bottom:14px">Nunca tuvieron lote, pedido, nota ni regla de proceso — revisa si de verdad ya no los usas (algunos son productos que aún no vendes; otros, como los que dicen "Parecido a", son casi seguro la misma talla que otra fila ya escrita distinto). Elimínalos uno por uno si confirmas que no sirven.</div>'+
+      htmlSinUso:'')+
     '</div>'+
     '<div class="modal-footer"><button class="btn" onclick="cm()">Cerrar</button></div>'+
   '</div>');
