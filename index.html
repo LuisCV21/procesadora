@@ -1039,9 +1039,6 @@ function esSoloProceso(esp){
   var p=PRODUCTOS.find(function(x){return x.n===esp;});
   return !!(p&&p.soloProceso);
 }
-function partidaFaltaPrecio(pt){
-  return !pt.precioVenta&&!esSoloProceso(pt.esp);
-}
 // Campo "Precio venta" reutilizado en Entrada a cámara/bodega y Editar lote —
 // si el producto es "solo proceso" el precio no aplica (nunca se vende tal
 // cual), así que el campo se bloquea en vez de dejar que se capture por error.
@@ -1211,7 +1208,7 @@ function updateBadges(){
   if(b){b.style.display=a>0?'':'none';b.textContent=a;}
   if(ROL==='admin'){
     var pp=preciosPendientesInfo();
-    var c=pp.inv.length+pp.ped.length;
+    var c=pp.inv.length;
     var bp=g('badge-precios');
     if(bp){bp.style.display=c>0?'':'none';bp.textContent=c;}
   }
@@ -1237,35 +1234,22 @@ function preciosPendientesInfo(){
     });
   });
 
-  // Solo pedidos SIN recibir: en cuanto se reciben, el producto ya vive en
-  // Cámara/Bodega con su propio precio — mostrarlo aquí también duplicaría
-  // el mismo producto en las dos secciones.
-  var listaPed=[];
-  pedidos.forEach(function(p){
-    if(p.est!=='pendiente')return;
-    (p.partidas||[]).forEach(function(pt,i){
-      if(partidaFaltaPrecio(pt)){
-        listaPed.push({pedidoId:p.id,numPedido:p.numPedido,prov:p.prov,idx:i,esp:pt.esp,kg:pt.kgReal||pt.kg,costo:pt.costoAjust||pt.costo||0});
-      }
-    });
-  });
-  return {inv:listaInv,ped:listaPed};
+  // No se pide precio de venta mientras el pedido sigue sin recibir — solo
+  // hasta que Jannet lo reciba y el producto ya viva en Cámara/Bodega (arriba)
+  // se le pide al admin. Antes de recibirse, el pedido ni siquiera se cuenta
+  // como "pendiente de precio".
+  return {inv:listaInv,ped:[]};
 }
 var _PRECIOS_INV=[];
-var _PRECIOS_PED=[];
 function rPrecios(){
   if(ROL!=='admin')return '<div class="card"><div class="card-body" style="text-align:center;padding:30px;color:var(--text3)">Solo el administrador puede asignar precios.</div></div>';
   var info=preciosPendientesInfo();
   _PRECIOS_INV=info.inv;
-  _PRECIOS_PED=info.ped;
-  var total=_PRECIOS_INV.length+_PRECIOS_PED.length;
   return '<div class="stat-grid" style="margin-bottom:18px">'+
     '<div class="stat"><div class="stat-lbl">Lotes en inventario sin precio</div><div class="stat-val c-warn">'+_PRECIOS_INV.length+'</div></div>'+
-    '<div class="stat"><div class="stat-lbl">Partidas de pedidos sin precio</div><div class="stat-val c-warn">'+_PRECIOS_PED.length+'</div></div>'+
   '</div>'+
-  (total===0?'<div class="card"><div class="card-body" style="text-align:center;padding:40px;color:var(--text3)">🎉 No hay nada pendiente de precio.</div></div>':'')+
-  (_PRECIOS_INV.length>0?
-  '<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">📦 Inventario (Cámara / Bodega)</div></div>'+
+  (_PRECIOS_INV.length===0?'<div class="card"><div class="card-body" style="text-align:center;padding:40px;color:var(--text3)">🎉 No hay nada pendiente de precio.</div></div>':
+  '<div class="card"><div class="card-hdr"><div class="card-title">📦 Inventario (Cámara / Bodega)</div></div>'+
   '<div class="tw"><table><thead><tr><th>Producto</th><th>Lote</th><th>Cantidad disponible</th><th>Costo</th><th>Precio de venta</th><th></th></tr></thead><tbody>'+
   _PRECIOS_INV.map(function(item,i){
     return '<tr><td class="pr">'+item.esp+'</td>'+
@@ -1275,20 +1259,7 @@ function rPrecios(){
       '<td><input id="pp-inv-'+i+'" type="number" min="0" placeholder="$0" style="width:100px;padding:6px 8px;border:2px solid var(--border);border-radius:var(--r);font-size:14px"></td>'+
       '<td><button class="btn btn-xs btn-p" onclick="guardarPrecioInv('+i+')">Guardar</button></td></tr>';
   }).join('')+
-  '</tbody></table></div></div>':'')+
-  (_PRECIOS_PED.length>0?
-  '<div class="card"><div class="card-hdr"><div class="card-title">🧾 Pedidos a proveedores</div></div>'+
-  '<div class="tw"><table><thead><tr><th>Pedido</th><th>Proveedor</th><th>Producto</th><th>Cantidad</th><th>Costo</th><th>Precio de venta</th><th></th></tr></thead><tbody>'+
-  _PRECIOS_PED.map(function(item,i){
-    return '<tr><td class="mn" style="color:var(--accent);font-weight:700">'+(item.numPedido||'#'+item.pedidoId)+'</td>'+
-      '<td class="pr">'+item.prov+'</td>'+
-      '<td>'+item.esp+'</td>'+
-      '<td class="mn">'+item.kg+'</td>'+
-      '<td class="mn">'+money(item.costo)+'</td>'+
-      '<td><input id="pp-ped-'+i+'" type="number" min="0" placeholder="$0" style="width:100px;padding:6px 8px;border:2px solid var(--border);border-radius:var(--r);font-size:14px"></td>'+
-      '<td><button class="btn btn-xs btn-p" onclick="guardarPrecioPed('+i+')">Guardar</button></td></tr>';
-  }).join('')+
-  '</tbody></table></div></div>':'');
+  '</tbody></table></div></div>');
 }
 function guardarPrecioInv(i){
   var item=_PRECIOS_INV[i];if(!item)return;
@@ -1298,16 +1269,6 @@ function guardarPrecioInv(i){
   var lote=arr.find(function(x){return x.id===item.id;});
   if(lote)lote.precio=v;
   audit('Asignó precio de venta','Configuracion',item.esp+' · '+money(v)+' · Lote '+item.lote);
-  persist();nav('precios');
-}
-function guardarPrecioPed(i){
-  var item=_PRECIOS_PED[i];if(!item)return;
-  var v=parseFloat(g('pp-ped-'+i)?g('pp-ped-'+i).value:0)||0;
-  if(v<=0){alert('Ingresa un precio válido');return;}
-  var p=pedidos.find(function(x){return x.id===item.pedidoId;});
-  if(!p||!p.partidas||!p.partidas[item.idx])return;
-  p.partidas[item.idx].precioVenta=v;
-  audit('Asignó precio de venta','Pedidos',(p.numPedido||'#'+p.id)+' · '+item.esp+' · '+money(v));
   persist();nav('precios');
 }
 
@@ -1330,13 +1291,10 @@ function rDash(){
     if(!pr.minStock)return false;
     return stockTotal(pr.n,camara)+stockTotal(pr.n,bodega)<=pr.minStock;
   });
-  // Misma fuente que la pantalla "Precios pendientes" (y su badge en el menú) —
-  // antes este resumen contaba pedidos completos con some(partidaFaltaPrecio)
-  // sin importar si ya se habían recibido, así que un pedido ya recibido y
-  // repreciado en Cámara/Bodega (donde vive el precio real) se seguía marcando
-  // "sin precio" para siempre porque pt.precioVenta del pedido nunca se toca.
-  var precPend=isAdmin?preciosPendientesInfo():{inv:[],ped:[]};
-  var sinPrecioItems=precPend.inv.concat(precPend.ped);
+  // Misma fuente que la pantalla "Precios pendientes" (y su badge en el menú).
+  // Solo cuenta inventario ya recibido — mientras un pedido siga sin recibir
+  // no se le pide precio a nadie.
+  var sinPrecioItems=isAdmin?preciosPendientesInfo().inv:[];
   // Lotes de productos "solo proceso" que ya llegaron a Cámara (por un pedido
   // recibido o entrada directa) y siguen sin pasar por Registrar proceso — se
   // le puede olvidar a quien recibe, y mientras tanto ese producto no se puede
@@ -2426,9 +2384,9 @@ function verPedido(id){
     '</div>';
   }
 
-  // El precio de venta ya no se edita aquí — se asigna desde Precios pendientes
-  // (antes de recibir) o Cámara/Bodega > Editar lote (después de recibir), para
-  // no tener dos lugares donde el mismo precio se pudiera desincronizar.
+  // El precio de venta ya no se edita aquí — opcionalmente se puede capturar
+  // al crear/editar el pedido, pero solo se le PIDE al admin una vez que se
+  // recibe (Precios pendientes > Inventario, o Cámara/Bodega > Editar lote).
   var tablaPartidas='<div class="tw"><table><thead><tr><th>Producto</th><th>Cantidad</th><th>Costo/u</th><th>Subtotal</th>'+
     (isAdmin?'<th>Precio venta</th>':'')+
     '<th>Destino</th></tr></thead><tbody>'+
@@ -2438,7 +2396,7 @@ function verPedido(id){
         '<td class="mn">'+(pt.kgReal||pt.kg)+' '+(pt.unidad||'kg')+'</td>'+
         '<td class="mn">'+money(pt.costoAjust||pt.costo||0)+'</td>'+
         '<td class="mn" style="color:var(--accent)">'+money(sub)+'</td>'+
-        (isAdmin?'<td>'+(pt.precioVenta?'<span style="color:var(--info);font-weight:600">'+money(pt.precioVenta)+'</span>':(esSoloProceso(pt.esp)?'<span style="color:var(--text3);font-size:12px">No se vende — va a proceso</span>':'<span style="color:var(--warn);font-size:12px">Sin precio — ver Precios pendientes</span>'))+'</td>':'')+
+        (isAdmin?'<td>'+(pt.precioVenta?'<span style="color:var(--info);font-weight:600">'+money(pt.precioVenta)+'</span>':(esSoloProceso(pt.esp)?'<span style="color:var(--text3);font-size:12px">No se vende — va a proceso</span>':(p.est==='pendiente'?'<span style="color:var(--text3);font-size:12px">Se pedirá al recibir</span>':'<span style="color:var(--warn);font-size:12px">Sin precio — ver Precios pendientes</span>')))+'</td>':'')+
         '<td><span class="pill '+(pt.destino==='bodega'?'p-warn':'p-info')+'">'+(pt.destino==='bodega'?'Bodega':'Cámara')+'</span></td></tr>';
     }).join('')+
     '<tr style="background:var(--accent-dim)"><td colspan="'+(isAdmin?'3':'3')+'" style="text-align:right;font-weight:700;padding:12px 14px">TOTAL</td>'+
