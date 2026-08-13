@@ -696,6 +696,7 @@ var UMBRAL_MERMA_LIMPIEZA=15;
 // esa copia vieja pisaba la de Supabase y borraba en silencio lo que el otro
 // dispositivo acababa de agregar. Con una fila por item, agregar un cliente
 // solo puede tocar esa fila — nunca puede pisar lo que pasó con productos.
+function normNombre(s){return (s||'').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');}
 function kProducto(id){return 'producto_'+id;}
 function kProveedor(n){return 'proveedor_'+n;}
 function kCliente(n){return 'cliente_'+n;}
@@ -3527,11 +3528,15 @@ function buildNotaHTML(n,marca){
 function verNota(id){
   var n=notas.find(function(x){return x.id===id;});if(!n)return;
   var html=buildNotaHTML(n);
+  var yaEnviada=n.est!=='pendiente';
+  var btnImprimir=yaEnviada
+    ?'<button class="btn btn-p" onclick="printNota('+n.id+')">Imprimir / PDF</button>'
+    :'<button class="btn btn-p" onclick="printNotaSurtido('+n.id+')">🖨 Lista de surtido</button>';
   modal('<div class="modal modal-wide"><div class="modal-hdr"><div class="modal-title">Nota de remisión #'+n.folio+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
     '<div class="modal-body" style="overflow-y:auto">'+html+'</div>'+
     '<div class="modal-footer"><button class="btn" onclick="cm()">Cerrar</button>'+
       (puedeEditarPartidasNota(n)?'<button class="btn" style="border-color:var(--border2);color:var(--text2)" onclick="cm();mEditarPartidasNota('+n.id+')">✏ Editar partidas</button>':'')+
-      '<button class="btn btn-p" onclick="printNota('+n.id+')">Imprimir / PDF</button></div>'+
+      btnImprimir+'</div>'+
   '</div>');
 }
 
@@ -3582,6 +3587,98 @@ function printNota(id){
     '.nota-firmas{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:22px}'+
     '.nota-firma{text-align:center;font-size:10px;font-weight:700;color:#000}'+
     '.nota-firma-line{border-top:1px solid #000;padding-top:4px}'+
+    '@media print{body{padding:0}}'+
+  '</style></head><body>'+html+'</body></html>');
+  win.document.close();
+  setTimeout(function(){win.print();},350);
+}
+
+function buildSurtidoFilas(items,offset,fs,padV){
+  var cellStyle='font-size:'+fs.toFixed(1)+'px;padding:'+padV.toFixed(1)+'px 5px';
+  return items.map(function(p,i){
+    return '<tr>'+
+      '<td style="'+cellStyle+';text-align:center">'+(offset+i+1)+'</td>'+
+      '<td style="'+cellStyle+';text-align:center">'+p.cant+' '+(p.unidad||'kg')+'</td>'+
+      '<td class="left" style="'+cellStyle+'">'+p.concepto+(p.lote?' <span style="font-size:.85em">(Lote '+p.lote+')</span>':'')+'</td>'+
+      '<td style="'+cellStyle+';text-align:center"><span class="surtido-check"></span></td>'+
+    '</tr>';
+  }).join('');
+}
+function buildSurtidoTabla(items,offset,fs,padV,thFs){
+  return '<table class="nota-tbl"><colgroup><col style="width:8%"><col style="width:20%"><col><col style="width:14%"></colgroup>'+
+    '<thead><tr>'+
+      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:4px 3px">#</th>'+
+      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:4px 3px">Cantidad</th>'+
+      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:4px 3px;text-align:left">Concepto</th>'+
+      '<th style="font-size:'+thFs.toFixed(1)+'px;padding:4px 3px">Surtido</th>'+
+    '</tr></thead><tbody>'+buildSurtidoFilas(items,offset,fs,padV)+'</tbody></table>';
+}
+function buildNotaSurtidoHTML(n){
+  var partidas=n.partidas||[];
+  var cols=partidas.length>NOTA_FILAS_POR_COLUMNA?2:1;
+  var perCol=Math.max(Math.ceil(partidas.length/cols),1);
+  var fs,padV;
+  if(perCol<=NOTA_FILAS_POR_COLUMNA){fs=11;padV=3;}
+  else{
+    var exceso=perCol-NOTA_FILAS_POR_COLUMNA;
+    fs=Math.max(8,11-exceso*0.08);
+    padV=Math.max(1,3-exceso*0.03);
+  }
+  var thFs=Math.max(9,Math.min(11,fs+0.5));
+  var col1=partidas.slice(0,perCol);
+  var col2=cols===2?partidas.slice(perCol):[];
+  var tablasHTML=cols===2
+    ? '<div class="nota-cols">'+
+        '<div class="nota-col">'+buildSurtidoTabla(col1,0,fs,padV,thFs)+'</div>'+
+        '<div class="nota-col">'+buildSurtidoTabla(col2,perCol,fs,padV,thFs)+'</div>'+
+      '</div>'
+    : buildSurtidoTabla(col1,0,fs,padV,thFs);
+  var campos=[
+    {l:'Cliente',v:n.cliente},{l:'Fecha',v:fmtFecha(n.fecha)},{l:'Ciudad',v:n.ciudad}
+  ].filter(function(c){return c.v;});
+  return '<div class="nota-wrap">'+
+    '<div class="nota-top">'+
+      '<div><div class="nota-brand-name">LISTA DE SURTIDO</div><div class="nota-brand-sub">Guía interna de cámara a camioneta</div></div>'+
+      '<div class="nota-folio-box" style="background:#666"><div class="nota-folio-lbl">REF. NOTA</div><div class="nota-folio-n">'+n.folio+'</div></div>'+
+    '</div>'+
+    '<div class="surtido-aviso">Documento de uso interno para surtir mercancía · NO es nota de venta, comprobante de cobro ni comprobante fiscal · No requiere firma</div>'+
+    '<div class="nota-grid">'+
+      campos.map(function(c){return '<div class="nota-field"><b>'+c.l+':</b><span>'+c.v+'</span></div>';}).join('')+
+    '</div>'+
+    (cols===2?'<div class="nota-tabla-area">'+tablasHTML+'</div>':tablasHTML)+
+  '</div>';
+}
+
+function printNotaSurtido(id){
+  var n=notas.find(function(x){return x.id===id;});if(!n)return;
+  var html=buildNotaSurtidoHTML(n);
+  var win=window.open('','_blank');
+  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Lista de surtido #'+n.folio+'</title><style>'+
+    '@page{size:215.9mm 279.4mm;margin:8mm}'+
+    'body{font-family:Arial,sans-serif;margin:0;padding:0;background:#fff;color:#000}'+
+    '.nota-wrap{width:100%;font-size:11px;display:flex;flex-direction:column}'+
+    '.nota-tabla-area{flex:1;min-height:0;display:flex;flex-direction:column}'+
+    '.nota-tabla-area>.nota-cols{flex:1;min-height:0}'+
+    '.nota-tabla-area .nota-col{min-height:0;display:flex;flex-direction:column}'+
+    '.nota-tabla-area .nota-col>.nota-tbl{height:100%}'+
+    '.nota-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;border-bottom:2px solid #666;padding-bottom:8px}'+
+    '.nota-brand-name{font-size:17px;font-weight:700;color:#333;line-height:1.3}'+
+    '.nota-brand-sub{font-size:10px;color:#000;margin-top:2px}'+
+    '.nota-folio-box{color:#fff;padding:6px 16px;border-radius:4px;text-align:center;min-width:110px}'+
+    '.nota-folio-lbl{font-size:9px;font-weight:700;letter-spacing:.05em}'+
+    '.nota-folio-n{font-size:22px;font-weight:700}'+
+    '.surtido-aviso{background:#f2f2f2;border:1px dashed #888;border-radius:4px;padding:6px 10px;font-size:9.5px;color:#333;font-style:italic;margin-bottom:8px}'+
+    '.nota-grid{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #000;border-radius:4px;overflow:hidden;margin:8px 0}'+
+    '.nota-field{padding:4px 8px;border-bottom:1px solid #000;border-right:1px solid #000;display:flex;gap:5px;font-size:10.5px}'+
+    '.nota-field b{color:#000;flex-shrink:0}'+
+    '.nota-cols{display:flex;gap:12px}'+
+    '.nota-col{flex:1;min-width:0}'+
+    '.nota-col+.nota-col{border-left:1px solid #000;padding-left:12px}'+
+    '.nota-tbl{width:100%;border-collapse:collapse;margin:6px 0;table-layout:fixed}'+
+    '.nota-tbl th{background:#666;color:#fff;text-align:center}'+
+    '.nota-tbl td{border-bottom:1px solid #000;text-align:right;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#000}'+
+    '.nota-tbl td.left{text-align:left}'+
+    '.surtido-check{display:inline-block;width:14px;height:14px;border:1px solid #000;border-radius:2px}'+
     '@media print{body{padding:0}}'+
   '</style></head><body>'+html+'</body></html>');
   win.document.close();
@@ -5485,7 +5582,12 @@ function rConfig(){
   var tabBar='<div class="config-tabs">'+tabs.map(function(t,i){return '<div class="cfg-tab'+(CFG_TAB===t?' active':'')+'" onclick="setCfgTab(\''+t+'\')">'+labels[i]+'</div>';}).join('')+'</div>';
   var body='';
   if(CFG_TAB==='productos'){
-    body='<div class="card-hdr"><div class="card-title">Catálogo de productos</div>'+(isAdmin?'<button class="btn btn-p" onclick="mAddItem(\'producto\')">+ Agregar producto</button>':'')+'</div>'+
+    var nDup=isAdmin?gruposDuplicados().length:0;
+    body='<div class="card-hdr"><div class="card-title">Catálogo de productos</div>'+
+      (isAdmin?'<div style="display:flex;gap:8px">'+
+        (nDup?'<button class="btn" style="border-color:var(--warn);color:var(--warn)" onclick="mRevisarDuplicados()">⚠ Revisar duplicados ('+nDup+')</button>':'')+
+        '<button class="btn btn-p" onclick="mAddItem(\'producto\')">+ Agregar producto</button>'+
+      '</div>':'')+'</div>'+
       '<div class="tw"><table><thead><tr><th>#</th><th>Nombre</th><th>Unidad</th><th>Categoría</th><th>Acciones</th></tr></thead><tbody>'+
       PRODUCTOS.map(function(p,i){
         return '<tr><td class="mn" style="color:var(--text3)">'+(i+1)+'</td>'+
@@ -5710,6 +5812,10 @@ function saveEditItem(id){
   var c=readCatSelect();
   if(!n){alert('Escribe un nombre');return;}
   var nombreAnterior=p.n;
+  if(normNombre(n)!==normNombre(nombreAnterior)){
+    var otro=PRODUCTOS.find(function(x){return x.id!==id&&normNombre(x.n)===normNombre(n);});
+    if(otro){alert('Ya existe otro producto llamado "'+otro.n+'". Usa "🔍 Revisar duplicados" para fusionarlos en vez de renombrar este a un nombre que ya existe.');return;}
+  }
   p.n=n;p.u=u;p.cat=c;
   p.soloProceso=!!(g('ai-sp')&&g('ai-sp').checked);
   var minV=g('ai-min')?parseFloat(g('ai-min').value):null;
@@ -5772,6 +5878,8 @@ function saveItem(tipo){
   var n=(g('ai-n')?.value||'').trim();
   if(!n){alert('Escribe un nombre');return;}
   if(tipo==='producto'){
+    var existente=PRODUCTOS.find(function(x){return normNombre(x.n)===normNombre(n);});
+    if(existente){alert('Ya existe un producto llamado "'+existente.n+'" ('+existente.u+', '+existente.cat+'). Si necesitas cambiarle algo, edítalo desde la fila en la tabla en vez de crear uno nuevo — así no se duplica.');return;}
     var u=g('ai-u')?.value||'kg',c=readCatSelect();
     var soloProceso=!!(g('ai-sp')&&g('ai-sp').checked);
     var p={id:idProductoUnico(),n:n,u:u,cat:c,soloProceso:soloProceso};
@@ -5896,6 +6004,99 @@ function delItem(tipo,clave){
     }
     nav('config');
   },{detalle:nom});
+}
+
+// ── Revisión de catálogo duplicado ──────────────────────
+// Cámara, bodega, pedidos y procesos identifican un producto por su NOMBRE
+// (campo esp/concepto), nunca por el id de catálogo — así que dos filas de
+// catálogo con el mismo nombre son pura redundancia en la tabla de
+// Configuración: nunca "reparten" el inventario entre sí, ambas ya apuntan al
+// mismo stock. Fusionar solo tiene que dejar una fila y borrar las demás; si
+// además se corrige el nombre al fusionar, ahí sí hay que reencauzar
+// referencias (ver renombrarProductoEnTodo) para no dejar nada huérfano.
+function gruposDuplicados(){
+  var grupos={};
+  PRODUCTOS.forEach(function(p){
+    var k=normNombre(p.n);
+    (grupos[k]=grupos[k]||[]).push(p);
+  });
+  return Object.keys(grupos).map(function(k){return grupos[k];}).filter(function(g){return g.length>1;});
+}
+function usoProducto(nombre){
+  var enProceso=Object.keys(PROC_REGLAS).some(function(t){
+    var r=PROC_REGLAS[t];
+    return r&&((r.entradas&&r.entradas.indexOf(nombre)!==-1)||(r.salidas&&r.salidas.indexOf(nombre)!==-1));
+  });
+  var lotesCamara=camara.filter(function(l){return l.esp===nombre;});
+  var lotesBodega=bodega.filter(function(l){return l.esp===nombre;});
+  var enPedidos=pedidos.some(function(p){return p.esp===nombre||(p.partidas||[]).some(function(pt){return pt.esp===nombre;});});
+  return {
+    enProceso:enProceso,
+    lotesCamara:lotesCamara.length,kgCamara:lotesCamara.reduce(function(a,l){return a+(l.kg||0);},0),
+    lotesBodega:lotesBodega.length,kgBodega:lotesBodega.reduce(function(a,l){return a+(l.kg||0);},0),
+    enPedidos:enPedidos
+  };
+}
+function badgesUso(u){
+  var b=[];
+  if(u.enProceso)b.push('<span class="pill p-info" style="font-size:10px">En reglas de proceso</span>');
+  if(u.lotesCamara)b.push('<span class="pill p-ok" style="font-size:10px">Cámara: '+u.lotesCamara+' lote(s) · '+u.kgCamara.toFixed(1)+' kg</span>');
+  if(u.lotesBodega)b.push('<span class="pill p-ok" style="font-size:10px">Bodega: '+u.lotesBodega+' lote(s) · '+u.kgBodega.toFixed(1)+' kg</span>');
+  if(u.enPedidos)b.push('<span class="pill p-gray" style="font-size:10px">En pedidos</span>');
+  if(!b.length)b.push('<span class="pill p-gray" style="font-size:10px">Sin uso registrado</span>');
+  return b.join(' ');
+}
+var _DUP_GRUPOS=null;
+function renderGrupoDuplicado(grupo,gi){
+  var filas=grupo.map(function(p,ri){
+    var uso=usoProducto(p.n);
+    return '<label style="display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-radius:6px;cursor:pointer;border:1px solid var(--border)">'+
+      '<input type="radio" name="dupkeep-'+gi+'" value="'+ri+'" style="margin-top:3px">'+
+      '<div style="flex:1">'+
+        '<div style="font-weight:600;font-size:13px">'+p.n+' <span style="font-weight:400;color:var(--text3)">— id '+p.id+' · '+p.u+' · '+p.cat+(p.soloProceso?' · solo proceso':'')+'</span></div>'+
+        '<div style="margin-top:4px;display:flex;gap:5px;flex-wrap:wrap">'+badgesUso(uso)+'</div>'+
+      '</div>'+
+    '</label>';
+  }).join('');
+  return '<div class="card" style="margin-bottom:14px"><div class="card-body">'+
+    '<div style="font-weight:700;margin-bottom:8px">'+grupo.length+' filas repetidas de "'+grupo[0].n+'"</div>'+
+    filas+
+    '<div style="margin-top:10px;text-align:right"><button class="btn btn-p btn-xs" onclick="fusionarGrupo('+gi+')">Fusionar — conservar la seleccionada</button></div>'+
+  '</div></div>';
+}
+function mRevisarDuplicados(){
+  _DUP_GRUPOS=gruposDuplicados();
+  if(_DUP_GRUPOS.length===0){alert('No se encontraron productos duplicados en el catálogo. 🎉');return;}
+  var html=_DUP_GRUPOS.map(function(grupo,gi){return renderGrupoDuplicado(grupo,gi);}).join('');
+  modal('<div class="modal modal-wide"><div class="modal-hdr"><div class="modal-title">🔍 Revisar duplicados ('+_DUP_GRUPOS.length+')</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body" style="overflow-y:auto">'+
+      '<div style="font-size:13px;color:var(--text3);margin-bottom:14px">Elige qué fila quieres conservar en cada grupo — las demás se eliminan del catálogo. Nada de tu inventario, procesos, pedidos o notas se pierde: todo identifica productos por su nombre, no por esta fila, así que solo se limpian las filas repetidas. La unidad de medida de la fila que elijas no se modifica.</div>'+
+      html+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cerrar</button></div>'+
+  '</div>');
+}
+function fusionarGrupo(gi){
+  var grupo=_DUP_GRUPOS[gi];
+  var radio=document.querySelector('input[name="dupkeep-'+gi+'"]:checked');
+  if(!radio){alert('Elige cuál fila quieres conservar antes de fusionar.');return;}
+  var keeper=grupo[parseInt(radio.value,10)];
+  var perder=grupo.filter(function(p){return p.id!==keeper.id;});
+  var nombresDetalle=perder.map(function(p){return p.n+' (id '+p.id+')';}).join(', ');
+  confirmarEliminar(
+    'Vas a conservar "'+keeper.n+'" ('+keeper.u+', id '+keeper.id+') y eliminar '+perder.length+' fila(s) duplicada(s) del catálogo. Tu inventario, procesos y pedidos no se ven afectados.',
+    function(){
+      perder.forEach(function(p){
+        if(normNombre(p.n)===normNombre(keeper.n)&&p.n!==keeper.n)renombrarProductoEnTodo(p.n,keeper.n);
+        var pi=PRODUCTOS.findIndex(function(x){return x.id===p.id;});
+        if(pi!==-1)PRODUCTOS.splice(pi,1);
+        eliminarProducto(p.id);
+      });
+      audit('Fusionó productos duplicados','Configuracion','Conservó "'+keeper.n+'" (id '+keeper.id+') · eliminó: '+nombresDetalle);
+      persist();cm();nav('config');
+    },
+    {detalle:nombresDetalle}
+  );
 }
 
 function mAddUsuario(){
