@@ -5561,7 +5561,7 @@ function rConfig(){
         '<input id="prod-buscar" type="text" placeholder="🔎 Buscar producto por nombre..." oninput="filtrarProductosTabla(this.value)" style="width:100%;padding:9px 12px;border:2px solid var(--border);border-radius:var(--r);font-size:14px;background:var(--bg2);color:var(--text)">'+
       '</div>'+
       '<div class="tw"><table><thead><tr><th>#</th><th>Nombre</th><th>Unidad</th><th>Categoría</th><th>Acciones</th></tr></thead><tbody id="prod-tbody">'+
-      PRODUCTOS.map(function(p,i){
+      PRODUCTOS.slice().sort(function(a,b){return a.n.localeCompare(b.n,'es');}).map(function(p,i){
         return '<tr data-nn="'+normNombre(p.n)+'"><td class="mn" style="color:var(--text3)">'+(i+1)+'</td>'+
           '<td class="pr">'+p.n+'</td>'+
           '<td class="mn">'+p.u+'</td>'+
