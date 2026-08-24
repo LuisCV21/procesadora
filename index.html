@@ -4338,14 +4338,17 @@ function getMovsCaja(){
     }
   });
   pedidos.forEach(function(p){
-    var tieneEfectivo=false;
     (p.abonos||[]).forEach(function(a){
       if(a.forma==='efectivo'){
-        tieneEfectivo=true;
         movs.push({fecha:a.fecha,hora:a.hora||'00:00',cat:CAT_CAJA.pedido,tipo:'cargo',concepto:'Pago a '+p.prov,monto:a.monto,ref:p.numPedido||('Pedido #'+p.id)});
       }
     });
-    if(p.condiciones==='Contado'&&p.pagado&&!tieneEfectivo){
+    // Solo la "entrada directa" (alta rápida en cámara) paga de contado sin
+    // dejar ningún abono registrado — ahí sí hay que reconstruir el cargo.
+    // Si ya hay abonos (aunque ninguno sea forma efectivo, ej. se pagó por
+    // transferencia o compensación), ese dinero nunca salió de la caja física
+    // y no debe contarse aquí como si hubiera salido.
+    if(p.condiciones==='Contado'&&p.pagado&&(!p.abonos||p.abonos.length===0)){
       movs.push({fecha:p.fecha,hora:'00:00',cat:CAT_CAJA.pedido,tipo:'cargo',concepto:'Compra de contado a '+p.prov+' (entrada directa)',monto:p.montoPagado||p.total||0,ref:p.numPedido||('Pedido #'+p.id)});
     }
   });
