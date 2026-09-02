@@ -4724,26 +4724,18 @@ function rCaja(){
     (function(){
       var filaSimple=function(a,b,color){return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:14px"><span>'+a+'</span><span style="font-weight:700'+(color?';color:'+color:'')+'">'+b+'</span></div>';};
       var filaSub=function(a,b,color){return '<div style="display:flex;justify-content:space-between;padding:9px 12px;margin:2px -12px;background:var(--bg3);border-radius:6px;font-size:14px"><span style="font-weight:700">'+a+'</span><span style="font-weight:700'+(color?';color:'+color:'')+'">'+b+'</span></div>';};
-      return '<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">Estado de resultados</div></div><div class="card-body">'+
-        filaSimple('Ventas del periodo','+'+money(d0.ventasPeriodo),'var(--accent)')+
-        filaSimple('− Compras del periodo',money(d0.comprasPeriodo),'var(--danger)')+
-        filaSub('= Utilidad bruta',money(d0.utilidadBruta))+
-        filaSimple('− Gastos del periodo',money(d0.gastosPeriodo),'var(--danger)')+
-        '<div style="display:flex;justify-content:space-between;padding:12px 12px;margin:6px -12px 0;background:'+(d0.utilidadPeriodo>=0?'rgba(46,204,113,.12)':'rgba(192,57,43,.12)')+';border-radius:6px;font-size:17px"><span style="font-weight:700">= UTILIDAD NETA</span><span style="font-weight:700;color:'+(d0.utilidadPeriodo>=0?'var(--accent)':'var(--danger)')+'">'+money(d0.utilidadPeriodo)+'</span></div>'+
-      '</div></div>'+
-      (function(){
-        // Mismo formato que llevaba la oficina en papel/Excel antes de este sistema
-        // (INVENTARIO, ADEUDOS, CAJA, ANTERIOR, UTILIDAD, GASTOS, UTILIDAD REAL) —
-        // matemáticamente da exactamente lo mismo que capitalNeto-metaPatrimonio,
-        // solo organizado en los mismos pasos con los que ya cuadraban Janet y oficina.
-        var adeudos=d0.porCobrar+d0.totalVales-d0.deudaProv;
-        var subtotal=d0.valInv+adeudos;
-        var gastosCaja=d0.gastosPeriodo-d0.gastosNoCaja;
-        var cajaAntes=d0.efectivoCaja+gastosCaja;
-        var total=subtotal+cajaAntes;
-        var utilidad=total-d0.metaPatrimonio;
-        var utilidadReal=utilidad-d0.gastosPeriodo;
-        return '<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">Utilidad real del periodo ('+(d0.cerrado?'al cierre':'en vivo')+')</div></div><div class="card-body">'+
+      // Mismo formato que llevaba la oficina en papel/Excel antes de este sistema
+      // (INVENTARIO, ADEUDOS, CAJA, ANTERIOR, UTILIDAD, GASTOS, UTILIDAD REAL) —
+      // matemáticamente da exactamente lo mismo que capitalNeto-metaPatrimonio,
+      // solo organizado en los mismos pasos con los que ya cuadraban Janet y oficina.
+      var adeudos=d0.porCobrar+d0.totalVales-d0.deudaProv;
+      var subtotal=d0.valInv+adeudos;
+      var gastosCaja=d0.gastosPeriodo-d0.gastosNoCaja;
+      var cajaAntes=d0.efectivoCaja+gastosCaja;
+      var total=subtotal+cajaAntes;
+      var utilidad=total-d0.metaPatrimonio;
+      var utilidadReal=utilidad-d0.gastosPeriodo;
+      return '<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">Utilidad real del periodo ('+(d0.cerrado?'al cierre':'en vivo')+')</div></div><div class="card-body">'+
         filaSimple('INVENTARIO',money(d0.valInv))+
         filaSimple('VALES',money(adeudos),adeudos>=0?'var(--warn)':'var(--danger)')+
         filaSub('SUBTOTAL',money(subtotal))+
@@ -4753,8 +4745,7 @@ function rCaja(){
         filaSub('UTILIDAD',money(utilidad))+
         filaSimple('GASTOS',money(-d0.gastosPeriodo),'var(--danger)')+
         '<div style="display:flex;justify-content:space-between;padding:12px 12px;margin:6px -12px 0;background:'+(utilidadReal>=0?'rgba(46,204,113,.12)':'rgba(192,57,43,.12)')+';border-radius:6px;font-size:17px"><span style="font-weight:700">UTILIDAD REAL</span><span style="font-weight:700;color:'+(utilidadReal>=0?'var(--accent)':'var(--danger)')+'">'+money(utilidadReal)+'</span></div>'+
-        '</div></div>';
-      })()+
+      '</div></div>'+
       '<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">Movimientos de efectivo del periodo (informativo)</div></div><div class="card-body">'+
         filaSimple('Cobros a clientes',money(d0.cobrosClientesPeriodo),'var(--accent)')+
         filaSimple('Pagos a proveedores',money(d0.pagosProvPeriodo),'var(--danger)')+
@@ -5265,14 +5256,6 @@ function imprimirCorte(mes){
     '</style></head><body>'+
     '<h1>Bodega de Mariscos y Productos — Corte de periodo</h1>'+
     '<div class="sub">Periodo: '+mesLbl+' · Generado: '+fmtFecha(today())+(d.cerrado?' · 🔒 Cerrado el '+fmtFecha(d.fechaCierre)+(d.cerradoPor?' por '+d.cerradoPor:''):' · Periodo abierto (cifras en vivo)')+'</div>'+
-    '<h2>Estado de resultados</h2>'+
-    '<table>'+
-      fila('Ventas del periodo',d.ventasPeriodo,'#1a7a3a')+
-      fila('− Compras del periodo',d.comprasPeriodo,'#b8342e')+
-      '<tr class="tot"><td style="padding:8px">= Utilidad bruta</td><td style="padding:8px;text-align:right">'+money(d.utilidadBruta)+'</td></tr>'+
-      fila('− Gastos del periodo',d.gastosPeriodo,'#b8342e')+
-      '<tr class="tot"><td style="padding:10px">= UTILIDAD NETA</td><td style="padding:10px;text-align:right">'+money(d.utilidadPeriodo)+'</td></tr>'+
-    '</table>'+
     (function(){
       // Mismo formato que llevaba la oficina en papel/Excel antes de este sistema —
       // da exactamente lo mismo que capitalNeto-metaPatrimonio, solo organizado en
