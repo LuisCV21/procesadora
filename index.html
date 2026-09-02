@@ -4949,6 +4949,27 @@ function nombreMes(mesStr){
   var t=new Date(y,m-1,1).toLocaleDateString('es-MX',{month:'long',year:'numeric'});
   return t.charAt(0).toUpperCase()+t.slice(1);
 }
+function mesAnterior(mesStr){
+  var y=+mesStr.slice(0,4),m=+mesStr.slice(5,7);
+  var d=new Date(y,m-2,1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+}
+// Jannet no cierra el mes el último día sino al siguiente, cuadrando su
+// efectivo con gastos/vales de ese día — si se dejan con fecha de "hoy"
+// (día 1) quedan fuera del corte del mes que en realidad quieren cuadrar.
+// Si el mes anterior sigue abierto y es día 1, sugerimos su último día.
+function fechaSugerida(){
+  var hoy=today();
+  if(hoy.slice(8,10)!=='01')return hoy;
+  var mesPrev=mesAnterior(hoy.slice(0,7));
+  var cerrado=cortesCerrados.find(function(c){return c.mes===mesPrev;});
+  return cerrado?hoy:ultimoDiaMes(mesPrev);
+}
+function notaFechaSugerida(){
+  var s=fechaSugerida();
+  if(s===today())return '';
+  return '<div class="muted" style="font-size:12px;margin-top:4px">'+nombreMes(s.slice(0,7))+' sigue abierto — se sugirió su último día. Cambia la fecha si esto es de hoy.</div>';
+}
 function setCortePeriodo(){
   window._CORTE_MES=g('cor-mes')?g('cor-mes').value:window._CORTE_MES;
   nav('caja');
@@ -4960,7 +4981,7 @@ function mAddVale(){
       '<div class="field" style="margin-bottom:10px"><label>Negocio / Cliente</label><input id="vn" type="text" placeholder="Ej: Mar Bravo Centro" list="vn-list"><datalist id="vn-list">'+CLIENTES.map(function(c){return '<option>'+c+'</option>';}).join('')+'</datalist></div>'+
       '<div class="field" style="margin-bottom:10px"><label>Concepto</label><input id="vc" type="text" placeholder="Ej: Saldo anterior camarón"></div>'+
       '<div class="field" style="margin-bottom:10px"><label>Monto ($)</label><input id="vm" type="number" min="0" placeholder="0.00"></div>'+
-      '<div class="field"><label>Fecha del vale</label><input id="vf" type="date" value="'+today()+'"></div>'+
+      '<div class="field"><label>Fecha del vale</label><input id="vf" type="date" value="'+fechaSugerida()+'">'+notaFechaSugerida()+'</div>'+
     '</div>'+
     '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gVale()">Guardar vale</button></div>'+
   '</div>');
@@ -5193,7 +5214,7 @@ function mAddGasto(){
       '<div class="field"><label>Categoría</label><input id="ga2" type="text" placeholder="Ej: servicios, nómina, insumos" list="ga2-list"><datalist id="ga2-list"><option>servicios</option><option>nómina</option><option>renta</option><option>mantenimiento</option><option>insumos</option><option>otro</option></datalist></div>'+
       '<div class="field"><label>Monto ($)</label><input id="ga3" type="number" placeholder="0" min="0"></div>'+
       '<div class="field"><label>Forma de pago</label><select id="ga4"><option value="efectivo">Efectivo</option><option value="transferencia">Transferencia</option></select></div>'+
-      '<div class="field"><label>Fecha</label><input id="ga5" type="date" value="'+today()+'"></div>'+
+      '<div class="field"><label>Fecha</label><input id="ga5" type="date" value="'+fechaSugerida()+'">'+notaFechaSugerida()+'</div>'+
     '</div></div>'+
     '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gAddGasto()">Guardar</button></div>'+
   '</div>');
