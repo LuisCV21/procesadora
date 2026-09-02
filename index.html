@@ -4854,7 +4854,9 @@ function calcularCortePeriodo(mes){
   var cobrosClientesPeriodo=0;
   notas.forEach(function(n){(n.abonos||[]).forEach(function(a){if(a.fecha>=desde&&a.fecha<=hasta)cobrosClientesPeriodo+=a.monto;});});
   var gastosPeriodo=d.gastosDetalle.reduce(function(a,gto){return a+gto.monto;},0);
-  var valesCobradosPeriodo=vales.filter(function(v){return v.est==='cobrado'&&v.fechaCobro>=desde&&v.fechaCobro<=hasta;}).reduce(function(a,v){return a+v.monto;},0);
+  // v.monto es el SALDO pendiente (queda en 0 al saldarse) — el monto real
+  // cobrado está en v.montoTotal, así que sumar v.monto aquí siempre daría 0.
+  var valesCobradosPeriodo=vales.filter(function(v){return v.est==='cobrado'&&v.fechaCobro>=desde&&v.fechaCobro<=hasta;}).reduce(function(a,v){return a+(v.montoTotal!==undefined?v.montoTotal:v.monto);},0);
   // Vales que salieron de caja Y ya se cobraron por completo — su ciclo ya cerró,
   // no afectan ningún total actual (ni caja, ni "vales por cobrar"), son puro
   // historial de lo que pasó en el mes, a diferencia de valesPendientesActuales
