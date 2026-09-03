@@ -4390,6 +4390,11 @@ function getMovsCaja(){
       movs.push({fecha:gto.fecha,hora:'00:00',cat:CAT_CAJA.gasto,tipo:'cargo',concepto:'Gasto: '+gto.concepto,monto:gto.monto,ref:gto.categoria||'gasto'});
     }
   });
+  cortesCerrados.forEach(function(c){
+    if(c.utilidadExtraida&&c.montoExtraido>0){
+      movs.push({fecha:c.fechaExtraccion,hora:'00:00',cat:CAT_CAJA.ajuste,tipo:'cargo',concepto:'Utilidad extraída — '+nombreMes(c.mes),monto:c.montoExtraido,ref:c.extraidoPor||'—'});
+    }
+  });
   auditLog.forEach(function(a){
     if(a.accion==='Actualizó efectivo en caja'){
       var m=/\$([\d,.]+)\s*→\s*\$([\d,.]+)/.exec(a.detalle||'');
@@ -4818,9 +4823,18 @@ function datosCorteDetalle(desde,hasta){
   var comprasDetalle=pedidos.filter(function(p){return p.fecha>=desde&&p.fecha<=hasta;}).slice().sort(function(a,b){
     return parseInt((a.numPedido||'').replace(/\D/g,''))-parseInt((b.numPedido||'').replace(/\D/g,''));
   });
-  var pendientesProveedor=pedidos.filter(function(p){return p.est==='recibido'&&!p.pagado;}).map(function(p){
-    var abonado=p.montoPagado||0;
-    return{prov:p.prov,numPedido:p.numPedido,fecha:p.fecha,saldo:Math.max(0,(p.total||p.costo||0)-abonado)};
+  // Adeudo a proveedores AL CIERRE de "hasta": solo pedidos ya recibidos para
+  // esa fecha, y solo cuenta lo abonado hasta esa fecha (no lo que se pague
+  // después) — así un pedido recibido/pagado el mes siguiente no se cuenta
+  // como si ya estuviera saldado en el corte de este mes.
+  var pendientesProveedor=pedidos.filter(function(p){return p.fecha<=hasta&&p.est==='recibido';}).map(function(p){
+    var total=p.total||p.costo||0,abonado;
+    if(p.condiciones==='Contado'&&p.pagado&&(!p.abonos||p.abonos.length===0)){
+      abonado=total; // compra de contado sin abono fechado: se dio por pagada el mismo día del pedido
+    } else {
+      abonado=(p.abonos||[]).filter(function(a){return a.fecha<=hasta;}).reduce(function(s,a){return s+a.monto;},0);
+    }
+    return{prov:p.prov,numPedido:p.numPedido,fecha:p.fecha,saldo:Math.max(0,total-abonado)};
   }).filter(function(x){return x.saldo>0;}).sort(function(a,b){return a.fecha.localeCompare(b.fecha);});
   var totalPendienteProveedor=pendientesProveedor.reduce(function(a,x){return a+x.saldo;},0);
   var valesDetalle=vales.filter(function(v){return v.fecha>=desde&&v.fecha<=hasta;}).slice().sort(function(a,b){return a.fecha.localeCompare(b.fecha);});
@@ -4830,22 +4844,78 @@ function datosCorteDetalle(desde,hasta){
     valesDetalle:valesDetalle,gastosDetalle:gastosDetalle};
 }
 
+// Saldo pendiente de un vale a una fecha de corte "hasta" (no el saldo actual):
+// reconstruye desde su historial (igual que getMovsCaja) para que un vale creado
+// o abonado DESPUÉS de "hasta" no afecte el corte de un mes ya pasado.
+function valeSaldoAsOf(v,hasta){
+  var hist;
+  if(v.historial&&v.historial.length){
+    hist=v.historial;
+  } else if(v.est==='cobrado'){
+    var montoOriginal=(v.montoTotal!==undefined?v.montoTotal:v.monto);
+    hist=[{tipo:'creacion',monto:montoOriginal,fecha:v.fecha},{tipo:'abono',monto:montoOriginal,fecha:v.fechaCobro||v.fecha}];
+  } else {
+    hist=[{tipo:'creacion',monto:v.monto,fecha:v.fecha}];
+  }
+  var saldo=0;
+  hist.forEach(function(h){
+    if(h.fecha>hasta)return;
+    if(h.tipo==='creacion'||h.tipo==='aumento')saldo+=h.monto;
+    else if(h.tipo==='abono')saldo-=h.monto;
+    else if(h.tipo==='reversion')saldo+=h.monto; // revertir un vale cobrado lo regresa a pendiente
+  });
+  return Math.max(0,Math.round(saldo*100)/100);
+}
 // Calcula el corte de un mes SIEMPRE en vivo (ignora si ya está cerrado) —
 // lo usa cerrarPeriodo() para tomar la foto fresca al momento del cierre.
+//
+// IMPORTANTE: todo lo que compone el "balance" (efectivo, inventario, vales,
+// cuentas por cobrar/pagar) se reconstruye TAL COMO ESTABA al final del mes
+// ("hasta"), no como está ahora mismo. Antes se usaba el estado actual en vivo,
+// así que si ya se habían capturado notas/vales del mes siguiente antes de
+// cerrar, esos movimientos se colaban en el corte del mes anterior (caso real:
+// 3 notas y 1 vale del 1-sep se colaron en el cierre de agosto hecho el 2-sep).
 function calcularCortePeriodo(mes){
   var desde=mes+'-01',hasta=ultimoDiaMes(mes);
   var valCamara=camara.reduce(function(a,i){return a+i.kg*(i.costo||0);},0);
   var valBodega=bodega.reduce(function(a,i){return a+i.kg*(i.costo||0);},0);
   var valInv=valCamara+valBodega;
-  var porCobrar=notas.filter(function(n){return !n.pagada&&(n.est==='entregada');}).reduce(function(a,n){
-    var ab=n.abonos?n.abonos.reduce(function(x,b){return x+b.monto;},0):0;
+  // El inventario actual ya tiene descontado lo que salió en notas posteriores a
+  // "hasta" (se le suma de vuelta su costo) y ya tiene sumado lo que entró en
+  // pedidos posteriores a "hasta" (se le resta su costo), para dejarlo como
+  // estaba exactamente al cierre del mes.
+  notas.forEach(function(n){
+    if(n.fecha>hasta&&(n.est==='entregada'||n.est==='pagada')){
+      (n.partidas||[]).forEach(function(pt){valInv+=(pt.cant||0)*(pt.costo||0);});
+    }
+  });
+  pedidos.forEach(function(p){
+    if(p.fecha>hasta&&p.est==='recibido'){
+      (p.partidas||[{kg:p.kg,costo:p.costo||0}]).forEach(function(pt){valInv-=(pt.kg||0)*(pt.costo||0);});
+    }
+  });
+  var porCobrar=notas.filter(function(n){return n.fecha<=hasta&&(n.est==='entregada'||n.est==='pagada');}).reduce(function(a,n){
+    var ab;
+    if(n.condiciones==='Contado'&&n.pagada&&(!n.abonos||n.abonos.length===0)){
+      ab=n.total; // venta de contado sin abono fechado: se dio por cobrada el mismo día de la nota
+    } else {
+      ab=(n.abonos||[]).filter(function(b){return b.fecha<=hasta;}).reduce(function(x,b){return x+b.monto;},0);
+    }
     return a+Math.max(0,n.total-ab);},0);
-  var valesPendientesActuales=vales.filter(function(v){return v.est==='pendiente';}).slice().sort(function(a,b){return a.fecha.localeCompare(b.fecha);});
+  var valesPendientesActuales=vales.map(function(v){return{v:v,saldo:valeSaldoAsOf(v,hasta)};})
+    .filter(function(x){return x.saldo>0;})
+    .sort(function(a,b){return a.v.fecha.localeCompare(b.v.fecha);})
+    .map(function(x){return{negocio:x.v.negocio,concepto:x.v.concepto,fecha:x.v.fecha,monto:x.saldo};});
   var totalVales=valesPendientesActuales.reduce(function(a,v){return a+v.monto;},0);
-  var gastosNoCaja=gastos.filter(function(gto){return gto.forma!=='efectivo';}).reduce(function(a,gto){return a+gto.monto;},0);
+  var gastosNoCaja=gastos.filter(function(gto){return gto.forma!=='efectivo'&&gto.fecha<=hasta;}).reduce(function(a,gto){return a+gto.monto;},0);
   var d=datosCorteDetalle(desde,hasta);
   var deudaProv=d.totalPendienteProveedor;
-  var capitalNeto=efectivoDeclarado+valInv+porCobrar+totalVales-deudaProv-gastosNoCaja;
+  // Efectivo en caja al cierre de "hasta": el saldo corrido del estado de cuenta
+  // real (getMovsCaja) justo en el último movimiento con fecha<=hasta, no el
+  // efectivo declarado actual (que ya incluye movimientos de días posteriores).
+  var movsCajaHasta=getMovsCaja().filter(function(m){return m.fecha<=hasta;});
+  var efectivoCajaHasta=movsCajaHasta.length?movsCajaHasta[movsCajaHasta.length-1].saldo:0;
+  var capitalNeto=efectivoCajaHasta+valInv+porCobrar+totalVales-deudaProv-gastosNoCaja;
   var utilidadAcumulada=capitalNeto-metaPatrimonio;
   var ventasPeriodo=d.ventasFiltradas.reduce(function(a,n){return a+(n.total||0);},0);
   var comprasPeriodo=pedidos.filter(function(p){return p.est==='recibido'&&p.fecha>=desde&&p.fecha<=hasta;}).reduce(function(a,p){return a+(p.total||0);},0);
@@ -4866,7 +4936,7 @@ function calcularCortePeriodo(mes){
   var utilidadBruta=ventasPeriodo-comprasPeriodo;
   return {
     mes:mes,cerrado:false,fechaCierre:null,cerradoPor:null,
-    efectivoCaja:efectivoDeclarado,valInv:valInv,porCobrar:porCobrar,totalVales:totalVales,
+    efectivoCaja:efectivoCajaHasta,valInv:valInv,porCobrar:porCobrar,totalVales:totalVales,
     deudaProv:deudaProv,gastosNoCaja:gastosNoCaja,capitalNeto:capitalNeto,
     metaPatrimonio:metaPatrimonio,utilidadAcumulada:utilidadAcumulada,
     ventasPeriodo:ventasPeriodo,comprasPeriodo:comprasPeriodo,gastosPeriodo:gastosPeriodo,
