@@ -4844,6 +4844,7 @@ function rCaja(){
         '<div style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:rgba(26,110,181,.12);color:var(--info);font-size:13px">💰 Utilidad extraída el '+fmtFecha(d0.fechaExtraccion)+(d0.extraidoPor?' por '+d0.extraidoPor:'')+' — '+money(d0.montoExtraido)+'. El capital operativo volvió a '+money(d0.metaPatrimonio)+'.</div>':'')+
       '<div style="display:flex;gap:10px;flex-wrap:wrap">'+
         '<button class="btn btn-p" onclick="imprimirCorte(\''+mesCorte+'\')">🖨 Imprimir corte</button>'+
+        '<button class="btn" onclick="imprimirInventarioHistorico(\''+mesCorte+'\')">🧊 Imprimir inventario al cierre</button>'+
         (puedeCerrar?'<button class="btn '+(d0.cerrado?'':'btn-w')+'" onclick="cerrarPeriodo()">🔒 '+(d0.cerrado?'Volver a cerrar con datos actuales':'Cerrar periodo')+'</button>':'')+
         (puedeCerrar&&d0.cerrado&&!d0.utilidadExtraida?'<button class="btn btn-w" onclick="extraerUtilidadPeriodo()">💰 Extraer utilidad ('+money(d0.utilidadAcumulada)+')</button>':'')+
       '</div>'+
@@ -4987,6 +4988,35 @@ function valeSaldoAsOf(v,hasta){
     else if(h.tipo==='reversion')saldo+=h.monto; // revertir un vale cobrado lo regresa a pendiente
   });
   return Math.max(0,Math.round(saldo*100)/100);
+}
+// Reconstruye cámara o bodega lote por lote tal como estaban al final del día
+// "hasta" (no ahora mismo) — para poder imprimir "el inventario tal como
+// estaba el 31 a última hora", igual que ya se hace con el VALOR total del
+// inventario en calcularCortePeriodo, pero aquí con el detalle por lote.
+//
+// Limitación real: si un lote se BORRÓ del sistema por completo después de
+// "hasta" (eliminación manual, o revertir un pedido que lo había creado), ya
+// no hay forma de reconstruirlo desde aquí — no queda ningún rastro de él en
+// cámara/bodega. Esto es poco frecuente (la mayoría de la salida/entrada de
+// inventario pasa por notas y pedidos, que sí dejan rastro fechado), pero el
+// reporte lo advierte igual para que quede claro que no es un conteo 100%
+// garantizado si hubo una eliminación manual de por medio.
+function inventarioAsOf(arr,hasta){
+  var out=[];
+  arr.forEach(function(lote){
+    if(lote.ent&&lote.ent>hasta)return; // el lote todavía no existía a esa fecha
+    var kgAsOf=lote.kg;
+    notas.forEach(function(n){
+      if(n.fecha>hasta&&(n.est==='entregada'||n.est==='pagada')){
+        (n.partidas||[]).forEach(function(pt){
+          if(pt.loteId===lote.id)kgAsOf+=(pt.cant||0);
+        });
+      }
+    });
+    if(kgAsOf<=0.0001)return;
+    out.push({esp:lote.esp,lote:lote.lote,kg:Math.round(kgAsOf*1000)/1000,unidad:lote.unidad||'kg',costo:lote.costo||0,valor:kgAsOf*(lote.costo||0)});
+  });
+  return out.sort(function(a,b){return a.esp.localeCompare(b.esp)||a.lote.localeCompare(b.lote);});
 }
 // Calcula el corte de un mes SIEMPRE en vivo (ignora si ya está cerrado) —
 // lo usa cerrarPeriodo() para tomar la foto fresca al momento del cierre.
@@ -5541,6 +5571,54 @@ function imprimirCorte(mes){
       d.valesLiquidadosPeriodo.map(function(v){return filaDet([v.negocio,v.concepto||'—',fmtFecha(v.fecha),money(v.montoTotal||v.monto)]);}).join(''))+
       '<tr class="tot"><td colspan="3" style="padding:8px">TOTAL VALES COBRADOS</td><td style="padding:8px;text-align:right">'+money(d.valesLiquidadosPeriodo.reduce(function(a,v){return a+(v.montoTotal||v.monto);},0))+'</td></tr>'+
     '</tbody></table>'+
+    '</body></html>';
+  var win=window.open('','_blank');
+  win.document.write(html);
+  win.document.close();
+  setTimeout(function(){win.print();},350);
+}
+
+// Imprime el inventario tal como estaba al último día del mes elegido (no el
+// inventario actual) — reconstruido lote por lote con inventarioAsOf().
+function imprimirInventarioHistorico(mes){
+  var hasta=ultimoDiaMes(mes);
+  var cam=inventarioAsOf(camara,hasta);
+  var bod=inventarioAsOf(bodega,hasta);
+  var valCam=cam.reduce(function(a,l){return a+l.valor;},0);
+  var valBod=bod.reduce(function(a,l){return a+l.valor;},0);
+  function filaLote(l){
+    return '<tr><td style="padding:5px 8px;border-bottom:1px solid #eee">'+l.esp+'</td>'+
+      '<td style="padding:5px 8px;border-bottom:1px solid #eee">'+l.lote+'</td>'+
+      '<td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right">'+l.kg+' '+l.unidad+'</td>'+
+      '<td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right">'+money(l.costo)+'</td>'+
+      '<td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:700">'+money(l.valor)+'</td></tr>';
+  }
+  function tablaInv(titulo,lotes,val){
+    return '<h2>'+titulo+' ('+lotes.length+' lotes)</h2>'+
+      '<table><thead><tr><th>Producto</th><th>Lote</th><th style="text-align:right">Cantidad</th><th style="text-align:right">Costo/u</th><th style="text-align:right">Valor</th></tr></thead><tbody>'+
+      (lotes.length===0?'<tr><td colspan="5" style="text-align:center;padding:12px;color:#999">Sin existencias a esta fecha</td></tr>':lotes.map(filaLote).join(''))+
+      '<tr class="tot"><td colspan="4" style="padding:8px">TOTAL '+titulo.toUpperCase()+'</td><td style="padding:8px;text-align:right">'+money(val)+'</td></tr>'+
+      '</tbody></table>';
+  }
+  var mesLbl=nombreMes(mes);
+  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Inventario histórico '+mesLbl+'</title><style>'+
+    'body{font-family:Arial,sans-serif;margin:0;padding:24px;background:#fff;color:#111}'+
+    'h1{font-size:20px;margin:0 0 4px}'+
+    '.sub{color:#666;font-size:13px;margin-bottom:20px}'+
+    'h2{font-size:14px;background:#1a3a6b;color:#fff;padding:8px 10px;border-radius:4px;margin:20px 0 6px}'+
+    'table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:6px}'+
+    'th{background:#eef1f6;text-align:left;padding:5px 8px;font-size:11px;color:#444}'+
+    '.tot td{background:#f0f0f0;font-weight:700}'+
+    '.warn{background:#fff6e0;border:1px solid #e3c98a;border-radius:4px;padding:10px 14px;font-size:12.5px;color:#7a5a10;margin-bottom:16px}'+
+    '@media print{h2{-webkit-print-color-adjust:exact;print-color-adjust:exact}}'+
+    '</style></head><body>'+
+    '<h1>Bodega de Mariscos y Productos — Inventario histórico</h1>'+
+    '<div class="sub">Tal como estaba el último día de '+mesLbl+', a última hora · Generado: '+fmtFecha(today())+'</div>'+
+    '<div class="warn">⚠ Reconstruido a partir de las notas de venta y pedidos con fecha posterior — no incluye lotes que se hayan <b>eliminado manualmente</b> del sistema después de esta fecha, si los hubo. Para el valor total oficial de este mes, usa "Imprimir corte".</div>'+
+    tablaInv('Cámara frigorífica',cam,valCam)+
+    tablaInv('Bodega',bod,valBod)+
+    '<h2>Total inventario</h2>'+
+    '<table><tbody><tr class="tot"><td style="padding:10px">CÁMARA + BODEGA</td><td style="padding:10px;text-align:right">'+money(valCam+valBod)+'</td></tr></tbody></table>'+
     '</body></html>';
   var win=window.open('','_blank');
   win.document.write(html);
