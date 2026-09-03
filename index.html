@@ -4582,7 +4582,13 @@ function rCaja(){
     var abonado=p.montoPagado||0; return a+Math.max(0,(p.total||p.costo||0)-abonado);},0);
   var totalVales=vales.filter(function(v){return v.est==='pendiente';}).reduce(function(a,v){return a+v.monto;},0);
   var totalFondo=efectivoDeclarado+valInv+porCobrar+totalVales;
-  var totalGastos=gastos.reduce(function(a,gto){return a+gto.monto;},0);
+  // Solo del mes en curso — mostrar la suma de TODOS los gastos desde
+  // siempre en el resumen mezclaba meses ya cerrados con el actual y
+  // confundía (el mismo motivo por el que Gastos ya no deja retroceder a
+  // un mes cerrado). gastosNoCaja de abajo sí sigue siendo de toda la
+  // historia a propósito — es una deuda real todavía sin reflejar en caja.
+  var gastosMesActual=gastos.filter(function(gto){return gto.fecha&&gto.fecha.slice(0,7)===mesActual();});
+  var totalGastos=gastosMesActual.reduce(function(a,gto){return a+gto.monto;},0);
   // Los gastos pagados en efectivo ya restaron de "Efectivo en caja" al registrarse;
   // sólo los pagados por transferencia aún no están reflejados en ningún activo de arriba.
   var gastosNoCaja=gastos.filter(function(gto){return gto.forma!=='efectivo';}).reduce(function(a,gto){return a+gto.monto;},0);
@@ -4615,7 +4621,7 @@ function rCaja(){
         '<div class="stat"><div class="stat-lbl">Valor inventario</div><div class="stat-val c-ok">'+money(valInv)+'</div><div class="stat-sub">Cámara '+money(valCamara)+' · Bodega '+money(valBodega)+'</div></div>'+
         '<div class="stat"><div class="stat-lbl">Por cobrar (clientes)</div><div class="stat-val c-warn">'+money(porCobrar)+'</div><div class="stat-sub">Notas entregadas sin cobrar</div></div>'+
         '<div class="stat" style="cursor:pointer" onclick="setCajaTab(\'vales\')"><div class="stat-lbl">Vales por cobrar</div><div class="stat-val c-warn">'+money(totalVales)+'</div><div class="stat-sub">'+vales.filter(function(v){return v.est==='pendiente';}).length+' vales pendientes</div></div>'+
-        '<div class="stat" style="cursor:pointer" onclick="setCajaTab(\'gastos\')"><div class="stat-lbl">Gastos</div><div class="stat-val c-danger">'+money(totalGastos)+'</div><div class="stat-sub">'+gastos.length+' gastos registrados</div></div>'+
+        '<div class="stat" style="cursor:pointer" onclick="setCajaTab(\'gastos\')"><div class="stat-lbl">Gastos de este mes</div><div class="stat-val c-danger">'+money(totalGastos)+'</div><div class="stat-sub">'+gastosMesActual.length+' gastos registrados</div></div>'+
         '<div class="stat"><div class="stat-lbl">FONDO TOTAL</div><div class="stat-val" style="font-size:20px;color:var(--accent)">'+money(totalFondo)+'</div></div>'+
         '<div class="stat"><div class="stat-lbl">Deuda proveedores</div><div class="stat-val c-danger">'+money(deudaProv)+'</div><div class="stat-sub">Saldo pendiente real</div></div>'+
         '<div class="stat"><div class="stat-lbl">Capital neto</div><div class="stat-val" style="color:'+(totalFondo-deudaProv>=0?'var(--accent)':'var(--danger)')+'">'+money(totalFondo-deudaProv)+'</div></div>'+
