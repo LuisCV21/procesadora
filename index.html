@@ -1179,8 +1179,14 @@ function cambiarMes(mod,delta){MES_SEL[mod]=sumarMes(MES_SEL[mod],delta);nav(pag
 function irMesActual(mod){MES_SEL[mod]=mesActual();nav(paginaDeMes(mod));}
 function selectorMes(mod){
   var ym=MES_SEL[mod];var esActual=ym===mesActual();
+  // En Gastos, una vez que un mes ya se cerró no se puede seguir retrocediendo
+  // hasta él desde aquí — los datos siguen intactos (nada se borra ni se
+  // oculta del sistema), pero para consultarlos hay que ir a Caja / Fondos >
+  // Corte del periodo, que es la vista pensada para meses ya cerrados.
+  var mesAtras=sumarMes(ym,-1);
+  var mesAtrasCerrado=mod==='gastos'&&cortesCerrados.some(function(c){return c.mes===mesAtras&&c.cerrado;});
   return '<div style="display:flex;align-items:center;gap:6px">'+
-    '<button class="btn btn-xs" onclick="cambiarMes(\''+mod+'\',-1)">‹</button>'+
+    '<button class="btn btn-xs" onclick="cambiarMes(\''+mod+'\',-1)"'+(mesAtrasCerrado?' disabled title="Ese periodo ya se cerró — consúltalo en Caja / Fondos > Corte del periodo"':'')+'>‹</button>'+
     '<span style="font-size:13px;font-weight:700;color:var(--text);min-width:120px;text-align:center">'+mesLabel(ym)+'</span>'+
     '<button class="btn btn-xs" onclick="cambiarMes(\''+mod+'\',1)"'+(esActual?' disabled':'')+'>›</button>'+
     (esActual?'':'<button class="btn btn-xs" onclick="irMesActual(\''+mod+'\')">Hoy</button>')+
