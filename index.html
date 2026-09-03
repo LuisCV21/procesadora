@@ -598,6 +598,49 @@ function persistAuditLog(){
     sbSet('auditLog',auditLog);
   });
 }
+// Igual que mergeAuditPorId pero genérico (por defecto combina por ".id"; se
+// puede pasar otro campo, como "mes" para cortes_cerrados). Se usa para TODO
+// arreglo compartido entre dispositivos (notas, pedidos, vales, gastos,
+// cámara, bodega, compensaciones, procesos, cortes_cerrados) — antes esos
+// arreglos se subían tal cual, así que si dos dispositivos guardaban casi al
+// mismo tiempo, el segundo borraba en silencio los cambios del primero (ej:
+// un abono a un vale hecho desde el celular podía desaparecer sin ningún
+// error visible en ningún dispositivo). Local gana si el mismo id existe en
+// ambos lados — es lo mismo que ya pasaba antes para ese registro puntual,
+// solo que ahora ya no arrastra con él a TODOS los demás registros.
+function mergeArrayPorId(local,remoto,idField){
+  idField=idField||'id';
+  local=local||[];remoto=Array.isArray(remoto)?remoto:[];
+  var mapa={};
+  remoto.forEach(function(x){if(x&&x[idField]!==undefined)mapa[x[idField]]=x;});
+  local.forEach(function(x){if(x&&x[idField]!==undefined)mapa[x[idField]]=x;});
+  var vistos={};
+  var out=remoto.filter(function(x){return x&&x[idField]!==undefined;}).map(function(x){vistos[x[idField]]=true;return mapa[x[idField]];});
+  local.forEach(function(x){if(x&&x[idField]!==undefined&&!vistos[x[idField]]){vistos[x[idField]]=true;out.push(mapa[x[idField]]);}});
+  return out;
+}
+// Encadena los guardados de una misma key para que no se disparen dos
+// fetch-merge-write en paralelo sobre el mismo arreglo (si el usuario hace
+// dos acciones seguidas antes de que termine el primer guardado).
+var _saveChain={};
+function persistArrayMerged(key,getLocal,setLocal,idField){
+  var previa=_saveChain[key]||Promise.resolve();
+  var corrida=previa.catch(function(){}).then(function(){
+    return sbGet(key).then(function(remoto){
+      var merged=mergeArrayPorId(getLocal(),remoto,idField);
+      setLocal(merged);
+      saveLocal(key,merged);
+      return sbSetReal(key,merged);
+    }).then(function(r){
+      if(r&&r.ok)quitarPendiente(key);else marcarPendiente(key,getLocal());
+    }).catch(function(e){
+      console.warn('persistArrayMerged error:',key,e);
+      marcarPendiente(key,getLocal());
+    });
+  });
+  _saveChain[key]=corrida;
+  return corrida;
+}
 // Vaciar el log es la única vez que se quiere sobrescribir (no combinar) lo remoto
 function limpiarAuditLog(){
   auditLog=[];
@@ -1016,14 +1059,28 @@ function persist(){
   // aquí — cada item se sube a su propia fila en cuanto se agrega/edita/borra
   // (ver guardarProducto/guardarProveedor/guardarCliente/guardarProcTipo y sus
   // pares eliminarX), así que nunca hay un array completo viejo que pisar.
-  save('camara',camara);save('procesos',procesos);save('pedidos',pedidos);save('notas',notas);
+  //
+  // camara/bodega/pedidos/notas/vales/gastos/compensaciones/procesos SÍ son un
+  // solo blob compartido entre dispositivos — se guardan con persistArrayMerged
+  // (fetch + combinar por id + subir) en vez de save() directo, para que un
+  // dispositivo con una copia vieja en memoria no borre en silencio lo que
+  // otro dispositivo acababa de guardar (ver mergeArrayPorId más arriba).
+  persistArrayMerged('camara',function(){return camara;},function(v){camara=v;});
+  persistArrayMerged('procesos',function(){return procesos;},function(v){procesos=v;});
+  persistArrayMerged('pedidos',function(){return pedidos;},function(v){pedidos=v;});
+  persistArrayMerged('notas',function(){return notas;},function(v){notas=v;});
+  persistArrayMerged('bodega',function(){return bodega;},function(v){bodega=v;});
+  persistArrayMerged('compensaciones',function(){return compensaciones;},function(v){compensaciones=v;});
+  persistArrayMerged('vales',function(){return vales;},function(v){vales=v;});
+  persistArrayMerged('gastos',function(){return gastos;},function(v){gastos=v;});
+  persistArrayMerged('cortes_cerrados',function(){return cortesCerrados;},function(v){cortesCerrados=v;},'mes');
   save('next_id',NEXT_ID);save('next_folio',nextFolio);
-  save('bodega',bodega);save('efectivo_declarado',efectivoDeclarado);
+  save('efectivo_declarado',efectivoDeclarado);
   save('mov_tarjeta',movTransferencias);save('saldo_tarjeta',saldoTransferencias);
-  save('compensaciones',compensaciones);save('temp_logs',tempLogs);
-  save('next_pedido_num',nextPedidoNum);save('vales',vales);persistAuditLog();
-  save('meta_patrimonio',metaPatrimonio);save('gastos',gastos);save('saldo_inicial_caja',saldoInicialCaja);
-  save('admin_puede_recibir',ADMIN_RECIBE);save('cortes_cerrados',cortesCerrados);
+  save('temp_logs',tempLogs);
+  save('next_pedido_num',nextPedidoNum);persistAuditLog();
+  save('meta_patrimonio',metaPatrimonio);save('saldo_inicial_caja',saldoInicialCaja);
+  save('admin_puede_recibir',ADMIN_RECIBE);
 }
 
 // ══════════════════════════════════════════════════════
@@ -2726,11 +2783,28 @@ function revertirPedido(id){
   movTransferencias=movTransferencias.filter(function(m){
     return !(p.abonos||[]).some(function(a){return a.forma==='transferencia'&&a.monto===m.monto&&a.fecha===m.fecha;});
   });
+  // Si este pedido se pagó (total o parcialmente) con saldo de compensación de
+  // una sucursal propia (ver aplicarSaldoCompPedido), esa aplicación también
+  // dejó abonos fantasma en las notas de esa sucursal para descontar el saldo.
+  // Sin esto, revertir el pedido regresaba su deuda a "pendiente" pero las
+  // notas de la sucursal seguían marcadas como más pagadas de lo real — el
+  // saldo de compensación quedaba perdido, ni aplicado a nada ni disponible.
+  var huboCompensacion=false;
+  notas.forEach(function(n){
+    if(!n.abonos||n.abonos.length===0)return;
+    var quitados=n.abonos.filter(function(a){return a.forma==='compensacion'&&a.pedidoId===id;});
+    if(quitados.length===0)return;
+    huboCompensacion=true;
+    n.abonos=n.abonos.filter(function(a){return !(a.forma==='compensacion'&&a.pedidoId===id);});
+    var ab=n.abonos.reduce(function(a,b){return a+b.monto;},0);
+    n.pagada=ab>=n.total;
+    n.est=n.pagada?'pagada':'entregada';
+  });
   // Resetear pedido a pendiente
   p.est='pendiente';p.pagado=false;p.montoPagado=0;p.abonos=[];
-  audit('Revirtió pedido (corrección)','Pedidos',(p.numPedido||'#'+p.id)+' · '+p.prov);
+  audit('Revirtió pedido (corrección)','Pedidos',(p.numPedido||'#'+p.id)+' · '+p.prov+(huboCompensacion?' · también se deshizo la compensación aplicada a notas de sucursal':''));
   persist();cm();nav('pedidos');
-  alert('Pedido '+(p.numPedido||'')+ ' revertido. Ahora puedes editarlo y volver a registrar la recepción.');
+  alert('Pedido '+(p.numPedido||'')+ ' revertido. Ahora puedes editarlo y volver a registrar la recepción.'+(huboCompensacion?'\n\nTambién se deshizo la compensación de sucursal que se había aplicado — ese saldo vuelve a estar disponible.':''));
 }
 
 function pagarPedido(id){
@@ -2780,7 +2854,7 @@ function pagarPedido(id){
         '<div class="field"><label>Nota</label><input id="pp4" type="text" placeholder="Opcional"></div>'+
       '</div>'+
     '</div>'+
-    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gPagarPedido('+id+')">Registrar abono</button></div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" id="btn-confirmar-abono-pedido" onclick="gPagarPedido('+id+')">Registrar abono</button></div>'+
   '</div>');
 }
 
@@ -2792,7 +2866,12 @@ function aplicarSaldoCompPedido(pedidoId,sucursal,saldoDisp,pendiente){
   var fecha=today();
   var hora=new Date().toTimeString().slice(0,5);
   if(!p.abonos)p.abonos=[];
-  p.abonos.push({monto:aplicar,forma:'compensacion-'+sucursal,fecha:fecha,hora:hora,nota:'Saldo de '+sucursal+' aplicado al pedido'});
+  // pedidoId en ambos lados (aquí y en los abonos fantasma de las notas de abajo)
+  // es el rastro que usa revertirPedido() para deshacer exactamente esto si el
+  // pedido se corrige después — sin esa referencia, revertir el pedido dejaba
+  // las notas de la sucursal marcadas como pagadas de más, con el saldo de
+  // compensación efectivamente perdido (ni el pedido ni las notas lo reflejaban).
+  p.abonos.push({monto:aplicar,forma:'compensacion-'+sucursal,fecha:fecha,hora:hora,nota:'Saldo de '+sucursal+' aplicado al pedido',pedidoId:pedidoId});
   p.montoPagado=(p.montoPagado||0)+aplicar;
   if(p.montoPagado>=(p.total||p.costo||0))p.pagado=true;
   // Registrar como compensación usada — agregar abono fantasma en notas para que se descuente del saldo
@@ -2807,7 +2886,7 @@ function aplicarSaldoCompPedido(pedidoId,sucursal,saldoDisp,pendiente){
     if(pend<=0)continue;
     var aplicarN=Math.min(restante,pend);
     if(!n.abonos)n.abonos=[];
-    n.abonos.push({monto:aplicarN,forma:'compensacion',fecha:fecha,hora:hora,nota:'Aplicado a pedido '+( p.numPedido||p.prov)});
+    n.abonos.push({monto:aplicarN,forma:'compensacion',fecha:fecha,hora:hora,nota:'Aplicado a pedido '+( p.numPedido||p.prov),pedidoId:pedidoId});
     var nuevoAb=n.abonos.reduce(function(a,b){return a+b.monto;},0);
     if(nuevoAb>=n.total){n.pagada=true;n.est='pagada';}
     restante-=aplicarN;
@@ -2815,17 +2894,27 @@ function aplicarSaldoCompPedido(pedidoId,sucursal,saldoDisp,pendiente){
   persist();cm();nav('pedidos');
 }
 
+// Candado síncrono contra doble clic — mismo patrón que _recibiendoIds en
+// gRecibirPedido (ver el comentario ahí sobre el bug real del lote P-0076).
+// Registrar un abono es 100% síncrono (no espera red antes de mutar), así
+// que un flag simple ya bloquea un doble clic/doble toque que dispararía
+// dos abonos y descontaría el efectivo dos veces.
+var _pagandoPedidoIds={};
 function gPagarPedido(id){
-  var p=pedidos.find(function(x){return x.id===id;});if(!p)return;
+  if(_pagandoPedidoIds[id])return;
+  _pagandoPedidoIds[id]=true;
+  var btn=g('btn-confirmar-abono-pedido');if(btn){btn.disabled=true;btn.textContent='Registrando…';}
+  var p=pedidos.find(function(x){return x.id===id;});
+  if(!p){delete _pagandoPedidoIds[id];return;}
   var monto=parseFloat(g('pp1').value)||0;
   var forma=g('pp2').value;
   var fecha=g('pp3').value;
   var hora=g('pp3h')?g('pp3h').value:'';
   var nota=g('pp4').value;
-  if(monto<=0){alert('Ingresa un monto válido');return;}
+  if(monto<=0){delete _pagandoPedidoIds[id];alert('Ingresa un monto válido');return;}
   if(forma==='efectivo'){
-    if(efectivoDeclarado<=0){alert('No hay efectivo disponible en caja.');return;}
-    if(monto>efectivoDeclarado){alert('Efectivo disponible: '+money(efectivoDeclarado)+'\nNo puedes abonar '+money(monto)+'.');return;}
+    if(efectivoDeclarado<=0){delete _pagandoPedidoIds[id];alert('No hay efectivo disponible en caja.');return;}
+    if(monto>efectivoDeclarado){delete _pagandoPedidoIds[id];alert('Efectivo disponible: '+money(efectivoDeclarado)+'\nNo puedes abonar '+money(monto)+'.');return;}
   }
   if(!p.abonos)p.abonos=[];
   p.abonos.push({monto:monto,forma:forma,fecha:fecha,hora:hora,nota:nota});
@@ -2838,6 +2927,7 @@ function gPagarPedido(id){
   }
   audit('Pagó pedido','Pedidos',(p.numPedido||'#'+p.id)+' · '+p.prov+' · '+money(monto)+' ('+forma+')');
   persist();
+  delete _pagandoPedidoIds[id];
   // Preguntar si desea imprimir comprobante
   if(confirm('✅ Pago registrado correctamente.\n\n¿Deseas imprimir el comprobante?')){
     imprimirComprobantePago(p,{monto:monto,forma:forma,fecha:fecha,hora:hora,nota:nota});
@@ -3167,15 +3257,6 @@ function renderEdnInfo(){
     '</div>';
 }
 
-function estN(id,e){
-  var n=notas.find(function(x){return x.id===id;});
-  if(!n)return;
-  n.est=e;
-  if(e==='entregada'&&n.condiciones==='Contado'){n.pagada=true;efectivoDeclarado+=n.total;}
-  audit('Cambió estado de nota','Notas','Nota #'+n.folio+' → '+e+' · '+n.cliente+' · '+money(n.total));
-  persist();nav('notas');
-}
-
 function mEnviarNota(id){
   var n=notas.find(function(x){return x.id===id;});if(!n)return;
   modal('<div class="modal" style="max-width:440px"><div class="modal-hdr"><div class="modal-title">Marcar como enviada — Nota #'+n.folio+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
@@ -3237,6 +3318,12 @@ function revertirNota(id){
   n.abonos=[];
   n.pagada=false;
   n.est='pendiente';
+  // La mercancía de esta nota ya salió físicamente (por eso revertirNota no
+  // toca inventario). Si después alguien entra a "Editar partidas" de esta
+  // misma nota, gEditarPartidas() NO debe devolver ese stock a cámara/bodega
+  // como si nunca hubiera salido — quedaría inventario fantasma que no existe
+  // en la realidad. Esta bandera se lo recuerda aunque n.est ya diga "pendiente".
+  n.mercanciaEntregada=true;
   persist();cm();nav('notas');
 }
 
@@ -3980,8 +4067,12 @@ function gEditarPartidas(){
   if(n.est==='pendiente'&&g('epcond'))n.condiciones=g('epcond').value;
   // Cuánto tenía reservado (descontado) esta nota, por lote — es lo "disponible extra"
   // al validar, porque ese stock ya salió de cámara/bodega por esta misma nota.
+  // Si la mercancía ya salió de verdad (nota revertida con "Corregir nota"),
+  // ese colchón no existe en la realidad — no se le suma a lo disponible.
   var origPorLote={};
-  n.partidas.forEach(function(p){origPorLote[p.loteId]=(origPorLote[p.loteId]||0)+p.cant;});
+  if(!n.mercanciaEntregada){
+    n.partidas.forEach(function(p){origPorLote[p.loteId]=(origPorLote[p.loteId]||0)+p.cant;});
+  }
   var nuevas=[],errStock=[],errPrecio=[],usoNuevo={};
   EDITANDO_NOTA.partidas.forEach(function(p){
     var loteId=parseInt(p.loteId)||null;
@@ -4007,15 +4098,21 @@ function gEditarPartidas(){
   });
   if(errStock.length>0){alert('Stock insuficiente:\n'+errStock.join('\n'));return;}
 
-  // Revertir el descuento original y aplicar el nuevo, lote por lote.
-  n.partidas.forEach(function(p){
-    var lote=buscarLoteVenta(p.loteId);
-    if(lote)lote.kg=parseFloat((lote.kg+p.cant).toFixed(3));
-  });
-  nuevas.forEach(function(p){
-    var lote=buscarLoteVenta(p.loteId);
-    if(lote)lote.kg=restarKg(lote.kg,p.cant);
-  });
+  // Revertir el descuento original y aplicar el nuevo, lote por lote — SALVO
+  // que la mercancía de esta nota ya haya salido de verdad (se corrigió con
+  // "Corregir nota"/revertirNota): ahí el stock ya no existe físicamente para
+  // devolverlo, así que esta edición queda como corrección de papel (precio,
+  // condiciones, producto anotado) sin tocar cámara/bodega en absoluto.
+  if(!n.mercanciaEntregada){
+    n.partidas.forEach(function(p){
+      var lote=buscarLoteVenta(p.loteId);
+      if(lote)lote.kg=parseFloat((lote.kg+p.cant).toFixed(3));
+    });
+    nuevas.forEach(function(p){
+      var lote=buscarLoteVenta(p.loteId);
+      if(lote)lote.kg=restarKg(lote.kg,p.cant);
+    });
+  }
 
   var totalAnterior=n.total;
   var nuevoTotal=nuevas.reduce(function(a,p){return a+p.importe;},0);
@@ -4861,7 +4958,7 @@ function valeSaldoAsOf(v,hasta){
   hist.forEach(function(h){
     if(h.fecha>hasta)return;
     if(h.tipo==='creacion'||h.tipo==='aumento')saldo+=h.monto;
-    else if(h.tipo==='abono')saldo-=h.monto;
+    else if(h.tipo==='abono'||h.tipo==='cancelacion')saldo-=h.monto;
     else if(h.tipo==='reversion')saldo+=h.monto; // revertir un vale cobrado lo regresa a pendiente
   });
   return Math.max(0,Math.round(saldo*100)/100);
@@ -5170,13 +5267,29 @@ function revertirVale(id){
 function delVale(id){
   var v=vales.find(function(x){return x.id===id;});
   confirmarEliminar('¿Eliminar este vale?',function(){
-    if(v&&v.est==='pendiente'&&v.efectivoRestado){
-      efectivoDeclarado+=v.monto;
-      audit('Eliminó vale — devuelto al efectivo','Caja',v.negocio+' · '+money(v.monto));
-    }else if(v){
+    if(!v){persist();nav('caja');return;}
+    ensureHistorialVale(v);
+    // Si el vale ya tuvo abonos/aumentos reales fechados (no solo la creación),
+    // borrarlo del arreglo completo perdería ese historial para siempre — un
+    // corte de un mes ya pasado que se vuelva a calcular después ya no vería
+    // esos movimientos. En ese caso se conserva el registro (marcado
+    // "eliminado", con saldo 0) en vez de quitarlo del arreglo.
+    var tieneHistorialReal=v.historial.some(function(h){return h.tipo!=='creacion';});
+    var eraPendienteConEfectivo=v.est==='pendiente'&&v.efectivoRestado;
+    if(eraPendienteConEfectivo)efectivoDeclarado+=v.monto;
+    if(tieneHistorialReal){
+      if(v.monto>0){
+        // 'abono' si había que devolver efectivo real (mismo signo de caja que
+        // ya se aplicó arriba); 'cancelacion' si no, para que el saldo baje a
+        // 0 sin inventar un movimiento de efectivo que nunca ocurrió.
+        v.historial.push({tipo:eraPendienteConEfectivo?'abono':'cancelacion',monto:v.monto,fecha:today(),concepto:'Vale eliminado'});
+      }
+      v.monto=0;v.est='eliminado';v.eliminado=true;
+      audit('Eliminó vale con historial (se conserva para el corte)','Caja',v.negocio+' · '+money(v.montoTotal!==undefined?v.montoTotal:0));
+    } else {
+      vales=vales.filter(function(x){return x.id!==id;});
       audit('Eliminó vale','Caja',v.negocio+' · '+money(v.monto));
     }
-    vales=vales.filter(function(x){return x.id!==id;});
     persist();nav('caja');
   },{detalle:v?v.negocio+' · '+money(v.monto):''});
 }
@@ -6528,10 +6641,15 @@ function aplicarDatos(data){
   var pend=getPendientes();
   Object.keys(pend).forEach(function(k){delete data[k];});
 
-  if(data.camara){camara=data.camara;normalizarLotesAgotados(camara);}
-  if(data.procesos)procesos=data.procesos;
-  if(data.pedidos)pedidos=data.pedidos;
-  if(data.notas)notas=data.notas;
+  // camara/procesos/pedidos/notas/bodega/compensaciones/vales/gastos/cortes_cerrados
+  // se combinan por id con lo local en vez de reemplazarse tal cual — si este
+  // dispositivo tiene una mutación local que todavía no terminó de subir (el
+  // persist() de persistArrayMerged corre en paralelo al polling), un dato
+  // remoto más viejo no la debe borrar de la pantalla mientras tanto.
+  if(data.camara){camara=mergeArrayPorId(camara,data.camara);normalizarLotesAgotados(camara);}
+  if(data.procesos)procesos=mergeArrayPorId(procesos,data.procesos);
+  if(data.pedidos)pedidos=mergeArrayPorId(pedidos,data.pedidos);
+  if(data.notas)notas=mergeArrayPorId(notas,data.notas);
   if(data.next_id)NEXT_ID=data.next_id;
   if(data.next_folio)nextFolio=data.next_folio;
   if(data.next_pedido_num)nextPedidoNum=data.next_pedido_num;
@@ -6554,17 +6672,17 @@ function aplicarDatos(data){
   }
 
   if(data.catalogo_seeds_vistos)CATALOGO_SEEDS_VISTOS=data.catalogo_seeds_vistos;
-  if(data.bodega){bodega=data.bodega;normalizarLotesAgotados(bodega);}
+  if(data.bodega){bodega=mergeArrayPorId(bodega,data.bodega);normalizarLotesAgotados(bodega);}
   if(data.efectivo_declarado!==undefined&&data.efectivo_declarado!==null)efectivoDeclarado=data.efectivo_declarado;
   if(data.mov_tarjeta)movTransferencias=data.mov_tarjeta;
-  if(data.compensaciones)compensaciones=data.compensaciones;
+  if(data.compensaciones)compensaciones=mergeArrayPorId(compensaciones,data.compensaciones);
   if(data.temp_logs)tempLogs=data.temp_logs;
-  if(data.vales)vales=data.vales;
+  if(data.vales)vales=mergeArrayPorId(vales,data.vales);
   if(data.auditLog)auditLog=mergeAuditPorId(auditLog,data.auditLog);
   if(data.users){USERS=data.users;repararIdsUsuariosDuplicados();}
   if(data.meta_patrimonio!==undefined&&data.meta_patrimonio!==null)metaPatrimonio=data.meta_patrimonio;
-  if(data.gastos)gastos=data.gastos;
-  if(data.cortes_cerrados)cortesCerrados=data.cortes_cerrados;
+  if(data.gastos)gastos=mergeArrayPorId(gastos,data.gastos);
+  if(data.cortes_cerrados)cortesCerrados=mergeArrayPorId(cortesCerrados,data.cortes_cerrados,'mes');
   if(data.saldo_inicial_caja)saldoInicialCaja=data.saldo_inicial_caja;
   if(data.admin_puede_recibir!==undefined&&data.admin_puede_recibir!==null)ADMIN_RECIBE=data.admin_puede_recibir;
   // Recalcula el efectivo declarado desde las transacciones ya combinadas
