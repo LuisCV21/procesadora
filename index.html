@@ -608,15 +608,28 @@ function persistAuditLog(){
 // error visible en ningún dispositivo). Local gana si el mismo id existe en
 // ambos lados — es lo mismo que ya pasaba antes para ese registro puntual,
 // solo que ahora ya no arrastra con él a TODOS los demás registros.
-function mergeArrayPorId(local,remoto,idField){
+// remotoGana=true invierte el desempate (remoto pisa a local en vez de al
+// revés) — se usa al APLICAR datos que llegan del servidor para colecciones
+// que casi nunca se editan localmente y sí pueden corregirse por fuera de la
+// app (ej. cortes_cerrados corregido directo en Supabase): si local siempre
+// ganara ahí, una copia vieja en caché de un dispositivo bloquearía para
+// siempre esa corrección aunque el servidor ya tenga el dato bueno. Al
+// GUARDAR (persistArrayMerged) siempre se deja que gane local — eso sí es la
+// acción real que se está haciendo en este dispositivo en este momento.
+function mergeArrayPorId(local,remoto,idField,remotoGana){
   idField=idField||'id';
   local=local||[];remoto=Array.isArray(remoto)?remoto:[];
+  var primero=remotoGana?local:remoto, segundo=remotoGana?remoto:local;
   var mapa={};
-  remoto.forEach(function(x){if(x&&x[idField]!==undefined)mapa[x[idField]]=x;});
-  local.forEach(function(x){if(x&&x[idField]!==undefined)mapa[x[idField]]=x;});
+  primero.forEach(function(x){if(x&&x[idField]!==undefined)mapa[x[idField]]=x;});
+  segundo.forEach(function(x){if(x&&x[idField]!==undefined)mapa[x[idField]]=x;});
+  var orden=remotoGana?local.concat(remoto):remoto.concat(local);
   var vistos={};
-  var out=remoto.filter(function(x){return x&&x[idField]!==undefined;}).map(function(x){vistos[x[idField]]=true;return mapa[x[idField]];});
-  local.forEach(function(x){if(x&&x[idField]!==undefined&&!vistos[x[idField]]){vistos[x[idField]]=true;out.push(mapa[x[idField]]);}});
+  var out=[];
+  orden.forEach(function(x){
+    if(!x||x[idField]===undefined||vistos[x[idField]])return;
+    vistos[x[idField]]=true;out.push(mapa[x[idField]]);
+  });
   return out;
 }
 // Encadena los guardados de una misma key para que no se disparen dos
@@ -6682,7 +6695,7 @@ function aplicarDatos(data){
   if(data.users){USERS=data.users;repararIdsUsuariosDuplicados();}
   if(data.meta_patrimonio!==undefined&&data.meta_patrimonio!==null)metaPatrimonio=data.meta_patrimonio;
   if(data.gastos)gastos=mergeArrayPorId(gastos,data.gastos);
-  if(data.cortes_cerrados)cortesCerrados=mergeArrayPorId(cortesCerrados,data.cortes_cerrados,'mes');
+  if(data.cortes_cerrados)cortesCerrados=mergeArrayPorId(cortesCerrados,data.cortes_cerrados,'mes',true);
   if(data.saldo_inicial_caja)saldoInicialCaja=data.saldo_inicial_caja;
   if(data.admin_puede_recibir!==undefined&&data.admin_puede_recibir!==null)ADMIN_RECIBE=data.admin_puede_recibir;
   // Recalcula el efectivo declarado desde las transacciones ya combinadas
