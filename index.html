@@ -354,6 +354,7 @@ hr.div{border:none;border-top:1px solid var(--border);margin:14px 0}
       </div>
     </div>
   </div>
+  <div id="mes-banner" style="display:none"></div>
   <div class="content" id="content"></div>
 </div>
 
@@ -1280,6 +1281,7 @@ function nav(tab){
   var fns={dashboard:rDash,precios:rPrecios,camara:rCam,bodega:rBodega,procesos:rProc,pedidos:rPed,notas:rNotas,'nueva-nota':rNuevaNota,'editar-partidas':rEditarPartidas,caja:rCaja,reportes:rRep,config:rConfig};
   g('content').innerHTML=fns[tab]?fns[tab]():'';
   g('topbar-act').innerHTML=tbAct(tab);
+  renderMesBanner();
 }
 
 function tbAct(tab){
@@ -2685,6 +2687,7 @@ function recalcCosto(i,kgPed,costoOrig){
 var _recibiendoIds={};
 function gRecibirPedido(id){
   if(_recibiendoIds[id])return;
+  if(!chequeoCierrePendiente(today()))return;
   _recibiendoIds[id]=true;
   var btn=g('btn-confirmar-recepcion');if(btn){btn.disabled=true;btn.textContent='Recibiendo…';}
   var p=pedidos.find(function(x){return x.id===id;});
@@ -3965,6 +3968,7 @@ function gNota(){
   if(errStock.length>0){alert('Stock insuficiente:\n'+errStock.join('\n'));return;}
   if(errPrecio.length>0){alert('No se puede vender sin precio asignado — corrígelo en Precios pendientes:\n'+errPrecio.join('\n'));return;}
   if(parts.length===0){alert('Agrega al menos una partida válida');return;}
+  if(!chequeoCierrePendiente(nuevaNota.fecha))return;
   var tot=parts.reduce(function(a,p){return a+p.importe;},0);
   var cond=nuevaNota.condiciones||'Crédito';
   parts.forEach(function(p){
@@ -4605,7 +4609,7 @@ function rCaja(){
 
   // Tabs de caja
   var CAJA_TAB=window._CAJA_TAB||'resumen';
-  var tabs=[['resumen','Resumen'],['vales','Vales por cobrar'],['gastos','Gastos'],['estadocuenta','Movimientos'],['compensaciones','Compensaciones sucursales'],['corte','Corte del periodo']];
+  var tabs=[['resumen','Resumen'],['vales','Vales por cobrar'],['gastos','Gastos'],['estadocuenta','Movimientos'],['compensaciones','Compensaciones sucursales'],['corte','Corte del periodo'],['verificar','Verificar inventario']];
   var tabBar='<div class="config-tabs" style="margin-bottom:16px">'+tabs.map(function(t){
     return '<div class="cfg-tab'+(CAJA_TAB===t[0]?' active':'')+'" onclick="setCajaTab(\''+t[0]+'\')">'+t[1]+'</div>';
   }).join('')+'</div>';
@@ -4930,8 +4934,85 @@ function rCaja(){
         '</tbody></table></div>'+
         '<div class="card-body" style="padding-top:0">'+filaSimple('TOTAL VALES COBRADOS',money(d.valesLiquidadosPeriodo.reduce(function(a,v){return a+(v.montoTotal||v.monto);},0)))+'</div></div>';
     })();
+  } else if(CAJA_TAB==='verificar'){
+    content=rVerificarInventario();
   }
   return tabBar+content;
+}
+
+// ══════════════════════════════════════════════════════
+//  VERIFICAR INVENTARIO — cruza lo que entró (pedidos + procesos) contra lo
+//  que salió (notas + procesos) por cada lote, y lo compara contra lo que
+//  el sistema dice tener ahora mismo. Si no cuadra, algo se corrigió mal en
+//  algún lado (edición directa, corte mal calculado, etc.) — pensado para
+//  que Jannet/Antonio lo corran solos sin depender de pedirle a alguien más
+//  que investigue con SQL. Solo lotes "P-" (los que tienen pedido rastreable
+//  de origen) — los lotes viejos sin ese origen no se pueden verificar así.
+function calcularVerificacionInventario(){
+  var recibidoPorLote={},producidoPorLote={},consumidoPorLote={},vendidoPorLoteId={};
+  pedidos.forEach(function(p){
+    (p.partidas||[]).forEach(function(part){
+      var k=part.esp+'|'+part.lote;
+      recibidoPorLote[k]=(recibidoPorLote[k]||0)+(parseFloat(part.kg)||0);
+    });
+  });
+  procesos.forEach(function(pr){
+    var kIn=pr.esp+'|'+pr.lote;
+    consumidoPorLote[kIn]=(consumidoPorLote[kIn]||0)+(parseFloat(pr.kgE)||0);
+    (pr.salidas||[]).forEach(function(s){
+      var kOut=s.esp+'|'+pr.lote;
+      producidoPorLote[kOut]=(producidoPorLote[kOut]||0)+(parseFloat(s.kg)||0);
+    });
+  });
+  notas.forEach(function(n){
+    (n.partidas||[]).forEach(function(p){
+      vendidoPorLoteId[p.loteId]=(vendidoPorLoteId[p.loteId]||0)+(parseFloat(p.cant)||0);
+    });
+  });
+  var problemas=[];
+  camara.concat(bodega).forEach(function(l){
+    if(!/^P-/.test(l.lote||''))return;
+    var k=l.esp+'|'+l.lote;
+    var recibido=recibidoPorLote[k]||0;
+    var producido=producidoPorLote[k]||0;
+    var consumido=consumidoPorLote[k]||0;
+    var vendido=vendidoPorLoteId[l.id]||0;
+    var esperado=recibido+producido-consumido-vendido;
+    var diferencia=Math.round((l.kg-esperado)*100)/100;
+    if(Math.abs(diferencia)>0.5){
+      problemas.push({id:l.id,esp:l.esp,lote:l.lote,esperado:Math.round(esperado*100)/100,sistema:l.kg,diferencia:diferencia,unidad:l.unidad||'kg'});
+    }
+  });
+  problemas.sort(function(a,b){return Math.abs(b.diferencia)-Math.abs(a.diferencia);});
+  return problemas;
+}
+function rVerificarInventario(){
+  var canEdit=ROL==='admin';
+  var problemas=calcularVerificacionInventario();
+  var intro='<div class="card" style="margin-bottom:18px"><div class="card-body">'+
+    '<div style="font-size:13px;color:var(--text3)">Compara, lote por lote, lo que entró (pedidos recibidos + procesos) menos lo que salió (notas de venta + procesos) contra lo que el sistema dice tener ahora. '+
+    'Si un lote no cuadra, es señal de que algo se corrigió mal en algún lado (una edición directa, un corte de mes calculado con inventario en vivo, etc.) — no de que falte mercancía por robo o merma, aunque también puede ser eso. '+
+    'Solo revisa lotes con código "P-" (los que tienen un pedido de origen rastreable); lotes muy viejos (de antes de julio 2026) no se pueden verificar así.</div>'+
+  '</div></div>';
+  if(problemas.length===0){
+    return intro+'<div class="card"><div class="card-body" style="text-align:center;padding:30px;color:var(--accent)">✅ Todo cuadra — no se encontró ningún lote con diferencia mayor a 0.5.</div></div>';
+  }
+  var filas=problemas.map(function(p){
+    var color=p.diferencia>0?'var(--warn)':'var(--danger)';
+    var signo=p.diferencia>0?'sobra':'falta';
+    return '<tr>'+
+      '<td class="pr">'+p.esp+'</td>'+
+      '<td class="mn">'+p.lote+'</td>'+
+      '<td class="mn">'+p.esperado+' '+p.unidad+'</td>'+
+      '<td class="mn">'+p.sistema+' '+p.unidad+'</td>'+
+      '<td class="mn" style="color:'+color+';font-weight:700">'+(p.diferencia>0?'+':'')+p.diferencia+' ('+signo+')</td>'+
+      (canEdit?'<td class="mn"><button class="btn btn-icon" title="Editar lote" onclick="'+(camara.some(function(x){return x.id===p.id;})?'mEditLote':'mEditBodega')+'('+p.id+')">✏️</button></td>':'')+
+    '</tr>';
+  }).join('');
+  return intro+'<div class="card"><div class="card-hdr"><div class="card-title">'+problemas.length+' lote(s) que no cuadran</div></div>'+
+    '<div class="tw"><table><thead><tr><th>Producto</th><th>Lote</th><th>Debería tener</th><th>Sistema dice</th><th>Diferencia</th>'+(canEdit?'<th></th>':'')+'</tr></thead><tbody>'+filas+'</tbody></table></div>'+
+    (canEdit?'<div class="card-body" style="font-size:12px;color:var(--text3)">Usa el ✏️ para abrir "Editar lote" y corregir la cantidad al valor de "Debería tener" — eso sí queda registrado en la bitácora (Configuración → Auditoría).</div>':'')+
+  '</div>';
 }
 
 function datosCorteDetalle(desde,hasta){
@@ -5154,6 +5235,45 @@ function extraerUtilidadPeriodo(){
   alert('✅ Se extrajeron '+money(monto)+' de utilidad. El capital operativo vuelve a '+money(metaPatrimonio)+'.');
 }
 
+// ══════════════════════════════════════════════════════
+//  AVISO DE CIERRE PENDIENTE — si el mes anterior no se cerró y ya se está
+//  capturando algo de un mes nuevo, hay que avisar ANTES de guardar (no
+//  solo mostrarlo como banner que se puede ignorar). Esto es lo que faltó
+//  el 1-sep-2026: se capturaron notas de septiembre con agosto sin cerrar
+//  y el corte de agosto salió mal — ver memoria del incidente.
+function mesAnteriorSinCerrar(){
+  var hoy=today();
+  var y=+hoy.slice(0,4),m=+hoy.slice(5,7);
+  m--;if(m===0){m=12;y--;}
+  var mesAnt=y+'-'+String(m).padStart(2,'0');
+  if(cortesCerrados.some(function(c){return c.mes===mesAnt;}))return null;
+  var huboActividad=notas.some(function(n){return n.fecha&&n.fecha.slice(0,7)===mesAnt;})||
+    pedidos.some(function(p){return p.fecha&&p.fecha.slice(0,7)===mesAnt;});
+  return huboActividad?mesAnt:null;
+}
+// Se llama justo antes de guardar una nota/gasto/recepción. Si el movimiento
+// es de un mes MÁS NUEVO que el mes abierto sin cerrar, pregunta antes de
+// seguir. Si el usuario cancela, quien llama a esta función debe abortar
+// el guardado (por eso regresa true/false, no solo avisa).
+function chequeoCierrePendiente(fechaMov){
+  var mesAnt=mesAnteriorSinCerrar();
+  if(!mesAnt)return true;
+  var mesMov=(fechaMov||today()).slice(0,7);
+  if(mesMov<=mesAnt)return true;
+  return confirm('⚠️ '+nombreMes(mesAnt)+' todavía no se ha cerrado.\n\n'+
+    'Si guardas esto de '+nombreMes(mesMov)+' ahora, cuando cierres '+nombreMes(mesAnt)+' el corte de ese mes puede salir mal (ya pasó antes).\n\n'+
+    'Lo más seguro es cerrar '+nombreMes(mesAnt)+' primero: Caja → Corte del periodo.\n\n¿Guardar de todas formas?');
+}
+function renderMesBanner(){
+  var b=g('mes-banner');if(!b)return;
+  var mesAnt=mesAnteriorSinCerrar();
+  if(!mesAnt){b.innerHTML='';b.style.display='none';return;}
+  b.style.display='';
+  b.innerHTML='<div style="display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap;padding:9px 16px;background:rgba(243,156,18,.15);border-bottom:1px solid rgba(243,156,18,.4);color:var(--warn);font-size:13px">'+
+    '<span>⚠️ <b>'+nombreMes(mesAnt)+' no está cerrado.</b> Ciérralo antes de seguir capturando movimientos nuevos, o el corte puede salir mal.</span>'+
+    '<button class="btn btn-w" style="padding:4px 12px;font-size:12px" onclick="window._CORTE_MES=\''+mesAnt+'\';window._CAJA_TAB=\'corte\';nav(\'caja\')">Cerrar '+nombreMes(mesAnt)+' ahora</button>'+
+  '</div>';
+}
 function setCajaTab(t){window._CAJA_TAB=t;nav('caja');}
 function ultimoDiaMes(mesStr){
   var y=+mesStr.slice(0,4),m=+mesStr.slice(5,7);
@@ -5458,6 +5578,7 @@ function gAddGasto(){
   var fecha=g('ga5')?g('ga5').value:today();
   if(!concepto||!monto){alert('Completa el concepto y el monto');return;}
   if(forma==='efectivo'&&monto>efectivoDeclarado){alert('Efectivo disponible: '+money(efectivoDeclarado)+'\nNo puedes registrar un gasto de '+money(monto)+' en efectivo.');return;}
+  if(!chequeoCierrePendiente(fecha))return;
   if(forma==='efectivo')efectivoDeclarado=Math.max(0,efectivoDeclarado-monto);
   gastos.push({id:uid(),fecha:fecha,concepto:concepto,categoria:categoria||'otro',monto:monto,forma:forma,registradoPor:CUR_USER?CUR_USER.nombre:''});
   audit('Registró gasto','Caja',concepto+' · '+money(monto)+' · '+forma);
