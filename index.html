@@ -381,6 +381,36 @@ function sbStatus(ok){
   if(lbl)lbl.textContent=ok?'En línea':'Sin conexión';
 }
 
+// Rastrea peticiones a Supabase en curso (GET/POST/DELETE) para poder saber,
+// en cualquier momento, si cerrar/recargar la pestaña ahora mismo cortaría
+// un guardado a la mitad (ver doLogout y el aviso de beforeunload más abajo).
+// Antes, recargar mientras una petición seguía en vuelo la abortaba en
+// silencio: ni se subía a Supabase, ni el .catch alcanzaba a marcarla como
+// pendiente, así que el cambio se perdía sin dejar ningún rastro.
+var _opsEnVuelo=[];
+function _trackOp(p){
+  _opsEnVuelo.push(p);
+  var limpiar=function(){var i=_opsEnVuelo.indexOf(p);if(i>=0)_opsEnVuelo.splice(i,1);};
+  p.then(limpiar,limpiar);
+  return p;
+}
+function hayGuardadosEnVuelo(){return _opsEnVuelo.length>0;}
+// Espera a que terminen los guardados que ya estaban en curso (no los que
+// arranquen después) — con un tope de 4s para no dejar el cierre de sesión
+// colgado para siempre si algo nunca resuelve.
+function esperarGuardadosEnCurso(){
+  if(_opsEnVuelo.length===0)return Promise.resolve();
+  return Promise.race([
+    Promise.all(_opsEnVuelo.slice()).catch(function(){}),
+    new Promise(function(res){setTimeout(res,4000);})
+  ]);
+}
+window.addEventListener('beforeunload',function(e){
+  if(hayGuardadosEnVuelo()){
+    e.preventDefault();e.returnValue='';return '';
+  }
+});
+
 // ══════════════════════════════════════════════════════
 //  COLA DE PENDIENTES — evita perder cambios si falla la subida a Supabase
 // ══════════════════════════════════════════════════════
@@ -424,12 +454,12 @@ setInterval(reintentarPendientes,8000);
 // Guardar en Supabase (upsert) — si falla, se guarda en la cola de pendientes
 function sbSetReal(key,val){
   var body=JSON.stringify({key:key,value:val});
-  return fetch(SB_URL+'/rest/v1/bodega_data?on_conflict=key&apikey='+SB_KEY,{
+  return _trackOp(fetch(SB_URL+'/rest/v1/bodega_data?on_conflict=key&apikey='+SB_KEY,{
     method:'POST',
     headers:Object.assign({'Prefer':'resolution=merge-duplicates'},SB_HEADERS),
     body:body
   }).then(function(r){sbStatus(r.ok);return r;})
-  .catch(function(e){sbStatus(false);console.warn('sbSet error:',key,e);return null;});
+  .catch(function(e){sbStatus(false);console.warn('sbSet error:',key,e);return null;}));
 }
 function sbSet(key,val){
   return sbSetReal(key,val).then(function(r){
@@ -444,10 +474,10 @@ function sbSet(key,val){
 // cola de pendientes que sbSet — reintentarPendientes distingue por valor.
 var PENDING_DELETE='__DELETE__';
 function sbDeleteReal(key){
-  return fetch(SB_URL+'/rest/v1/bodega_data?key=eq.'+encodeURIComponent(key)+'&apikey='+SB_KEY,{
+  return _trackOp(fetch(SB_URL+'/rest/v1/bodega_data?key=eq.'+encodeURIComponent(key)+'&apikey='+SB_KEY,{
     method:'DELETE',headers:SB_HEADERS
   }).then(function(r){sbStatus(r.ok);return r;})
-  .catch(function(e){sbStatus(false);console.warn('sbDelete error:',key,e);return null;});
+  .catch(function(e){sbStatus(false);console.warn('sbDelete error:',key,e);return null;}));
 }
 function sbDelete(key){
   return sbDeleteReal(key).then(function(r){
@@ -461,11 +491,11 @@ function remove(key){removeLocal(key);return sbDelete(key);}
 
 // Leer de Supabase
 function sbGet(key){
-  return fetch(SB_URL+'/rest/v1/bodega_data?key=eq.'+encodeURIComponent(key)+'&select=value&apikey='+SB_KEY,{
+  return _trackOp(fetch(SB_URL+'/rest/v1/bodega_data?key=eq.'+encodeURIComponent(key)+'&select=value&apikey='+SB_KEY,{
     headers:SB_HEADERS
   }).then(function(r){return r.json();})
   .then(function(rows){return rows&&rows.length>0?rows[0].value:null;})
-  .catch(function(){return null;});
+  .catch(function(){return null;}));
 }
 
 // Leer todos los datos de una sola vez al arrancar
@@ -564,9 +594,15 @@ async function doLogin(){
 
 function doLogout(){
   audit('Cerró sesión','Sistema','');
-  persistAuditLog();
-  SESSION=null;saveLocal('session',null);
-  location.reload();
+  // Antes esto recargaba de inmediato sin esperar a que persistAuditLog()
+  // (una llamada de red) terminara — la recarga cancelaba esa petición a
+  // medias y la entrada de auditoría (o cualquier otro guardado que
+  // siguiera en vuelo en ese momento) se perdía sin ningún error visible.
+  // Ahora se espera a que termine lo que ya estaba en curso antes de recargar.
+  persistAuditLog().catch(function(){}).then(esperarGuardadosEnCurso).then(function(){
+    SESSION=null;saveLocal('session',null);
+    location.reload();
+  });
 }
 
 // ── AUDITORÍA ──────────────────────────────────────────
@@ -593,11 +629,11 @@ function mergeAuditPorId(local,remoto){
   return out.length>1000?out.slice(0,1000):out;
 }
 function persistAuditLog(){
-  sbGet('auditLog').then(function(remoto){
+  return sbGet('auditLog').then(function(remoto){
     auditLog=mergeAuditPorId(auditLog,remoto);
     saveLocal('auditLog',auditLog);
-    sbSet('auditLog',auditLog);
-  });
+    return sbSet('auditLog',auditLog);
+  }).catch(function(e){console.warn('persistAuditLog error:',e);});
 }
 // Igual que mergeAuditPorId pero genérico (por defecto combina por ".id"; se
 // puede pasar otro campo, como "mes" para cortes_cerrados). Se usa para TODO
@@ -606,32 +642,68 @@ function persistAuditLog(){
 // arreglos se subían tal cual, así que si dos dispositivos guardaban casi al
 // mismo tiempo, el segundo borraba en silencio los cambios del primero (ej:
 // un abono a un vale hecho desde el celular podía desaparecer sin ningún
-// error visible en ningún dispositivo). Local gana si el mismo id existe en
-// ambos lados — es lo mismo que ya pasaba antes para ese registro puntual,
-// solo que ahora ya no arrastra con él a TODOS los demás registros.
-// remotoGana=true invierte el desempate (remoto pisa a local en vez de al
-// revés) — se usa al APLICAR datos que llegan del servidor para colecciones
-// que casi nunca se editan localmente y sí pueden corregirse por fuera de la
-// app (ej. cortes_cerrados corregido directo en Supabase): si local siempre
-// ganara ahí, una copia vieja en caché de un dispositivo bloquearía para
-// siempre esa corrección aunque el servidor ya tenga el dato bueno. Al
-// GUARDAR (persistArrayMerged) siempre se deja que gane local — eso sí es la
-// acción real que se está haciendo en este dispositivo en este momento.
+// error visible en ningún dispositivo).
+//
+// Cuando el mismo id existe en ambos lados, gana el que tenga el _mod (marca
+// de tiempo de edición real, ver marcarCambiosLocales) más reciente. Antes
+// siempre ganaba "local" sin importar qué tan viejo fuera — eso hacía que un
+// dispositivo que llevaba horas/días sin sincronizar (ej. un acceso directo
+// de iPad que iOS deja suspendido en segundo plano) pudiera "resucitar" datos
+// viejos y pisar silenciosamente ediciones más recientes hechas por alguien
+// más, con solo guardar cualquier cosa. Si ninguno de los dos trae _mod
+// (datos de antes de este mecanismo, o una corrección hecha directo en
+// Supabase sin pasar por la app) se usa el desempate de siempre: remotoGana
+// invierte quién gana (se usa al APLICAR datos del servidor para colecciones
+// que casi nunca se editan localmente, ej. cortes_cerrados corregido directo
+// en Supabase); al GUARDAR (persistArrayMerged) por defecto gana local.
 function mergeArrayPorId(local,remoto,idField,remotoGana){
   idField=idField||'id';
   local=local||[];remoto=Array.isArray(remoto)?remoto:[];
-  var primero=remotoGana?local:remoto, segundo=remotoGana?remoto:local;
-  var mapa={};
-  primero.forEach(function(x){if(x&&x[idField]!==undefined)mapa[x[idField]]=x;});
-  segundo.forEach(function(x){if(x&&x[idField]!==undefined)mapa[x[idField]]=x;});
+  var mapaLocal={},mapaRemoto={};
+  local.forEach(function(x){if(x&&x[idField]!==undefined)mapaLocal[x[idField]]=x;});
+  remoto.forEach(function(x){if(x&&x[idField]!==undefined)mapaRemoto[x[idField]]=x;});
+  function elegir(id){
+    var l=mapaLocal[id],r=mapaRemoto[id];
+    if(l&&r){
+      var lm=typeof l._mod==='number'?l._mod:-1;
+      var rm=typeof r._mod==='number'?r._mod:-1;
+      if(lm>=0||rm>=0)return rm>lm?r:l;
+      return remotoGana?r:l;
+    }
+    return l||r;
+  }
   var orden=remotoGana?local.concat(remoto):remoto.concat(local);
   var vistos={};
   var out=[];
   orden.forEach(function(x){
     if(!x||x[idField]===undefined||vistos[x[idField]])return;
-    vistos[x[idField]]=true;out.push(mapa[x[idField]]);
+    vistos[x[idField]]=true;out.push(elegir(x[idField]));
   });
   return out;
+}
+// Antes de fusionar con lo remoto, marca con _mod=ahora los registros que
+// este dispositivo de verdad acaba de crear/editar — comparándolos contra la
+// última copia que ESTE MISMO dispositivo guardó (bmp_<key>). Los que no
+// cambiaron desde entonces conservan su _mod anterior (o ninguno, si son de
+// antes de este mecanismo), en vez de recibir una marca de tiempo fresca solo
+// por venir en el arreglo local. Así, un dispositivo desactualizado no puede
+// hacer pasar datos viejos que nunca tocó como si fueran la edición más
+// reciente — mergeArrayPorId los comparará por su _mod real.
+function _sinMod(x){
+  if(!x||typeof x!=='object')return x;
+  var c={};for(var k in x)if(k!=='_mod')c[k]=x[k];
+  return c;
+}
+function marcarCambiosLocales(key,arr,idField){
+  idField=idField||'id';
+  var previo=loadLocal(key,[]);
+  var mapaPrevio={};
+  (previo||[]).forEach(function(x){if(x&&x[idField]!==undefined)mapaPrevio[x[idField]]=x;});
+  (arr||[]).forEach(function(x){
+    if(!x||x[idField]===undefined)return;
+    var antes=mapaPrevio[x[idField]];
+    if(!antes||JSON.stringify(_sinMod(antes))!==JSON.stringify(_sinMod(x)))x._mod=Date.now();
+  });
 }
 // Encadena los guardados de una misma key para que no se disparen dos
 // fetch-merge-write en paralelo sobre el mismo arreglo (si el usuario hace
@@ -640,8 +712,10 @@ var _saveChain={};
 function persistArrayMerged(key,getLocal,setLocal,idField){
   var previa=_saveChain[key]||Promise.resolve();
   var corrida=previa.catch(function(){}).then(function(){
+    var localArr=getLocal();
+    marcarCambiosLocales(key,localArr,idField);
     return sbGet(key).then(function(remoto){
-      var merged=mergeArrayPorId(getLocal(),remoto,idField);
+      var merged=mergeArrayPorId(localArr,remoto,idField);
       setLocal(merged);
       saveLocal(key,merged);
       return sbSetReal(key,merged);
