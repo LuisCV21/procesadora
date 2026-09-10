@@ -841,18 +841,40 @@ function raizNombre(s){
   PALABRAS_TALLA.forEach(function(w){n=n.replace(new RegExp('(^|\\s)'+w+'(\\s|$)','g'),' ');});
   return n.replace(/\s+/g,' ').trim();
 }
-function kProducto(id){return 'producto_'+id;}
-function kProveedor(n){return 'proveedor_'+n;}
-function kCliente(n){return 'cliente_'+n;}
-function kProcTipo(n){return 'proctipo_'+n;}
-function guardarProducto(p){save(kProducto(p.id),p);}
-function eliminarProducto(id){remove(kProducto(id));}
+// ══════════════════════════════════════════════════════
+//  "UNA FILA POR REGISTRO" — mecanismo genérico
+// ══════════════════════════════════════════════════════
+// Generalización del patrón que ya usaba el catálogo (productos/proveedores/
+// clientes/tipos de proceso): cada registro de una colección compartida vive
+// en su PROPIA fila de bodega_data (key = "<coleccion>_<id>"), en vez de que
+// toda la colección viva como un solo blob JSON. Así, guardar/editar/borrar
+// UN registro nunca toca ni re-sube los demás — dos dispositivos editando
+// registros distintos jamás se pisan entre sí, sin importar qué tan
+// desactualizada esté la copia local de cada uno (ver TODO.md).
+function kFila(coleccion,id){return coleccion+'_'+id;}
+function guardarFila(coleccion,obj,idField){idField=idField||'id';save(kFila(coleccion,obj[idField]),obj);}
+function eliminarFila(coleccion,id){remove(kFila(coleccion,id));}
+function guardarFilas(coleccion,objs,idField){(objs||[]).forEach(function(o){guardarFila(coleccion,o,idField);});}
+function eliminarFilas(coleccion,ids){(ids||[]).forEach(function(id){eliminarFila(coleccion,id);});}
+// Agrupa, a partir de un mapa plano {key:value} (ej. todo lo que devuelve
+// sbGetAll), las filas cuya key empieza con el prefijo dado.
+function reconstruirColeccionDesdeMapa(data,prefijo){
+  var out=[],tiene=false;
+  Object.keys(data).forEach(function(k){if(k.indexOf(prefijo)===0){out.push(data[k]);tiene=true;}});
+  return {tiene:tiene,items:out};
+}
+function kProducto(id){return kFila('producto',id);}
+function kProveedor(n){return kFila('proveedor',n);}
+function kCliente(n){return kFila('cliente',n);}
+function kProcTipo(n){return kFila('proctipo',n);}
+function guardarProducto(p){guardarFila('producto',p,'id');}
+function eliminarProducto(id){eliminarFila('producto',id);}
 function guardarProveedor(n){save(kProveedor(n),n);}
-function eliminarProveedor(n){remove(kProveedor(n));}
+function eliminarProveedor(n){eliminarFila('proveedor',n);}
 function guardarCliente(n){save(kCliente(n),n);}
-function eliminarCliente(n){remove(kCliente(n));}
+function eliminarCliente(n){eliminarFila('cliente',n);}
 function guardarProcTipo(n){save(kProcTipo(n),PROC_REGLAS[n]||{entradas:[],salidas:[]});}
-function eliminarProcTipo(n){remove(kProcTipo(n));}
+function eliminarProcTipo(n){eliminarFila('proctipo',n);}
 
 // Reconstruye PRODUCTOS/PROVEEDORES/CLIENTES/PROC_TIPOS/PROC_REGLAS a partir
 // de las filas individuales bmp_producto_*, bmp_proveedor_*, etc. en
@@ -1143,25 +1165,13 @@ function puedeEditarPartidasNota(n){return ROL==='admin'||(ROL==='gerente'&&n.es
 function puedeCorregirNota(n){return ROL==='admin'&&(n.est==='entregada'||n.est==='pagada');}
 
 function persist(){
-  // El catálogo (productos/proveedores/clientes/tipos de proceso) NO se guarda
-  // aquí — cada item se sube a su propia fila en cuanto se agrega/edita/borra
-  // (ver guardarProducto/guardarProveedor/guardarCliente/guardarProcTipo y sus
-  // pares eliminarX), así que nunca hay un array completo viejo que pisar.
-  //
-  // camara/bodega/pedidos/notas/vales/gastos/compensaciones/procesos SÍ son un
-  // solo blob compartido entre dispositivos — se guardan con persistArrayMerged
-  // (fetch + combinar por id + subir) en vez de save() directo, para que un
-  // dispositivo con una copia vieja en memoria no borre en silencio lo que
-  // otro dispositivo acababa de guardar (ver mergeArrayPorId más arriba).
-  persistArrayMerged('camara',function(){return camara;},function(v){camara=v;});
-  persistArrayMerged('procesos',function(){return procesos;},function(v){procesos=v;});
-  persistArrayMerged('pedidos',function(){return pedidos;},function(v){pedidos=v;});
-  persistArrayMerged('notas',function(){return notas;},function(v){notas=v;});
-  persistArrayMerged('bodega',function(){return bodega;},function(v){bodega=v;});
-  persistArrayMerged('compensaciones',function(){return compensaciones;},function(v){compensaciones=v;});
-  persistArrayMerged('vales',function(){return vales;},function(v){vales=v;});
-  persistArrayMerged('gastos',function(){return gastos;},function(v){gastos=v;});
-  persistArrayMerged('cortes_cerrados',function(){return cortesCerrados;},function(v){cortesCerrados=v;},'mes');
+  // Ninguna colección compartida se guarda como blob completo aquí — cada
+  // item (catálogo, compensaciones, gastos, vales, cortes_cerrados, notas,
+  // pedidos, cámara, bodega, procesos) se sube a su propia fila en cuanto se
+  // agrega/edita/borra (ver guardarProducto/guardarFila y sus pares
+  // eliminarX/eliminarFila), así que nunca hay un array completo viejo que
+  // pisar — ver TODO.md para el historial de esta migración. Lo que queda
+  // aquí son solo valores sueltos (escalares) y el log de auditoría.
   save('next_id',NEXT_ID);save('next_folio',nextFolio);
   save('efectivo_declarado',efectivoDeclarado);
   save('mov_tarjeta',movTransferencias);save('saldo_tarjeta',saldoTransferencias);
@@ -1432,7 +1442,7 @@ function guardarPrecioInv(i){
   if(v<=0){alert('Ingresa un precio válido');return;}
   var arr=item.origen==='camara'?camara:bodega;
   var lote=arr.find(function(x){return x.id===item.id;});
-  if(lote)lote.precio=v;
+  if(lote){lote.precio=v;guardarFila(item.origen==='camara'?'lotecam':'lotebod',lote,'id');}
   audit('Asignó precio de venta','Configuracion',item.esp+' · '+money(v)+' · Lote '+item.lote);
   persist();nav('precios');
 }
@@ -1722,7 +1732,7 @@ function actualizarCaducidades(){
     item.cad=d.toISOString().slice(0,10);
   });
   audit('Actualizó caducidades masivamente','Camara','Todos los lotes → +3 meses desde fecha de entrada');
-  persist();nav('camara');
+  guardarFilas('lotecam',camara,'id');persist();nav('camara');
 }
 function bajaLote(id,esGrupo){
   if(esGrupo){
@@ -1730,9 +1740,10 @@ function bajaLote(id,esGrupo){
     var esp=id;
     confirmarEliminar('¿Dar de baja TODOS los lotes de '+esp+'?',function(){
       var kgTotal=camara.filter(function(x){return x.esp===esp;}).reduce(function(a,x){return a+x.kg;},0);
+      var idsBaja=camara.filter(function(x){return x.esp===esp;}).map(function(x){return x.id;});
       audit('Baja de cámara (grupo completo)','Camara',esp+' · '+kgTotal.toFixed(2)+' kg (todos los lotes)');
       camara=camara.filter(function(x){return x.esp!==esp;});
-      persist();nav('camara');
+      eliminarFilas('lotecam',idsBaja);persist();nav('camara');
     },{palabra:'BORRAR'});
   } else {
     confirmarEliminar('¿Dar de baja este lote?',function(){
@@ -1740,7 +1751,7 @@ function bajaLote(id,esGrupo){
       if(l)audit('Baja de cámara','Camara',l.esp+' · Lote '+l.lote+' · '+l.kg+' '+(l.unidad||'kg'));
       ACC_OPEN['cam-'+id]=false;
       camara=camara.filter(function(x){return x.id!==id;});
-      persist();nav('camara');
+      eliminarFila('lotecam',id);persist();nav('camara');
     });
   }
 }
@@ -1811,13 +1822,14 @@ function saveEditLote(id){
   }
   ACC_OPEN['cam-'+id]=false;
   if(l.unidad!==unidadAnt)sincronizarUnidadProceso(espAnt,loteAnt,l.unidad);
-  persist();cm();nav('camara');
+  guardarFila('lotecam',l,'id');persist();cm();nav('camara');
 }
 // Cuando se corrige la unidad de un lote a mano (ej. de kg a pz porque el proceso
 // que lo generó se registró antes del fix que respeta la unidad real del producto),
 // refleja el mismo cambio en el registro de Procesos del que salió ese lote, para
 // que Cámara y el historial de Procesos no queden desincronizados.
 function sincronizarUnidadProceso(esp,lote,unidad){
+  var tocados=[];
   procesos.forEach(function(p){
     if(p.lote!==lote||!p.salidas)return;
     var tocado=false;
@@ -1831,7 +1843,9 @@ function sincronizarUnidadProceso(esp,lote,unidad){
       return a+s.kg;
     },0);
     p.merma=parseFloat((p.kgE-kgEquivTotal).toFixed(3));
+    tocados.push(p);
   });
+  guardarFilas('proceso',tocados,'id');
 }
 function moverLote(id,destino){
   var origenArr=destino==='bodega'?camara:bodega;
@@ -1849,6 +1863,10 @@ function moverLote(id,destino){
     camara.push(l);
   }
   audit('Movió lote de '+(destino==='bodega'?'cámara a bodega':'bodega a cámara'),destino==='bodega'?'Bodega':'Camara',l.esp+' · Lote '+l.lote+' · '+l.kg+' '+(l.unidad||'kg'));
+  // Mismo id, cambia de colección — se borra la fila del origen y se crea en
+  // el destino, en vez de subir los arreglos completos de camara Y bodega.
+  eliminarFila(destino==='bodega'?'lotecam':'lotebod',id);
+  guardarFila(destino==='bodega'?'lotebod':'lotecam',l,'id');
   persist();cm();nav(destino);
 }
 
@@ -1894,18 +1912,20 @@ function gEntrada(){
   // — esta entrada no tenía campo de unidad y todo quedaba guardado como kg.
   var prodCat=PRODUCTOS.find(function(x){return x.n===e;});
   var unidadReal=(prodCat&&prodCat.u)||'kg';
-  camara.push({id:id,esp:e,lote:lote,kg:k,unidad:unidadReal,ent:today(),cad:cad||fechaMas3Meses(),est:'ok',costo:c,precio:precio});
+  var loteNuevo={id:id,esp:e,lote:lote,kg:k,unidad:unidadReal,ent:today(),cad:cad||fechaMas3Meses(),est:'ok',costo:c,precio:precio};
+  camara.push(loteNuevo);
   // Crear pedido/registro de compra
   nextPedidoNum++;
   var pedId=uid();
   var total=k*c;
-  pedidos.push({id:pedId,prov:pr,partidas:[{esp:e,kg:k,costo:c,unidad:unidadReal,destino:'camara',lote:lote}],
+  var pedNuevo={id:pedId,prov:pr,partidas:[{esp:e,kg:k,costo:c,unidad:unidadReal,destino:'camara',lote:lote}],
     fecha:today(),condiciones:cond,est:'recibido',total:total,
     pagado:cond==='Contado',montoPagado:cond==='Contado'?total:0,
-    numPedido:numPedido(nextPedidoNum-1)});
+    numPedido:numPedido(nextPedidoNum-1)};
+  pedidos.push(pedNuevo);
   if(cond==='Contado')efectivoDeclarado=Math.max(0,efectivoDeclarado-total);
   audit('Entrada directa cámara','Camara',e+' · '+k+'kg · Lote:'+lote+' · Prov:'+pr+(cond==='Contado'?' · Pagado $'+money(total):''));
-  persist();cm();nav('camara');
+  guardarFila('lotecam',loteNuevo,'id');guardarFila('pedido',pedNuevo,'id');persist();cm();nav('camara');
 }
 
 function mTempLog(){
@@ -2331,6 +2351,7 @@ function gProceso(){
   loteOrig.kg=restarKg(loteOrig.kg,kgE);
 
   // Crear/actualizar lotes de salida — mismo lote que el original
+  var lotesSalidaTocados=[];
   salidas.forEach(function(s){
     // Buscar si ya existe un lote de ese producto con el mismo lote
     var existing=camara.find(function(x){return x.esp===s.esp&&x.lote===loteOrig.lote;});
@@ -2348,16 +2369,23 @@ function gProceso(){
       existing.kg=parseFloat((existing.kg+s.kg).toFixed(3));
       if(!existing.precio&&s.precio)existing.precio=s.precio;
       if(!existing.unidad&&s.unidad)existing.unidad=s.unidad;
+      lotesSalidaTocados.push(existing);
     } else {
-      camara.push({id:uid(),esp:s.esp,lote:loteOrig.lote,kg:s.kg,unidad:s.unidad,
-        ent:f,cad:loteOrig.cad,est:'ok',costo:s.costoPorUnidad,precio:s.precio,pesoProm:s.pesoProm});
+      var loteSalidaNuevo={id:uid(),esp:s.esp,lote:loteOrig.lote,kg:s.kg,unidad:s.unidad,
+        ent:f,cad:loteOrig.cad,est:'ok',costo:s.costoPorUnidad,precio:s.precio,pesoProm:s.pesoProm};
+      camara.push(loteSalidaNuevo);
+      lotesSalidaTocados.push(loteSalidaNuevo);
     }
   });
 
-  procesos.push({id:uid(),fecha:f,tipo:t,esp:loteOrig.esp,lote:loteOrig.lote,loteId:loteOrig.id,
+  var procNuevo={id:uid(),fecha:f,tipo:t,esp:loteOrig.esp,lote:loteOrig.lote,loteId:loteOrig.id,
     kgE:kgE,kgS:kgSal,merma:merma,estimado:estimado,notas:notas_,est:'completado',
-    salidas:salidas});
+    salidas:salidas};
+  procesos.push(procNuevo);
   _procSalidas=1;
+  guardarFila('lotecam',loteOrig,'id');
+  guardarFilas('lotecam',lotesSalidaTocados,'id');
+  guardarFila('proceso',procNuevo,'id');
   persist();cm();nav('procesos');
 }
 
@@ -2366,7 +2394,7 @@ function revisarMermaAlta(id){
   if(!p)return;
   p.revisadoMerma=true;
   audit('Revisó alerta de merma alta','Procesos',p.esp+' · Lote '+p.lote+' · '+p.merma.toFixed(2)+' kg');
-  persist();nav('dashboard');
+  guardarFila('proceso',p,'id');persist();nav('dashboard');
 }
 function elimProc(id){
   var p=procesos.find(function(x){return x.id===id;});
@@ -2374,7 +2402,7 @@ function elimProc(id){
   confirmarEliminar('¿Eliminar este registro de proceso? Se revertirá el movimiento de inventario: regresa la entrada y quita lo que se generó como salida.',function(){
     revertirProceso(p);
     procesos=procesos.filter(function(x){return x.id!==id;});
-    persist();nav('procesos');
+    eliminarFila('proceso',id);persist();nav('procesos');
   });
 }
 
@@ -2388,13 +2416,28 @@ function buscarLoteProceso(id,esp,lote){
 // Deshace el efecto en inventario de un proceso: regresa los kg al lote de
 // entrada y quita de cámara/bodega lo que ese proceso generó como salida.
 // Si algo ya no cuadra (se vendió/movió por separado), avisa en vez de fallar.
+// Colección (prefijo de fila) a la que pertenece un lote ya encontrado en
+// camara o bodega — necesario para guardar/eliminar la fila correcta tras
+// mutarlo, ya que buscarLoteProceso busca indistintamente en ambas.
+function coleccionDeLote(lote){return camara.indexOf(lote)>=0?'lotecam':'lotebod';}
+// Guarda un grupo de lotes tocados (mezcla de cámara y bodega) en sus filas
+// correspondientes — usado por ventas/notas, que pueden descontar de
+// cualquiera de las dos colecciones según de dónde vino cada lote.
+function guardarFilasLotes(lotes){
+  var cam=[],bod=[];
+  (lotes||[]).forEach(function(l){(coleccionDeLote(l)==='lotecam'?cam:bod).push(l);});
+  guardarFilas('lotecam',cam,'id');guardarFilas('lotebod',bod,'id');
+}
 function revertirProceso(p){
   var avisos=[];
   var loteEntrada=buscarLoteProceso(p.loteId,p.esp,p.lote);
   if(loteEntrada){
     loteEntrada.kg=parseFloat((loteEntrada.kg+p.kgE).toFixed(3));
+    guardarFila(coleccionDeLote(loteEntrada),loteEntrada,'id');
   } else {
-    camara.push({id:uid(),esp:p.esp,lote:p.lote,kg:p.kgE,unidad:'kg',ent:p.fecha,cad:null,est:'ok',costo:0});
+    var loteRecreado={id:uid(),esp:p.esp,lote:p.lote,kg:p.kgE,unidad:'kg',ent:p.fecha,cad:null,est:'ok',costo:0};
+    camara.push(loteRecreado);
+    guardarFila('lotecam',loteRecreado,'id');
     avisos.push('No se encontró el lote de entrada original ('+p.esp+' · Lote '+p.lote+'); se creó uno nuevo en Cámara — revisa costo y caducidad.');
   }
   (p.salidas||[]).forEach(function(s){
@@ -2404,6 +2447,7 @@ function revertirProceso(p){
         avisos.push('"'+s.esp+'" tenía menos existencia ('+loteSalida.kg.toFixed(2)+') de la que generó este proceso ('+s.kg.toFixed(2)+') — parte ya se vendió o movió. Se dejó en 0.');
       }
       loteSalida.kg=restarKg(loteSalida.kg,s.kg);
+      guardarFila(coleccionDeLote(loteSalida),loteSalida,'id');
     } else {
       avisos.push('No se encontró el lote de salida "'+s.esp+'" (Lote '+p.lote+') para quitarlo — puede que ya lo hayan eliminado por separado.');
     }
@@ -2449,7 +2493,7 @@ function gEditProceso(id){
   }
   p.merma=parseFloat((p.kgE-kgEquivTotal).toFixed(3));
   p.estimado=p.salidas.some(function(s){return (s.unidad||'kg')!=='kg';});
-  persist();cm();nav('procesos');
+  guardarFila('proceso',p,'id');persist();cm();nav('procesos');
 }
 // ══════════════════════════════════════════════════════
 //  PEDIDOS
@@ -2700,7 +2744,7 @@ function gEditarPedido(id){
   p.partidas=parts;
   p.total=parts.reduce(function(a,pt){return a+pt.kg*pt.costo;},0);
   _pedParts=1;
-  persist();cm();nav('pedidos');
+  guardarFila('pedido',p,'id');persist();cm();nav('pedidos');
 }
 
 function recibirPedido(id){
@@ -2767,10 +2811,13 @@ function gRecibirPedido(id){
   var p=pedidos.find(function(x){return x.id===id;});
   if(!p){delete _recibiendoIds[id];return;}
   if(p.est==='recibido'){delete _recibiendoIds[id];alert('Este pedido ya fue recibido.');cm();nav('pedidos');return;}
-  sbGet('pedidos').then(function(remoto){
-    var pr=Array.isArray(remoto)&&remoto.find(function(x){return x.id===id;});
+  // Antes esto traía el blob completo de "pedidos" solo para revisar UN
+  // registro — ahora que pedidos vive como una fila por id, se pide
+  // directamente esa fila (pedido_<id>), mucho más liviano y siempre al día.
+  sbGet('pedido_'+id).then(function(pr){
     if(pr&&pr.est==='recibido'){
-      pedidos.length=0;Array.prototype.push.apply(pedidos,remoto);saveLocal('pedidos',remoto);
+      var idx=pedidos.findIndex(function(x){return x.id===id;});
+      if(idx>=0)pedidos[idx]=pr;else pedidos.push(pr);
       delete _recibiendoIds[id];
       alert('Este pedido ya fue recibido por otro usuario justo ahora. Se actualizó la lista — revísalo en Pedidos.');
       cm();nav('pedidos');
@@ -2795,6 +2842,7 @@ function _gRecibirPedidoEjecutar(id){
   var p=pedidos.find(function(x){return x.id===id;});if(!p)return;
   var loteAuto=p.numPedido||numPedido(nextPedidoNum);
   var parts=p.partidas||[{esp:p.esp,kg:p.kg,costo:p.costo,destino:'camara'}];
+  var lotesRecibidos=[];
   parts.forEach(function(pt,i){
     var kgReal=g('rkr'+i)?parseFloat(g('rkr'+i).value)||parseFloat(pt.kg)||0:parseFloat(pt.kg)||0;
     var costoAjust=g('rca'+i)?parseFloat(g('rca'+i).value)||parseFloat(pt.costo)||0:parseFloat(pt.costo)||0;
@@ -2813,6 +2861,7 @@ function _gRecibirPedidoEjecutar(id){
       costo:costoAjust,precio:pt.precioVenta||0};
     pt.kgReal=kgReal;pt.costoAjust=costoAjust;pt.lote=loteAuto;pt.unidad=unidadReal;
     if(dest==='bodega'){bodega.push(item);}else{camara.push(item);}
+    lotesRecibidos.push({item:item,dest:dest});
   });
   // Recalcular total con kilos reales
   p.total=parts.reduce(function(a,pt){return a+(pt.kgReal||pt.kg)*(pt.costoAjust||pt.costo||0);},0);
@@ -2837,7 +2886,8 @@ function _gRecibirPedidoEjecutar(id){
       p.abonos.push({monto:p.total,forma:'efectivo',fecha:today(),hora:horaAhora,nota:'Pago de contado al recibir'});
     }
   }
-  persist();cm();nav('pedidos');
+  lotesRecibidos.forEach(function(x){guardarFila(x.dest==='bodega'?'lotebod':'lotecam',x.item,'id');});
+  guardarFila('pedido',p,'id');persist();cm();nav('pedidos');
 }
 
 function mRevertirPedido(id){
@@ -2869,8 +2919,11 @@ function revertirPedido(id){
   var loteRef=p.numPedido;
   // Quitar lotes de cámara y bodega creados por este pedido
   if(loteRef){
+    var idsCam=camara.filter(function(i){return i.lote===loteRef;}).map(function(i){return i.id;});
+    var idsBod=bodega.filter(function(i){return i.lote===loteRef;}).map(function(i){return i.id;});
     camara=camara.filter(function(i){return i.lote!==loteRef;});
     bodega=bodega.filter(function(i){return i.lote!==loteRef;});
+    eliminarFilas('lotecam',idsCam);eliminarFilas('lotebod',idsBod);
   }
   // Restaurar efectivo de abonos en efectivo
   var abEfect=(p.abonos||[]).filter(function(a){return a.forma==='efectivo';}).reduce(function(s,a){return s+a.monto;},0);
@@ -2895,11 +2948,12 @@ function revertirPedido(id){
     var ab=n.abonos.reduce(function(a,b){return a+b.monto;},0);
     n.pagada=ab>=n.total;
     n.est=n.pagada?'pagada':'entregada';
+    guardarFila('nota',n,'id');
   });
   // Resetear pedido a pendiente
   p.est='pendiente';p.pagado=false;p.montoPagado=0;p.abonos=[];
   audit('Revirtió pedido (corrección)','Pedidos',(p.numPedido||'#'+p.id)+' · '+p.prov+(huboCompensacion?' · también se deshizo la compensación aplicada a notas de sucursal':''));
-  persist();cm();nav('pedidos');
+  guardarFila('pedido',p,'id');persist();cm();nav('pedidos');
   alert('Pedido '+(p.numPedido||'')+ ' revertido. Ahora puedes editarlo y volver a registrar la recepción.'+(huboCompensacion?'\n\nTambién se deshizo la compensación de sucursal que se había aplicado — ese saldo vuelve a estar disponible.':''));
 }
 
@@ -2986,8 +3040,9 @@ function aplicarSaldoCompPedido(pedidoId,sucursal,saldoDisp,pendiente){
     var nuevoAb=n.abonos.reduce(function(a,b){return a+b.monto;},0);
     if(nuevoAb>=n.total){n.pagada=true;n.est='pagada';}
     restante-=aplicarN;
+    guardarFila('nota',n,'id');
   }
-  persist();cm();nav('pedidos');
+  guardarFila('pedido',p,'id');persist();cm();nav('pedidos');
 }
 
 // Candado síncrono contra doble clic — mismo patrón que _recibiendoIds en
@@ -3022,7 +3077,7 @@ function gPagarPedido(id){
     movTransferencias.push({id:uid(),tipo:'cargo',concepto:'Pago a '+p.prov,monto:monto,fecha:fecha,hora:hora,ref:(p.numPedido||'Pedido')+(nota?' · '+nota:'')});
   }
   audit('Pagó pedido','Pedidos',(p.numPedido||'#'+p.id)+' · '+p.prov+' · '+money(monto)+' ('+forma+')');
-  persist();
+  guardarFila('pedido',p,'id');persist();
   delete _pagandoPedidoIds[id];
   // Preguntar si desea imprimir comprobante
   if(confirm('✅ Pago registrado correctamente.\n\n¿Deseas imprimir el comprobante?')){
@@ -3066,7 +3121,7 @@ function elimP(id){
   var p=pedidos.find(function(x){return x.id===id;});
   confirmarEliminar('¿Eliminar este pedido?',function(){
     if(p)audit('Eliminó pedido','Pedidos',(p.numPedido||'#'+p.id)+' · '+p.prov+' · '+money(p.total||0));
-    pedidos=pedidos.filter(function(x){return x.id!==id;});persist();nav('pedidos');
+    pedidos=pedidos.filter(function(x){return x.id!==id;});eliminarFila('pedido',id);persist();nav('pedidos');
   },{detalle:p?(p.numPedido||'#'+p.id)+' · '+p.prov+' · '+money(p.total||0):''});
 }
 
@@ -3244,8 +3299,9 @@ function gPedido(){
   var total=parts.reduce(function(a,pt){return a+pt.kg*pt.costo;},0);
   var num=nextPedidoNum++;
   _pedParts=1;
-  pedidos.push({id:uid(),numPedido:numPedido(num),prov:prov,partidas:parts,fecha:fecha,condiciones:cond,formaPago:formaPago,est:'pendiente',total:total,pagado:false});
-  persist();cm();nav('pedidos');
+  var pedNuevo={id:uid(),numPedido:numPedido(num),prov:prov,partidas:parts,fecha:fecha,condiciones:cond,formaPago:formaPago,est:'pendiente',total:total,pagado:false};
+  pedidos.push(pedNuevo);
+  guardarFila('pedido',pedNuevo,'id');persist();cm();nav('pedidos');
 }
 
 // ══════════════════════════════════════════════════════
@@ -3379,7 +3435,7 @@ function gEnviarNota(id){
   if(notaAdj)n.notaAjuste=notaAdj;
   if(n.condiciones==='Contado'){n.pagada=true;efectivoDeclarado+=n.total;}
   audit('Marcó nota como enviada','Notas','Nota #'+n.folio+' · '+n.cliente+' · '+money(n.total));
-  persist();cm();nav('notas');
+  guardarFila('nota',n,'id');persist();cm();nav('notas');
 }
 
 // Corregir una nota que se envió con datos equivocados (ej. se marcó "Contado"
@@ -3420,7 +3476,7 @@ function revertirNota(id){
   // como si nunca hubiera salido — quedaría inventario fantasma que no existe
   // en la realidad. Esta bandera se lo recuerda aunque n.est ya diga "pendiente".
   n.mercanciaEntregada=true;
-  persist();cm();nav('notas');
+  guardarFila('nota',n,'id');persist();cm();nav('notas');
 }
 
 function saldoCompSucursal(sucursal){
@@ -3504,7 +3560,7 @@ function gAbonarNota(id){
   var totalAbonado=n.abonos.reduce(function(a,b){return a+b.monto;},0);
   if(totalAbonado>=n.total){n.pagada=true;n.est='pagada';}
   if(forma==='efectivo'){efectivoDeclarado=efectivoDeclarado+monto;}
-  persist();cm();nav('notas');
+  guardarFila('nota',n,'id');persist();cm();nav('notas');
 }
 
 // Cuánto efectivo real ha entrado por esta nota — mismo criterio que usa
@@ -3521,10 +3577,12 @@ function elimNota(id){
     if(n){
       audit('Eliminó nota','Notas','Nota #'+n.folio+' · '+n.cliente+' · '+money(n.total));
       // Al eliminar se debe devolver el stock que esta nota había descontado de cámara/bodega.
+      var lotesDevueltos=[];
       (n.partidas||[]).forEach(function(p){
         var lote=buscarLoteVenta(p.loteId);
-        if(lote)lote.kg=parseFloat((lote.kg+p.cant).toFixed(3));
+        if(lote){lote.kg=parseFloat((lote.kg+p.cant).toFixed(3));lotesDevueltos.push(lote);}
       });
+      guardarFilasLotes(lotesDevueltos);
       // Y el efectivo que esta nota ya había sumado (abonos en efectivo o venta de
       // contado ya entregada) — si no, el efectivo real queda con dinero de una
       // nota que ya no existe, sin forma de explicarlo en Movimientos.
@@ -3532,7 +3590,7 @@ function elimNota(id){
       if(efNota>0)efectivoDeclarado=Math.max(0,efectivoDeclarado-efNota);
     }
     notas=notas.filter(function(x){return x.id!==id;});
-    persist();nav('notas');
+    eliminarFila('nota',id);persist();nav('notas');
   },{palabra:'ELIMINAR',detalle:n?'Nota #'+n.folio+' · '+n.cliente+' · '+money(n.total):''});
 }
 
@@ -4045,17 +4103,20 @@ function gNota(){
   if(!chequeoCierrePendiente(nuevaNota.fecha))return;
   var tot=parts.reduce(function(a,p){return a+p.importe;},0);
   var cond=nuevaNota.condiciones||'Crédito';
+  var lotesVentaTocados=[];
   parts.forEach(function(p){
     var lote=buscarLoteVenta(p.loteId);
-    if(lote)lote.kg=restarKg(lote.kg,p.cant);
+    if(lote){lote.kg=restarKg(lote.kg,p.cant);lotesVentaTocados.push(lote);}
   });
   var folioNuevo=nextFolio;
   nextFolio++;
-  notas.push({id:uid(),folio:folioNuevo,fecha:nuevaNota.fecha,cliente:nuevaNota.cliente,
+  var notaNueva={id:uid(),folio:folioNuevo,fecha:nuevaNota.fecha,cliente:nuevaNota.cliente,
     domicilio:nuevaNota.domicilio,ciudad:nuevaNota.ciudad,tel:nuevaNota.tel,condiciones:cond,
-    partidas:parts,total:tot,est:'pendiente',pagada:cond==='Contado'});
+    partidas:parts,total:tot,est:'pendiente',pagada:cond==='Contado'};
+  notas.push(notaNueva);
   audit('Creó nota de remisión','Notas','Nota #'+folioNuevo+' · '+nuevaNota.cliente+' · '+money(tot));
-  persist();initNN();nav('notas');
+  guardarFilasLotes(lotesVentaTocados);
+  guardarFila('nota',notaNueva,'id');persist();initNN();nav('notas');
 }
 
 // Edición de partidas de una nota ya creada (ej. Jannet capturó 15 kg pero
@@ -4200,15 +4261,17 @@ function gEditarPartidas(){
   // "Corregir nota"/revertirNota): ahí el stock ya no existe físicamente para
   // devolverlo, así que esta edición queda como corrección de papel (precio,
   // condiciones, producto anotado) sin tocar cámara/bodega en absoluto.
+  var lotesEpTocados=[];
   if(!n.mercanciaEntregada){
     n.partidas.forEach(function(p){
       var lote=buscarLoteVenta(p.loteId);
-      if(lote)lote.kg=parseFloat((lote.kg+p.cant).toFixed(3));
+      if(lote){lote.kg=parseFloat((lote.kg+p.cant).toFixed(3));lotesEpTocados.push(lote);}
     });
     nuevas.forEach(function(p){
       var lote=buscarLoteVenta(p.loteId);
-      if(lote)lote.kg=restarKg(lote.kg,p.cant);
+      if(lote){lote.kg=restarKg(lote.kg,p.cant);lotesEpTocados.push(lote);}
     });
+    guardarFilasLotes(lotesEpTocados);
   }
 
   var totalAnterior=n.total;
@@ -4228,7 +4291,7 @@ function gEditarPartidas(){
   }
   audit('Editó partidas de nota','Notas','Nota #'+n.folio+' · '+n.cliente+' · Total '+money(totalAnterior)+' → '+money(nuevoTotal));
   EDITANDO_NOTA=null;
-  persist();nav('notas');
+  guardarFila('nota',n,'id');persist();nav('notas');
 }
 
 // ══════════════════════════════════════════════════════
@@ -4459,10 +4522,11 @@ function gEntradaBodega(){
   if(!e||!k){alert('Completa los campos requeridos');return;}
   var id=uid();
   var bLote=g('b7').value.trim()||('L-'+id),bUnit=g('b4').value;
-  bodega.push({id:id,esp:e,lote:bLote,kg:k,unidad:bUnit,
-    costo:parseFloat(g('b5').value)||0,precio:esSoloProceso(e)?0:(parseFloat(g('b6').value)||0),ent:g('b8').value,prov:pr});
+  var loteNuevo={id:id,esp:e,lote:bLote,kg:k,unidad:bUnit,
+    costo:parseFloat(g('b5').value)||0,precio:esSoloProceso(e)?0:(parseFloat(g('b6').value)||0),ent:g('b8').value,prov:pr};
+  bodega.push(loteNuevo);
   audit('Entrada directa bodega','Bodega',e+' · '+k+' '+bUnit+' · Lote:'+bLote+(pr?' · Prov:'+pr:''));
-  persist();cm();nav('bodega');
+  guardarFila('lotebod',loteNuevo,'id');persist();cm();nav('bodega');
 }
 function mEditBodega(id){
   var l=bodega.find(function(x){return x.id===id;});if(!l)return;
@@ -4494,14 +4558,14 @@ function gEditBodega(id){
   }
   ACC_OPEN['bod-'+id]=false;
   if(l.unidad!==unidadAnt)sincronizarUnidadProceso(espAnt,loteAnt,l.unidad);
-  persist();cm();nav('bodega');
+  guardarFila('lotebod',l,'id');persist();cm();nav('bodega');
 }
 function bajaBodega(id){
   var l=bodega.find(function(x){return x.id===id;});
   confirmarEliminar('¿Dar de baja este producto de bodega?',function(){
     if(l)audit('Baja de bodega','Bodega',l.esp+' · Lote '+l.lote+' · '+l.kg+' '+l.unidad);
     ACC_OPEN['bod-'+id]=false;
-    bodega=bodega.filter(function(x){return x.id!==id;});persist();nav('bodega');
+    bodega=bodega.filter(function(x){return x.id!==id;});eliminarFila('lotebod',id);persist();nav('bodega');
   },{detalle:l?l.esp+' · Lote '+l.lote+' · '+l.kg+' '+l.unidad:''});
 }
 
@@ -5281,7 +5345,10 @@ function cerrarPeriodo(){
   cortesCerrados=cortesCerrados.filter(function(c){return c.mes!==mes;});
   cortesCerrados.push(d);
   audit('Cerró periodo de caja','Caja',nombreMes(mes)+' · utilidad acumulada '+money(d.utilidadAcumulada));
-  save('cortes_cerrados',cortesCerrados);
+  // guardarFila hace upsert por key ("corte_"+mes) — reemplaza automáticamente
+  // el corte anterior de este mismo mes, sin necesidad de subir el arreglo
+  // completo de cortes_cerrados.
+  guardarFila('corte',d,'mes');
   nav('caja');
 }
 // Saca del efectivo operativo la utilidad ya congelada de un periodo cerrado
@@ -5303,7 +5370,10 @@ function extraerUtilidadPeriodo(){
   efectivoDeclarado=Math.max(0,efectivoDeclarado-monto);
   c.utilidadExtraida=true;c.montoExtraido=monto;c.fechaExtraccion=today();c.extraidoPor=CUR_USER?CUR_USER.nombre:'';
   audit('Extrajo utilidad del periodo — entregada al dueño','Caja',nombreMes(mes)+' · '+money(monto)+' · efectivo restante '+money(efectivoDeclarado));
-  save('cortes_cerrados',cortesCerrados);
+  // Antes esto hacía doble escritura (save() directo del arreglo completo Y
+  // persist() volviendo a re-mezclar todo) — con una fila por corte, basta
+  // el upsert de esta única fila.
+  guardarFila('corte',c,'mes');
   persist();
   nav('caja');
   alert('✅ Se extrajeron '+money(monto)+' de utilidad. El capital operativo vuelve a '+money(metaPatrimonio)+'.');
@@ -5399,11 +5469,12 @@ function gVale(){
   var n=g('vn').value.trim(),c=g('vc').value.trim(),m=parseFloat(g('vm').value)||0,f=g('vf').value;
   if(!n||!m){alert('Completa negocio y monto');return;}
   if(m>efectivoDeclarado){alert('Efectivo disponible: '+money(efectivoDeclarado)+'\nNo puedes registrar un vale de '+money(m)+' en efectivo.');return;}
-  vales.push({id:uid(),negocio:n,concepto:c,monto:m,montoTotal:m,fecha:f,est:'pendiente',fechaCobro:null,efectivoRestado:true,
-    historial:[{tipo:'creacion',monto:m,fecha:f,concepto:c}]});
+  var vNuevo={id:uid(),negocio:n,concepto:c,monto:m,montoTotal:m,fecha:f,est:'pendiente',fechaCobro:null,efectivoRestado:true,
+    historial:[{tipo:'creacion',monto:m,fecha:f,concepto:c}]};
+  vales.push(vNuevo);
   efectivoDeclarado=Math.max(0,efectivoDeclarado-m);
   audit('Creó vale por cobrar — descontado del efectivo','Caja',n+' · '+money(m)+(c?' · '+c:''));
-  persist();cm();nav('caja');
+  guardarFila('vale',vNuevo,'id');persist();cm();nav('caja');
 }
 function ensureHistorialVale(v){
   if(!v.historial)v.historial=[{tipo:'creacion',monto:v.monto,fecha:v.fecha,concepto:v.concepto||''}];
@@ -5433,7 +5504,7 @@ function gAumentarVale(id){
   v.historial.push({tipo:'aumento',monto:m,fecha:f,concepto:c});
   efectivoDeclarado=Math.max(0,efectivoDeclarado-m);
   audit('Aumentó vale por cobrar — descontado del efectivo','Caja',v.negocio+' · +'+money(m)+' · nuevo saldo '+money(v.monto));
-  persist();cm();nav('caja');
+  guardarFila('vale',v,'id');persist();cm();nav('caja');
 }
 function mAbonarVale(id){
   var v=vales.find(function(x){return x.id===id;});
@@ -5459,7 +5530,7 @@ function gAbonarVale(id){
   efectivoDeclarado+=m;
   if(v.monto<=0.01){v.monto=0;v.est='cobrado';v.fechaCobro=f;v.efectivoSumado=true;}
   audit(v.est==='cobrado'?'Cobró vale (saldado) — sumado al efectivo':'Abonó a vale por cobrar — sumado al efectivo','Caja',v.negocio+' · '+money(m)+' · saldo restante '+money(v.monto));
-  persist();cm();nav('caja');
+  guardarFila('vale',v,'id');persist();cm();nav('caja');
 }
 function mVerHistorialVale(id){
   var v=vales.find(function(x){return x.id===id;});
@@ -5493,7 +5564,7 @@ function acreditarValeEfectivo(id){
   v.efectivoSumado=true;
   efectivoDeclarado+=v.monto;
   audit('Acreditó vale cobrado al efectivo','Caja',v.negocio+' · '+money(v.monto)+' (cobrado el '+fmtFecha(v.fechaCobro)+')');
-  persist();nav('caja');
+  guardarFila('vale',v,'id');persist();nav('caja');
 }
 function revertirVale(id){
   var v=vales.find(function(x){return x.id===id;});
@@ -5511,7 +5582,7 @@ function revertirVale(id){
   v.historial.push({tipo:'reversion',monto:montoRevertir,fecha:today(),efectivo:seDescontoEfectivo});
   v.monto=montoRevertir;
   v.est='pendiente';v.fechaCobro=null;v.efectivoSumado=false;
-  persist();nav('caja');
+  guardarFila('vale',v,'id');persist();nav('caja');
 }
 function delVale(id){
   var v=vales.find(function(x){return x.id===id;});
@@ -5535,9 +5606,11 @@ function delVale(id){
       }
       v.monto=0;v.est='eliminado';v.eliminado=true;
       audit('Eliminó vale con historial (se conserva para el corte)','Caja',v.negocio+' · '+money(v.montoTotal!==undefined?v.montoTotal:0));
+      guardarFila('vale',v,'id');
     } else {
       vales=vales.filter(function(x){return x.id!==id;});
       audit('Eliminó vale','Caja',v.negocio+' · '+money(v.monto));
+      eliminarFila('vale',id);
     }
     persist();nav('caja');
   },{detalle:v?v.negocio+' · '+money(v.monto):''});
@@ -5654,9 +5727,10 @@ function gAddGasto(){
   if(forma==='efectivo'&&monto>efectivoDeclarado){alert('Efectivo disponible: '+money(efectivoDeclarado)+'\nNo puedes registrar un gasto de '+money(monto)+' en efectivo.');return;}
   if(!chequeoCierrePendiente(fecha))return;
   if(forma==='efectivo')efectivoDeclarado=Math.max(0,efectivoDeclarado-monto);
-  gastos.push({id:uid(),fecha:fecha,concepto:concepto,categoria:categoria||'otro',monto:monto,forma:forma,registradoPor:CUR_USER?CUR_USER.nombre:''});
+  var gto={id:uid(),fecha:fecha,concepto:concepto,categoria:categoria||'otro',monto:monto,forma:forma,registradoPor:CUR_USER?CUR_USER.nombre:''};
+  gastos.push(gto);
   audit('Registró gasto','Caja',concepto+' · '+money(monto)+' · '+forma);
-  persist();cm();nav('caja');
+  guardarFila('gasto',gto,'id');persist();cm();nav('caja');
 }
 function delGasto(id){
   var gto=gastos.find(function(x){return x.id===id;});
@@ -5665,7 +5739,7 @@ function delGasto(id){
     if(gto.forma==='efectivo')efectivoDeclarado+=gto.monto;
     audit('Eliminó gasto','Caja',gto.concepto+' · '+money(gto.monto));
     gastos=gastos.filter(function(x){return x.id!==id;});
-    persist();nav('caja');
+    eliminarFila('gasto',id);persist();nav('caja');
   },{detalle:gto.concepto+' · '+money(gto.monto)});
 }
 
@@ -5827,8 +5901,9 @@ function gCompensacion(){
   var fecha=g('cp4')?g('cp4').value:today();
   var nota=g('cp6')?g('cp6').value:'';
   if(!suc||!monto){alert('Selecciona la sucursal e ingresa el monto');return;}
-  compensaciones.push({id:uid(),sucursal:suc,monto:monto,fecha:fecha,nota:nota});
-  persist();nav('caja');
+  var c={id:uid(),sucursal:suc,monto:monto,fecha:fecha,nota:nota};
+  compensaciones.push(c);
+  guardarFila('comp',c,'id');nav('caja');
 }
 
 function updCompNotas(){}
@@ -5836,7 +5911,7 @@ function updCompNotas(){}
 function elimComp(id){
   confirmarEliminar('¿Eliminar este registro de pago? Los abonos ya aplicados en notas NO se revierten.',function(){
     compensaciones=compensaciones.filter(function(x){return x.id!==id;});
-    persist();nav('caja');
+    eliminarFila('comp',id);nav('caja');
   },{palabra:'ELIMINAR'});
 }
 
@@ -6320,12 +6395,28 @@ function resetModulo(mod){
     bodega:'todo el inventario de bodega',todo:'TODOS LOS DATOS del sistema'};
   var palabra=mod==='todo'?'BORRAR TODO':'BORRAR';
   confirmarEliminar('⚠ ¿Estás seguro de que quieres borrar '+msgs[mod]+'? Esta acción NO se puede deshacer.',function(){
+    // notas/pedidos ya viven como una fila por registro — igual que
+    // compensaciones/gastos más abajo, hay que borrar cada fila explícita
+    // (DELETE real) antes de vaciar el arreglo en memoria.
+    if(mod==='notas'||mod==='todo')eliminarFilas('nota',notas.map(function(n){return n.id;}));
+    if(mod==='pedidos'||mod==='todo')eliminarFilas('pedido',pedidos.map(function(p){return p.id;}));
+    if(mod==='procesos'||mod==='todo')eliminarFilas('proceso',procesos.map(function(p){return p.id;}));
+    if(mod==='camara'||mod==='todo')eliminarFilas('lotecam',camara.map(function(l){return l.id;}));
+    if(mod==='bodega'||mod==='todo')eliminarFilas('lotebod',bodega.map(function(l){return l.id;}));
     if(mod==='notas'||mod==='todo')notas=[];
     if(mod==='pedidos'||mod==='todo')pedidos=[];
     if(mod==='procesos'||mod==='todo')procesos=[];
     if(mod==='camara'||mod==='todo')camara=[];
     if(mod==='bodega'||mod==='todo')bodega=[];
-    if(mod==='todo'){compensaciones=[];movTransferencias=[];tempLogs=[];efectivoDeclarado=0;gastos=[];}
+    if(mod==='todo'){
+      // compensaciones ya vive como una fila por registro — hay que borrar
+      // cada fila explícitamente (un DELETE real); vaciar solo el arreglo en
+      // memoria y dejar que el sync normal lo "reconcilie" NO funcionaría:
+      // el próximo fetch traería de vuelta las filas que siguen en Supabase.
+      eliminarFilas('comp',compensaciones.map(function(c){return c.id;}));
+      eliminarFilas('gasto',gastos.map(function(gto){return gto.id;}));
+      compensaciones=[];movTransferencias=[];tempLogs=[];efectivoDeclarado=0;gastos=[];
+    }
     persist();nav('config');
     alert('✅ Datos borrados correctamente.');
   },{palabra:palabra});
@@ -6393,14 +6484,13 @@ function saveEditItem(id){
   var maxV=g('ai-max')?parseFloat(g('ai-max').value):null;
   if(minV&&minV>0)p.minStock=minV;else delete p.minStock;
   if(maxV&&maxV>0)p.maxStock=maxV;else delete p.maxStock;
-  var huboRenombre=false;
-  if(n!==nombreAnterior){renombrarProductoEnTodo(nombreAnterior,n);huboRenombre=true;}
+  if(n!==nombreAnterior)renombrarProductoEnTodo(nombreAnterior,n);
   PRODUCTOS.sort(function(a,b){return a.n.localeCompare(b.n,'es');});
   guardarProducto(p);
-  // Igual que en fusionarGrupo: no se llama a persist() completo — guardarProducto
-  // ya subió esta fila por su cuenta, y cámara/bodega/pedidos/procesos solo se
-  // resuben si de verdad hubo un renombre que los haya tocado.
-  if(huboRenombre){save('camara',camara);save('bodega',bodega);save('pedidos',pedidos);save('procesos',procesos);}
+  // No hace falta persist() completo aquí — guardarProducto ya subió esta
+  // fila por su cuenta, y renombrarProductoEnTodo (si hubo renombre) ya
+  // guarda por su lado solo las filas de cámara/bodega/pedidos/procesos que
+  // de verdad tocó, cada una en su propia fila.
   cm();nav('config');
 }
 // Si se renombra un producto, el nombre viejo queda huérfano en todo lo que lo
@@ -6408,16 +6498,31 @@ function saveEditItem(id){
 // no encontrarían el producto en el catálogo (ej. perderían la unidad correcta
 // al recalcularse) porque el nombre dejó de coincidir. Se actualiza en cascada.
 function renombrarProductoEnTodo(anterior,nuevo){
-  camara.forEach(function(l){if(l.esp===anterior)l.esp=nuevo;});
-  bodega.forEach(function(l){if(l.esp===anterior)l.esp=nuevo;});
+  var camTocados=[],bodTocados=[],pedTocados=[],procTocados=[];
+  camara.forEach(function(l){if(l.esp===anterior){l.esp=nuevo;camTocados.push(l);}});
+  bodega.forEach(function(l){if(l.esp===anterior){l.esp=nuevo;bodTocados.push(l);}});
   pedidos.forEach(function(p){
-    if(p.esp===anterior)p.esp=nuevo;
-    (p.partidas||[]).forEach(function(pt){if(pt.esp===anterior)pt.esp=nuevo;});
+    var tocado=false;
+    if(p.esp===anterior){p.esp=nuevo;tocado=true;}
+    (p.partidas||[]).forEach(function(pt){if(pt.esp===anterior){pt.esp=nuevo;tocado=true;}});
+    if(tocado)pedTocados.push(p);
   });
   procesos.forEach(function(pr){
-    if(pr.esp===anterior)pr.esp=nuevo;
-    (pr.salidas||[]).forEach(function(s){if(s.esp===anterior)s.esp=nuevo;});
+    var tocado=false;
+    if(pr.esp===anterior){pr.esp=nuevo;tocado=true;}
+    (pr.salidas||[]).forEach(function(s){if(s.esp===anterior){s.esp=nuevo;tocado=true;}});
+    if(tocado)procTocados.push(pr);
   });
+  // Operación rara y deliberada de un admin (no la hacen decenas de veces al
+  // día como gNota/gAbonarNota) — se resuelve como N upserts independientes
+  // (una fila por registro tocado), sin candado ni transacción: si la
+  // conexión se cae a la mitad, lo que ya llegó queda guardado y el resto
+  // sigue en la cola de pendientes local, en vez de perder o pisar TODO el
+  // arreglo como pasaba con el guardado directo del blob completo.
+  guardarFilas('lotecam',camTocados,'id');
+  guardarFilas('lotebod',bodTocados,'id');
+  guardarFilas('pedido',pedTocados,'id');
+  guardarFilas('proceso',procTocados,'id');
   // Las reglas de entrada/salida por tipo de proceso también referencian
   // productos por nombre (ej. "Limpieza de pescado" → salida "Sargo Limpio")
   // — si no se actualizan aquí, la regla queda huérfana y su checklist se ve
@@ -6712,21 +6817,16 @@ function fusionarGrupo(gi){
   confirmarEliminar(
     'Vas a conservar "'+keeper.n+'" ('+keeper.u+', id '+keeper.id+') y eliminar '+perder.length+' fila(s) duplicada(s) del catálogo. Tu inventario, procesos y pedidos no se ven afectados.',
     function(){
-      var huboRenombre=false;
       perder.forEach(function(p){
-        if(normNombre(p.n)===normNombre(keeper.n)&&p.n!==keeper.n){renombrarProductoEnTodo(p.n,keeper.n);huboRenombre=true;}
+        if(normNombre(p.n)===normNombre(keeper.n)&&p.n!==keeper.n)renombrarProductoEnTodo(p.n,keeper.n);
         var pi=PRODUCTOS.findIndex(function(x){return x.id===p.id;});
         if(pi!==-1)PRODUCTOS.splice(pi,1);
         eliminarProducto(p.id);
       });
       audit('Fusionó productos duplicados','Configuracion','Conservó "'+keeper.n+'" (id '+keeper.id+') · eliminó: '+nombresDetalle);
-      // A propósito NO se llama a persist() aquí: eso resubiría notas, pedidos,
-      // gastos, vales... TODO lo que esta pestaña tenga en memoria, y si alguien
-      // más (ej. Jannet) guardó algo distinto mientras tanto, se lo pisaría
-      // completo. eliminarProducto ya guardó su propia fila; solo se resuben
-      // cámara/bodega/pedidos/procesos, y solo si de verdad hubo un renombre
-      // en cascada que los haya tocado.
-      if(huboRenombre){save('camara',camara);save('bodega',bodega);save('pedidos',pedidos);save('procesos',procesos);}
+      // No hace falta persist() completo aquí — cada producto eliminado ya
+      // guardó/borró su propia fila, y renombrarProductoEnTodo (si aplicó)
+      // ya guardó por su lado solo las filas que de verdad tocó.
       cm();nav('config');
     },
     {detalle:nombresDetalle}
@@ -6911,13 +7011,13 @@ function _importarDatosArchivo(file){
 // vinieron en este fetch de Supabase (ver comentario grande en la sección
 // CATÁLOGO sobre por qué cada item vive en su propia fila).
 function reconstruirCatalogoDesdeMapa(data){
-  var out={tieneProductos:false,productos:[],tieneProveedores:false,proveedores:[],
-    tieneClientes:false,clientes:[],tieneProcTipos:false,proc_tipos:[],proc_reglas:{}};
+  var rProd=reconstruirColeccionDesdeMapa(data,'producto_');
+  var rProv=reconstruirColeccionDesdeMapa(data,'proveedor_');
+  var rCli=reconstruirColeccionDesdeMapa(data,'cliente_');
+  var out={tieneProductos:rProd.tiene,productos:rProd.items,tieneProveedores:rProv.tiene,proveedores:rProv.items,
+    tieneClientes:rCli.tiene,clientes:rCli.items,tieneProcTipos:false,proc_tipos:[],proc_reglas:{}};
   Object.keys(data).forEach(function(k){
-    if(k.indexOf('producto_')===0){out.productos.push(data[k]);out.tieneProductos=true;}
-    else if(k.indexOf('proveedor_')===0){out.proveedores.push(data[k]);out.tieneProveedores=true;}
-    else if(k.indexOf('cliente_')===0){out.clientes.push(data[k]);out.tieneClientes=true;}
-    else if(k.indexOf('proctipo_')===0){
+    if(k.indexOf('proctipo_')===0){
       var nombre=k.substring('proctipo_'.length);
       out.proc_tipos.push(nombre);out.proc_reglas[nombre]=data[k];out.tieneProcTipos=true;
     }
@@ -6938,23 +7038,26 @@ function aplicarDatos(data){
   // No pisar ninguna key que todavía tenga un cambio local sin confirmar en Supabase
   var pend=getPendientes();
   Object.keys(pend).forEach(function(k){delete data[k];});
+  var keysData=Object.keys(data);
 
-  // camara/procesos/pedidos/notas/bodega/compensaciones/vales/gastos/cortes_cerrados
-  // se combinan por id con lo local en vez de reemplazarse tal cual — si este
-  // dispositivo tiene una mutación local que todavía no terminó de subir (el
-  // persist() de persistArrayMerged corre en paralelo al polling), un dato
-  // remoto más viejo no la debe borrar de la pantalla mientras tanto.
-  if(data.camara){camara=mergeArrayPorId(camara,data.camara);normalizarLotesAgotados(camara);}
-  if(data.procesos)procesos=mergeArrayPorId(procesos,data.procesos);
-  if(data.pedidos)pedidos=mergeArrayPorId(pedidos,data.pedidos);
-  if(data.notas)notas=mergeArrayPorId(notas,data.notas);
+  var rcLoteCam=reconstruirColeccionDesdeMapa(data,'lotecam_');
+  if(rcLoteCam.tiene){camara=rcLoteCam.items;normalizarLotesAgotados(camara);podarCacheLocal('lotecam_',keysData.filter(function(k){return k.indexOf('lotecam_')===0;}));}
+  else if(data.camara){camara=mergeArrayPorId(camara,data.camara);normalizarLotesAgotados(camara);}
+  var rcProceso=reconstruirColeccionDesdeMapa(data,'proceso_');
+  if(rcProceso.tiene){procesos=rcProceso.items;podarCacheLocal('proceso_',keysData.filter(function(k){return k.indexOf('proceso_')===0;}));}
+  else if(data.procesos)procesos=mergeArrayPorId(procesos,data.procesos);
+  var rcPedido=reconstruirColeccionDesdeMapa(data,'pedido_');
+  if(rcPedido.tiene){pedidos=rcPedido.items;podarCacheLocal('pedido_',keysData.filter(function(k){return k.indexOf('pedido_')===0;}));}
+  else if(data.pedidos)pedidos=mergeArrayPorId(pedidos,data.pedidos);
+  var rcNota=reconstruirColeccionDesdeMapa(data,'nota_');
+  if(rcNota.tiene){notas=rcNota.items;podarCacheLocal('nota_',keysData.filter(function(k){return k.indexOf('nota_')===0;}));}
+  else if(data.notas)notas=mergeArrayPorId(notas,data.notas);
   if(data.next_id)NEXT_ID=data.next_id;
   if(data.next_folio)nextFolio=data.next_folio;
   if(data.next_pedido_num)nextPedidoNum=data.next_pedido_num;
   if(data.next_producto_id)NEXT_PRODUCTO_ID=Math.max(NEXT_PRODUCTO_ID,data.next_producto_id);
 
   var rc=reconstruirCatalogoDesdeMapa(data);
-  var keysData=Object.keys(data);
   if(rc.tieneProductos){PRODUCTOS=rc.productos;podarCacheLocal('producto_',keysData.filter(function(k){return k.indexOf('producto_')===0;}));}
   else if(data.productos)PRODUCTOS=data.productos;
   if(rc.tieneProveedores){PROVEEDORES=rc.proveedores;podarCacheLocal('proveedor_',keysData.filter(function(k){return k.indexOf('proveedor_')===0;}));}
@@ -6970,17 +7073,35 @@ function aplicarDatos(data){
   }
 
   if(data.catalogo_seeds_vistos)CATALOGO_SEEDS_VISTOS=data.catalogo_seeds_vistos;
-  if(data.bodega){bodega=mergeArrayPorId(bodega,data.bodega);normalizarLotesAgotados(bodega);}
+  var rcLoteBod=reconstruirColeccionDesdeMapa(data,'lotebod_');
+  if(rcLoteBod.tiene){bodega=rcLoteBod.items;normalizarLotesAgotados(bodega);podarCacheLocal('lotebod_',keysData.filter(function(k){return k.indexOf('lotebod_')===0;}));}
+  else if(data.bodega){bodega=mergeArrayPorId(bodega,data.bodega);normalizarLotesAgotados(bodega);}
   if(data.efectivo_declarado!==undefined&&data.efectivo_declarado!==null)efectivoDeclarado=data.efectivo_declarado;
   if(data.mov_tarjeta)movTransferencias=data.mov_tarjeta;
-  if(data.compensaciones)compensaciones=mergeArrayPorId(compensaciones,data.compensaciones);
+  // compensaciones ya migró a una fila por registro (comp_<id>) — mismo
+  // patrón mutuamente excluyente que el catálogo: si ya hay filas, se
+  // reemplaza completo (vienen frescas); si no, se usa el merge viejo sobre
+  // el blob (dispositivos/datos de antes de la migración).
+  var rcComp=reconstruirColeccionDesdeMapa(data,'comp_');
+  if(rcComp.tiene){compensaciones=rcComp.items;podarCacheLocal('comp_',keysData.filter(function(k){return k.indexOf('comp_')===0;}));}
+  else if(data.compensaciones)compensaciones=mergeArrayPorId(compensaciones,data.compensaciones);
   if(data.temp_logs)tempLogs=data.temp_logs;
-  if(data.vales)vales=mergeArrayPorId(vales,data.vales);
+  var rcVale=reconstruirColeccionDesdeMapa(data,'vale_');
+  if(rcVale.tiene){vales=rcVale.items;podarCacheLocal('vale_',keysData.filter(function(k){return k.indexOf('vale_')===0;}));}
+  else if(data.vales)vales=mergeArrayPorId(vales,data.vales);
   if(data.auditLog)auditLog=mergeAuditPorId(auditLog,data.auditLog);
   if(data.users){USERS=data.users;repararIdsUsuariosDuplicados();}
   if(data.meta_patrimonio!==undefined&&data.meta_patrimonio!==null)metaPatrimonio=data.meta_patrimonio;
-  if(data.gastos)gastos=mergeArrayPorId(gastos,data.gastos);
-  if(data.cortes_cerrados)cortesCerrados=mergeArrayPorId(cortesCerrados,data.cortes_cerrados,'mes',true);
+  var rcGasto=reconstruirColeccionDesdeMapa(data,'gasto_');
+  if(rcGasto.tiene){gastos=rcGasto.items;podarCacheLocal('gasto_',keysData.filter(function(k){return k.indexOf('gasto_')===0;}));}
+  else if(data.gastos)gastos=mergeArrayPorId(gastos,data.gastos);
+  // El desempate remotoGana=true que usaba esto (para que una corrección
+  // manual en Supabase no quedara bloqueada por una caché local vieja) ya no
+  // hace falta: al reconstruir siempre desde las filas frescas del fetch, una
+  // corrección directa en Supabase ya "gana" automáticamente.
+  var rcCorte=reconstruirColeccionDesdeMapa(data,'corte_');
+  if(rcCorte.tiene){cortesCerrados=rcCorte.items;podarCacheLocal('corte_',keysData.filter(function(k){return k.indexOf('corte_')===0;}));}
+  else if(data.cortes_cerrados)cortesCerrados=mergeArrayPorId(cortesCerrados,data.cortes_cerrados,'mes',true);
   if(data.saldo_inicial_caja)saldoInicialCaja=data.saldo_inicial_caja;
   if(data.admin_puede_recibir!==undefined&&data.admin_puede_recibir!==null)ADMIN_RECIBE=data.admin_puede_recibir;
   // Recalcula el efectivo declarado desde las transacciones ya combinadas
@@ -7007,6 +7128,15 @@ function aplicarDatos(data){
     PROC_TIPOS.forEach(guardarProcTipo);remove('proc_tipos');
     if(data.proc_reglas)remove('proc_reglas');
   }
+  if(data.compensaciones&&!rcComp.tiene){data.compensaciones.forEach(function(o){guardarFila('comp',o,'id');});remove('compensaciones');}
+  if(data.gastos&&!rcGasto.tiene){data.gastos.forEach(function(o){guardarFila('gasto',o,'id');});remove('gastos');}
+  if(data.vales&&!rcVale.tiene){data.vales.forEach(function(o){guardarFila('vale',o,'id');});remove('vales');}
+  if(data.cortes_cerrados&&!rcCorte.tiene){data.cortes_cerrados.forEach(function(o){guardarFila('corte',o,'mes');});remove('cortes_cerrados');}
+  if(data.pedidos&&!rcPedido.tiene){data.pedidos.forEach(function(o){guardarFila('pedido',o,'id');});remove('pedidos');}
+  if(data.notas&&!rcNota.tiene){data.notas.forEach(function(o){guardarFila('nota',o,'id');});remove('notas');}
+  if(data.camara&&!rcLoteCam.tiene){data.camara.forEach(function(o){guardarFila('lotecam',o,'id');});remove('camara');}
+  if(data.bodega&&!rcLoteBod.tiene){data.bodega.forEach(function(o){guardarFila('lotebod',o,'id');});remove('bodega');}
+  if(data.procesos&&!rcProceso.tiene){data.procesos.forEach(function(o){guardarFila('proceso',o,'id');});remove('procesos');}
 }
 
 function mostrarCargando(){
