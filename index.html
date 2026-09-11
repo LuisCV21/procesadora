@@ -5107,18 +5107,33 @@ function calcularVerificacionInventario(){
       vendidoPorLoteId[p.loteId]=(vendidoPorLoteId[p.loteId]||0)+(parseFloat(p.cant)||0);
     });
   });
-  var problemas=[];
+  // Se agrupa por especie+lote (no por registro individual) antes de comparar:
+  // un mismo pedido puede haber quedado repartido en más de un registro de
+  // cámara/bodega (ej. el mismo lote llegó con dos costos distintos, o quedó
+  // duplicado por un bug ya corregido) — "recibido/producido/consumido" están
+  // atados al lote+especie, no a un registro en particular, así que comparar
+  // cada registro por separado contra el total marcaba diferencia en AMBOS
+  // aunque juntos cuadraran exacto. Agrupando, el grupo completo se compara
+  // contra el total una sola vez.
+  var grupos={};
   camara.concat(bodega).forEach(function(l){
     if(!/^P-/.test(l.lote||''))return;
     var k=l.esp+'|'+l.lote;
+    if(!grupos[k])grupos[k]={esp:l.esp,lote:l.lote,unidad:l.unidad||'kg',ids:[],sistema:0};
+    grupos[k].ids.push(l.id);
+    grupos[k].sistema+=l.kg;
+  });
+  var problemas=[];
+  Object.keys(grupos).forEach(function(k){
+    var grp=grupos[k];
     var recibido=recibidoPorLote[k]||0;
     var producido=producidoPorLote[k]||0;
     var consumido=consumidoPorLote[k]||0;
-    var vendido=vendidoPorLoteId[l.id]||0;
+    var vendido=grp.ids.reduce(function(a,id){return a+(vendidoPorLoteId[id]||0);},0);
     var esperado=recibido+producido-consumido-vendido;
-    var diferencia=Math.round((l.kg-esperado)*100)/100;
+    var diferencia=Math.round((grp.sistema-esperado)*100)/100;
     if(Math.abs(diferencia)>0.5){
-      problemas.push({id:l.id,esp:l.esp,lote:l.lote,esperado:Math.round(esperado*100)/100,sistema:l.kg,diferencia:diferencia,unidad:l.unidad||'kg'});
+      problemas.push({id:grp.ids[0],idsTodos:grp.ids,esp:grp.esp,lote:grp.lote,esperado:Math.round(esperado*100)/100,sistema:grp.sistema,diferencia:diferencia,unidad:grp.unidad});
     }
   });
   problemas.sort(function(a,b){return Math.abs(b.diferencia)-Math.abs(a.diferencia);});
@@ -5138,13 +5153,14 @@ function rVerificarInventario(){
   var filas=problemas.map(function(p){
     var color=p.diferencia>0?'var(--warn)':'var(--danger)';
     var signo=p.diferencia>0?'sobra':'falta';
+    var multi=p.idsTodos&&p.idsTodos.length>1;
     return '<tr>'+
       '<td class="pr">'+p.esp+'</td>'+
-      '<td class="mn">'+p.lote+'</td>'+
+      '<td class="mn">'+p.lote+(multi?' <span style="color:var(--text3);font-size:12px">('+p.idsTodos.length+' registros)</span>':'')+'</td>'+
       '<td class="mn">'+p.esperado+' '+p.unidad+'</td>'+
       '<td class="mn">'+p.sistema+' '+p.unidad+'</td>'+
       '<td class="mn" style="color:'+color+';font-weight:700">'+(p.diferencia>0?'+':'')+p.diferencia+' ('+signo+')</td>'+
-      (canEdit?'<td class="mn"><button class="btn btn-icon" title="Editar lote" onclick="'+(camara.some(function(x){return x.id===p.id;})?'mEditLote':'mEditBodega')+'('+p.id+')">✏️</button></td>':'')+
+      (canEdit?'<td class="mn">'+(multi?'<span style="color:var(--text3);font-size:12px">revisar los '+p.idsTodos.length+' a mano</span>':'<button class="btn btn-icon" title="Editar lote" onclick="'+(camara.some(function(x){return x.id===p.id;})?'mEditLote':'mEditBodega')+'('+p.id+')">✏️</button>')+'</td>':'')+
     '</tr>';
   }).join('');
   return intro+'<div class="card"><div class="card-hdr"><div class="card-title">'+problemas.length+' lote(s) que no cuadran</div></div>'+
