@@ -498,18 +498,36 @@ function sbGet(key){
   .catch(function(){return null;}));
 }
 
-// Leer todos los datos de una sola vez al arrancar
-function sbGetAll(){
-  return fetch(SB_URL+'/rest/v1/bodega_data?select=key,value&apikey='+SB_KEY,{
-    headers:SB_HEADERS
-  }).then(function(r){
+// Leer TODAS las filas de la tabla, paginando — Supabase/PostgREST limita
+// cada respuesta a 1000 filas por default (Content-Range: 0-999/N). Antes de
+// la migración a fila-por-registro la tabla tenía ~30 keys y nunca se notó;
+// ahora con cientos de notas/pedidos/lotes puede pasar de 1000 filas
+// fácilmente, y sin paginar, todo lo que cae después de la fila 1000
+// simplemente nunca llega al navegador — se ve como si esos productos/notas
+// no existieran, sin ningún error visible. Se pagina de 1000 en 1000 hasta
+// que una página vuelve con menos de 1000 (ahí ya no hay más).
+function sbGetAllPagina(desde,acumulado){
+  desde=desde||0;acumulado=acumulado||[];
+  var PAGE=1000;
+  return _trackOp(fetch(SB_URL+'/rest/v1/bodega_data?select=key,value&apikey='+SB_KEY,{
+    headers:Object.assign({'Range-Unit':'items','Range':desde+'-'+(desde+PAGE-1)},SB_HEADERS)
+  })).then(function(r){
     sbStatus(r.ok);
     return r.json();
   }).then(function(rows){
+    if(!Array.isArray(rows))return acumulado;
+    acumulado=acumulado.concat(rows);
+    if(rows.length===PAGE)return sbGetAllPagina(desde+PAGE,acumulado);
+    return acumulado;
+  }).catch(function(){sbStatus(false);return acumulado;});
+}
+function sbGetAllFilas(){return sbGetAllPagina(0,[]);}
+function sbGetAll(){
+  return sbGetAllFilas().then(function(rows){
     var map={};
-    if(Array.isArray(rows))rows.forEach(function(r){map[r.key]=r.value;});
+    rows.forEach(function(r){map[r.key]=r.value;});
     return map;
-  }).catch(function(){sbStatus(false);return {};});
+  });
 }
 
 // save/load — mantiene caché local + escribe a Supabase
@@ -7217,8 +7235,7 @@ function iniciarRealtime(){
     // Solo sincronizar si han pasado al menos 5 segundos desde el último persist propio
     var ahora=Date.now();
     if(ahora-_rtUltimaSync<5000)return;
-    fetch(SB_URL+'/rest/v1/bodega_data?select=key,value&apikey='+SB_KEY,{headers:SB_HEADERS})
-      .then(function(r){return r.json();})
+    sbGetAllFilas()
       .then(function(rows){
         if(!Array.isArray(rows)||rows.length===0)return;
         var data={};
@@ -7278,12 +7295,13 @@ function arrancarUnaVez(){
   arrancar();
 }
 
-// Timeout de seguridad — si Supabase no responde en 5s, arranca con datos vacíos
-var _timeoutArranque=setTimeout(function(){arrancarUnaVez();},5000);
+// Timeout de seguridad — si Supabase no responde a tiempo, arranca con datos
+// vacíos. Un poco más largo que antes porque ahora la carga inicial puede
+// necesitar más de una página (ver sbGetAllPagina).
+var _timeoutArranque=setTimeout(function(){arrancarUnaVez();},8000);
 
 // Sincronizar con Supabase
-fetch(SB_URL+'/rest/v1/bodega_data?select=key,value&apikey='+SB_KEY,{headers:SB_HEADERS})
-  .then(function(r){return r.json();})
+sbGetAllFilas()
   .then(function(rows){
     clearTimeout(_timeoutArranque);
     if(Array.isArray(rows)&&rows.length>0){
