@@ -875,10 +875,25 @@ function eliminarFila(coleccion,id){remove(kFila(coleccion,id));}
 function guardarFilas(coleccion,objs,idField){(objs||[]).forEach(function(o){guardarFila(coleccion,o,idField);});}
 function eliminarFilas(coleccion,ids){(ids||[]).forEach(function(id){eliminarFila(coleccion,id);});}
 // Agrupa, a partir de un mapa plano {key:value} (ej. todo lo que devuelve
-// sbGetAll), las filas cuya key empieza con el prefijo dado.
-function reconstruirColeccionDesdeMapa(data,prefijo){
+// sbGetAll), las filas cuya key empieza con el prefijo dado. Se ordena por
+// idField (por default "id", numérico y asignado por uid() en orden de
+// creación) porque el orden en que Postgres devuelve las filas de una tabla
+// sin ORDER BY no tiene ninguna relación con el orden en que se crearon —
+// sin este sort, notas/pedidos/procesos se veían en un orden revuelto cada
+// vez que se recargaba la app (antes del rediseño a fila-por-registro, el
+// orden venía gratis porque todo vivía en un solo array que se guardaba tal
+// cual). Las pantallas que listan estas colecciones siguen dependiendo de
+// que el arreglo ya venga ordenado (hacen node.slice().reverse() para
+// mostrar lo más nuevo primero, no ordenan por su cuenta).
+function reconstruirColeccionDesdeMapa(data,prefijo,idField){
+  idField=idField||'id';
   var out=[],tiene=false;
   Object.keys(data).forEach(function(k){if(k.indexOf(prefijo)===0){out.push(data[k]);tiene=true;}});
+  out.sort(function(a,b){
+    var av=a&&a[idField],bv=b&&b[idField];
+    if(av===undefined||bv===undefined)return 0;
+    return av<bv?-1:(av>bv?1:0);
+  });
   return {tiene:tiene,items:out};
 }
 function kProducto(id){return kFila('producto',id);}
@@ -7133,7 +7148,7 @@ function aplicarDatos(data){
   // manual en Supabase no quedara bloqueada por una caché local vieja) ya no
   // hace falta: al reconstruir siempre desde las filas frescas del fetch, una
   // corrección directa en Supabase ya "gana" automáticamente.
-  var rcCorte=reconstruirColeccionDesdeMapa(data,'corte_');
+  var rcCorte=reconstruirColeccionDesdeMapa(data,'corte_','mes');
   if(rcCorte.tiene){cortesCerrados=rcCorte.items;podarCacheLocal('corte_',keysData.filter(function(k){return k.indexOf('corte_')===0;}));}
   else if(data.cortes_cerrados)cortesCerrados=mergeArrayPorId(cortesCerrados,data.cortes_cerrados,'mes',true);
   if(data.saldo_inicial_caja)saldoInicialCaja=data.saldo_inicial_caja;
