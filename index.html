@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Bodega de Mariscos — Poza Rica</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -369,6 +370,7 @@ hr.div{border:none;border-top:1px solid var(--border);margin:14px 0}
 var SB_URL='https://rtzabviyigjmulrdxsuh.supabase.co';
 var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ0emFidml5aWdqbXVscmR4c3VoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5OTIxMDYsImV4cCI6MjA5MjU2ODEwNn0.a2aTG0EU2Rtb5PWNcNgSZiquCoVvKBuVZ_RqccfODZg';
 var SB_HEADERS={'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY};
+var sbClient=supabase.createClient(SB_URL,SB_KEY);
 
 // localStorage como caché local inmediato
 function saveLocal(key,val){try{localStorage.setItem('bmp_'+key,JSON.stringify(val));}catch(e){}}
@@ -6989,37 +6991,80 @@ var _rtTimer=null;
 var _rtActivo=false;
 var _rtUltimaSync=0;
 
+function sincronizarRemoto(){
+  // No pollear con la pestaña en segundo plano — evita quemar egress con
+  // dispositivos que se quedan abiertos sin usarse (ver incidente de egress
+  // de sep/2026: esta tabla completa se bajaba cada 8s sin importar
+  // visibilidad, y eso solo multiplicaba tráfico sin ningún beneficio).
+  if(document.hidden)return;
+  // Solo sincronizar si han pasado al menos 5 segundos desde el último persist propio
+  var ahora=Date.now();
+  if(ahora-_rtUltimaSync<5000)return;
+  fetch(SB_URL+'/rest/v1/bodega_data?select=key,value&apikey='+SB_KEY,{headers:SB_HEADERS})
+    .then(function(r){return r.json();})
+    .then(function(rows){
+      if(!Array.isArray(rows)||rows.length===0)return;
+      var data={};
+      rows.forEach(function(r){data[r.key]=r.value;});
+      var cambio=false;
+      // Verificar si hay cambios respecto a lo local
+      Object.keys(data).forEach(function(k){
+        var localStr=localStorage.getItem('bmp_'+k);
+        var remoteStr=JSON.stringify(data[k]);
+        if(localStr!==remoteStr){cambio=true;}
+      });
+      if(cambio){
+        aplicarDatos(data);
+        // Refrescar la vista actual si hay cambios
+        if(CUR_TAB)nav(CUR_TAB);
+        // Mostrar notificación sutil
+        mostrarNotifSync();
+      }
+      sbStatus(true);
+    }).catch(function(){sbStatus(false);});
+}
+
+var _rtChannel=null;
 function iniciarRealtime(){
   if(_rtActivo)return;
   _rtActivo=true;
-  // Polling cada 8 segundos — detecta cambios de otros dispositivos
-  _rtTimer=setInterval(function(){
-    // Solo sincronizar si han pasado al menos 5 segundos desde el último persist propio
-    var ahora=Date.now();
-    if(ahora-_rtUltimaSync<5000)return;
-    fetch(SB_URL+'/rest/v1/bodega_data?select=key,value&apikey='+SB_KEY,{headers:SB_HEADERS})
-      .then(function(r){return r.json();})
-      .then(function(rows){
-        if(!Array.isArray(rows)||rows.length===0)return;
-        var data={};
-        rows.forEach(function(r){data[r.key]=r.value;});
-        var cambio=false;
-        // Verificar si hay cambios respecto a lo local
-        Object.keys(data).forEach(function(k){
-          var localStr=localStorage.getItem('bmp_'+k);
-          var remoteStr=JSON.stringify(data[k]);
-          if(localStr!==remoteStr){cambio=true;}
-        });
-        if(cambio){
-          aplicarDatos(data);
-          // Refrescar la vista actual si hay cambios
-          if(CUR_TAB)nav(CUR_TAB);
-          // Mostrar notificación sutil
-          mostrarNotifSync();
-        }
-        sbStatus(true);
-      }).catch(function(){sbStatus(false);});
-  },8000);
+  // Empuje por websocket: Supabase avisa en cuanto algo cambia en
+  // bodega_data (desde cualquier dispositivo) y disparamos un
+  // sincronizarRemoto() de inmediato — en vez de bajar la tabla completa
+  // cada N segundos "por si acaso". No se puede fetch(ear) solo la fila que
+  // cambió (updated_at=gt.X ni el payload del propio evento) porque
+  // aplicarDatos()/podarCacheLocal() asumen que cada sync trae la tabla
+  // completa para poder detectar borrados — con un dato parcial borraría
+  // productos/clientes/proveedores de otros dispositivos por error. Por eso
+  // el evento solo funciona como "aviso" y sincronizarRemoto() sigue
+  // trayendo la tabla completa (que es chica: key+value, sin el resto de la
+  // base) pero AHORA solo cuando hay algo nuevo, no cada 8s a ciegas.
+  //
+  // Antes de esto, el polling cada 8s bajando la tabla completa sin
+  // importar si algo cambió fue lo que reventó la cuota de egress del plan
+  // free (7GB/5GB en sep/2026 — bodega_data ~26MB bajándose ~270 veces en
+  // el periodo).
+  _rtChannel=sbClient.channel('bodega-changes')
+    .on('postgres_changes',{event:'*',schema:'public',table:'bodega_data'},function(){
+      sincronizarRemoto();
+    })
+    .subscribe(function(status){
+      if(status==='SUBSCRIBED'){sbStatus(true);}
+      else if(status==='CLOSED'||status==='CHANNEL_ERROR'||status==='TIMED_OUT'){
+        // Si el websocket se cae, el polling de respaldo de abajo sigue
+        // sincronizando cada 3 min mientras se reconecta solo.
+        sbStatus(false);
+      }
+    });
+  // Polling de respaldo cada 3 minutos — red de seguridad por si el
+  // websocket se desconecta y tarda en reconectar; con Realtime activo ya
+  // no es la vía principal de sincronización.
+  _rtTimer=setInterval(sincronizarRemoto,180000);
+  // Al volver a primer plano, sincronizar de inmediato en vez de esperar
+  // al próximo evento o al siguiente ciclo de respaldo.
+  document.addEventListener('visibilitychange',function(){
+    if(!document.hidden)sincronizarRemoto();
+  });
 }
 
 function mostrarNotifSync(){
