@@ -1,6 +1,43 @@
-# Pendiente: sincronización por bloque completo (riesgo de dinero)
+# RESUELTO (2026-09-10): sincronización por bloque completo (riesgo de dinero)
 
-## El problema
+## Estado actual
+
+**Cerrado.** `camara`, `bodega`, `procesos`, `pedidos`, `notas`, `vales`,
+`gastos`, `compensaciones` y `cortes_cerrados` ya viven como **una fila por
+registro** en Supabase (`lotecam_<id>`, `lotebod_<id>`, `proceso_<id>`,
+`pedido_<id>`, `nota_<id>`, `vale_<id>`, `gasto_<id>`, `comp_<id>`,
+`corte_<mes>`), exactamente el mismo esquema que ya usaba el catálogo desde
+julio. `persist()` ya no sube ningún arreglo completo — cada alta/edición/
+baja guarda solo su propia fila (`guardarFila`/`eliminarFila`/`guardarFilas`/
+`eliminarFilas`, junto a `kFila`/`reconstruirColeccionDesdeMapa`, la
+generalización del mecanismo del catálogo). La migración de los blobs
+viejos a filas es automática y de una sola vez (mismo patrón que ya usaba
+el catálogo desde julio), y `aplicarDatos` reconstruye cada colección desde
+sus filas frescas en vez de fusionar arreglos completos.
+
+De paso se resolvió la inconsistencia que ya tenía `cortes_cerrados` (antes
+`cerrarPeriodo` guardaba el blob completo directo y `extraerUtilidadPeriodo`
+hacía doble escritura — ahora ambos son un solo upsert por fila) y las dos
+operaciones de renombrado masivo (`renombrarProductoEnTodo`,
+`actualizarCaducidades`), que siguen siendo N upserts sin candado (riesgo
+aceptado: son acciones raras hechas por un admin, no algo que ocurra
+decenas de veces al día como capturar una nota).
+
+Antes de esto, ese mismo día (2026-09-09/10) ya se había agregado un primer
+parche: `mergeArrayPorId` empezó a desempatar por `_mod` (marca de tiempo
+de la edición real) en vez de "gana local a ciegas", y `doLogout()` pasó a
+esperar los guardados en curso antes de recargar (antes la recarga
+cancelaba peticiones a medias sin dejar rastro). Ese parche redujo el riesgo
+pero no lo eliminaba — la migración a fila-por-registro de este documento
+es la solución de fondo que ya lo reemplaza para las 9 colecciones.
+
+**Riesgo residual** (documentado, no crítico): si dos dispositivos editan
+literalmente el MISMO registro en la ventana de milisegundos entre leer y
+guardar, sigue ganando el último en llegar — igual que el catálogo. Ya no
+alcanza con tocar cualquier registro de la colección para pisar a alguien
+más, hace falta tocar el mismo registro exacto.
+
+## El problema (histórico, ya resuelto — se deja como referencia)
 
 `camara`, `bodega`, `procesos`, `pedidos` y `notas` se siguen guardando en
 Supabase como **un solo bloque JSON por lista** (ver `persist()` en
@@ -35,17 +72,13 @@ Ya pasó y ya se corrigió una vez, en el mismo patrón:
   mayor a 0. Se corrigió agregando esa validación — pero es un síntoma
   relacionado, no la causa de fondo.
 
-## Lo que falta (la solución real)
+## Lo que se hizo (ver "Estado actual" arriba)
 
-Aplicar a `camara`, `bodega`, `procesos`, `pedidos` y `notas` el mismo
-rediseño que ya se hizo para el catálogo: una fila por item en Supabase
-(con su propio id como clave), no un array completo por módulo. Así, dos
-personas editando cosas distintas nunca se pisan entre sí — cada quien
-sube solo lo que tocó.
-
-Mientras eso no se haga, el riesgo sigue abierto en cualquier pantalla que
-no sea "Recibir pedido" (por ejemplo: dos personas editando Cámara/Bodega,
-o capturando notas, casi al mismo tiempo).
+Se aplicó a `camara`, `bodega`, `procesos`, `pedidos`, `notas`, `vales`,
+`gastos`, `compensaciones` y `cortes_cerrados` el mismo rediseño que ya
+tenía el catálogo: una fila por item en Supabase (con su propio id como
+clave), no un array completo por módulo. Dos personas editando cosas
+distintas ya no se pisan entre sí — cada quien sube solo lo que tocó.
 
 ## Variante del mismo problema: colisión de ids dentro del catálogo
 
