@@ -2194,24 +2194,21 @@ function onProcTipoChange(){
     'Define los productos resultantes. La merma se calcula automáticamente (entrada − suma de salidas).';
   calcProcMerma();
 }
-// "Ordenado" no transforma el producto (solo cuenta piezas y pesa cada una) —
-// por eso el kg de entrada no se escribe a mano: se toma completo del lote
-// elegido, y la merma se sigue calculando igual (entrada del lote − piezas × peso c/u).
+// El kg de entrada nunca se escribe a mano: siempre se toma completo del lote
+// elegido en "Lote de entrada", para cualquier tipo de proceso. Antes solo
+// "Ordenado" hacía esto automático y en los demás tipos (Limpieza, Clasificación
+// por talla...) Jannet lo tecleaba a mano — si ponía menos que el lote completo
+// (ej. 153.9 en vez de 153.95), el resto se quedaba "atorado" como un sobrante
+// de gramos sueltos en el lote de entrada, sin pasar a ninguna talla/salida ni
+// contarse en la merma. Al fijar el kg completo del lote no puede quedar nada sin usar.
 function actualizarEntradaAuto(){
-  var tipo=g('p1')?g('p1').value:'';
   var p3=g('p3'),lbl=g('p3-lbl');
   if(!p3)return;
-  var esOrdenado=tipo==='Ordenado';
-  if(esOrdenado){
-    var loteId=parseInt(g('p2')?g('p2').value:0)||0;
-    var lote=camara.find(function(x){return x.id===loteId;});
-    p3.value=lote?lote.kg:'';
-    p3.disabled=true;
-    if(lbl)lbl.textContent='Kg que entran al proceso (todo el lote)';
-  } else {
-    p3.disabled=false;
-    if(lbl)lbl.textContent='Kg que entran al proceso';
-  }
+  var loteId=parseInt(g('p2')?g('p2').value:0)||0;
+  var lote=camara.find(function(x){return x.id===loteId;});
+  p3.value=lote?lote.kg:'';
+  p3.disabled=true;
+  if(lbl)lbl.textContent='Kg que entran al proceso (todo el lote)';
 }
 function procSalidaUnidad(i){
   var sel=g('psp'+i);
