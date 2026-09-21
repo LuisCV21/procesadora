@@ -5123,15 +5123,27 @@ function rCaja(){
 //  que Jannet/Antonio lo corran solos sin depender de pedirle a alguien más
 //  que investigue con SQL. Solo lotes "P-" (los que tienen pedido rastreable
 //  de origen) — los lotes viejos sin ese origen no se pueden verificar así.
+// Unidad de un producto según el catálogo (Configuración > Productos). El campo "unidad" guardado en cada
+// lote puede estar vacío o equivocado (lotes viejos, versiones anteriores) — antes eso hacía que una cerveza
+// (por pieza) apareciera como "kg" en esta pantalla.
+function unidadVerificacion(esp,unidadLote){
+  var pc=PRODUCTOS.find(function(x){return x.n===esp;});
+  return (pc&&pc.u)||unidadLote||'kg';
+}
 function calcularVerificacionInventario(){
   var recibidoPorLote={},producidoPorLote={},consumidoPorLote={},vendidoPorLoteId={};
   pedidos.forEach(function(p){
+    // Solo pedidos ya recibidos (uno pendiente todavía no metió nada a cámara/bodega) y con los kilos
+    // REALES recibidos cuando difieren de los pedidos.
+    if(p.est&&p.est!=='recibido')return;
     (p.partidas||[]).forEach(function(part){
       var k=part.esp+'|'+part.lote;
-      recibidoPorLote[k]=(recibidoPorLote[k]||0)+(parseFloat(part.kg)||0);
+      var q=(part.kgReal!==undefined&&part.kgReal!==null)?part.kgReal:part.kg;
+      recibidoPorLote[k]=(recibidoPorLote[k]||0)+(parseFloat(q)||0);
     });
   });
   procesos.forEach(function(pr){
+    if(pr.est&&pr.est!=='completado')return;
     var kIn=pr.esp+'|'+pr.lote;
     consumidoPorLote[kIn]=(consumidoPorLote[kIn]||0)+(parseFloat(pr.kgE)||0);
     (pr.salidas||[]).forEach(function(s){
@@ -5156,11 +5168,11 @@ function calcularVerificacionInventario(){
   camara.concat(bodega).forEach(function(l){
     if(!/^P-/.test(l.lote||''))return;
     var k=l.esp+'|'+l.lote;
-    if(!grupos[k])grupos[k]={esp:l.esp,lote:l.lote,unidad:l.unidad||'kg',ids:[],sistema:0};
+    if(!grupos[k])grupos[k]={esp:l.esp,lote:l.lote,unidad:unidadVerificacion(l.esp,l.unidad),ids:[],sistema:0};
     grupos[k].ids.push(l.id);
     grupos[k].sistema+=l.kg;
   });
-  var problemas=[];
+  var problemasLote=[],porProducto={};
   Object.keys(grupos).forEach(function(k){
     var grp=grupos[k];
     var recibido=recibidoPorLote[k]||0;
@@ -5169,23 +5181,68 @@ function calcularVerificacionInventario(){
     var vendido=grp.ids.reduce(function(a,id){return a+(vendidoPorLoteId[id]||0);},0);
     var esperado=recibido+producido-consumido-vendido;
     var diferencia=Math.round((grp.sistema-esperado)*100)/100;
+    // Además de cada lote, se suma por PRODUCTO: un lote que se vendió de más no puede bajar de 0 en el
+    // sistema, así que ese sobrante se descuenta de otro lote del mismo producto — lote por lote aparece
+    // "sobra" en uno y "falta" en el otro, pero por producto se compensan.
+    var pp=porProducto[grp.esp];
+    if(!pp)pp=porProducto[grp.esp]={esp:grp.esp,unidad:grp.unidad,esperado:0,sistema:0,lotes:[]};
+    pp.esperado+=esperado;
+    pp.sistema+=grp.sistema;
     if(Math.abs(diferencia)>0.5){
-      problemas.push({id:grp.ids[0],idsTodos:grp.ids,esp:grp.esp,lote:grp.lote,esperado:Math.round(esperado*100)/100,sistema:grp.sistema,diferencia:diferencia,unidad:grp.unidad});
+      var prob={id:grp.ids[0],idsTodos:grp.ids,esp:grp.esp,lote:grp.lote,esperado:Math.round(esperado*100)/100,sistema:grp.sistema,diferencia:diferencia,unidad:grp.unidad};
+      problemasLote.push(prob);
+      pp.lotes.push(prob);
     }
   });
-  problemas.sort(function(a,b){return Math.abs(b.diferencia)-Math.abs(a.diferencia);});
-  return problemas;
+  problemasLote.sort(function(a,b){return Math.abs(b.diferencia)-Math.abs(a.diferencia);});
+  var productos=Object.keys(porProducto).map(function(e){
+    var p=porProducto[e];
+    p.esperado=Math.round(p.esperado*100)/100;
+    p.sistema=Math.round(p.sistema*100)/100;
+    p.diferencia=Math.round((p.sistema-p.esperado)*100)/100;
+    return p;
+  });
+  return {
+    porLote:problemasLote,
+    productosQueNoCuadran:productos.filter(function(p){return Math.abs(p.diferencia)>0.5;}).sort(function(a,b){return Math.abs(b.diferencia)-Math.abs(a.diferencia);}),
+    productosCompensados:productos.filter(function(p){return Math.abs(p.diferencia)<=0.5&&p.lotes.length>0;})
+  };
 }
 function rVerificarInventario(){
   var canEdit=ROL==='admin';
-  var problemas=calcularVerificacionInventario();
+  var v=calcularVerificacionInventario();
+  var problemas=v.porLote;
   var intro='<div class="card" style="margin-bottom:18px"><div class="card-body">'+
-    '<div style="font-size:13px;color:var(--text3)">Compara, lote por lote, lo que entró (pedidos recibidos + procesos) menos lo que salió (notas de venta + procesos) contra lo que el sistema dice tener ahora. '+
-    'Si un lote no cuadra, es señal de que algo se corrigió mal en algún lado (una edición directa, un corte de mes calculado con inventario en vivo, etc.) — no de que falte mercancía por robo o merma, aunque también puede ser eso. '+
-    'Solo revisa lotes con código "P-" (los que tienen un pedido de origen rastreable); lotes muy viejos (de antes de julio 2026) no se pueden verificar así.</div>'+
+    '<div style="font-size:13px;color:var(--text3)">Compara lo que entró (pedidos recibidos + procesos) menos lo que salió (notas de venta + procesos) contra lo que el sistema dice tener ahora, <b>por producto</b> y lote por lote. '+
+    'Si un producto no cuadra, es señal de que algo se corrigió mal en algún lado (una edición directa, un dispositivo con datos viejos, etc.) — no de que falte mercancía por robo o merma, aunque también puede ser eso. '+
+    'Solo revisa lotes con código "P-" (los que tienen un pedido de origen rastreable); lotes muy viejos (de antes de julio 2026) no se pueden verificar así, y un ajuste hecho en uno de esos puede aparecer aquí como diferencia.</div>'+
   '</div></div>';
   if(problemas.length===0){
     return intro+'<div class="card"><div class="card-body" style="text-align:center;padding:30px;color:var(--accent)">✅ Todo cuadra — no se encontró ningún lote con diferencia mayor a 0.5.</div></div>';
+  }
+  var html=intro;
+  if(v.productosQueNoCuadran.length===0){
+    html+='<div class="card" style="margin-bottom:18px"><div class="card-body" style="text-align:center;padding:24px;color:var(--accent)">✅ Por producto todo cuadra — ningún producto tiene diferencia neta mayor a 0.5.</div></div>';
+  } else {
+    var filasP=v.productosQueNoCuadran.map(function(p){
+      var color=p.diferencia>0?'var(--warn)':'var(--danger)';
+      var signo=p.diferencia>0?'sobra':'falta';
+      var detalle=p.lotes.map(function(l){return l.lote+': '+(l.diferencia>0?'+':'')+l.diferencia;}).join(' · ');
+      return '<tr>'+
+        '<td class="pr">'+p.esp+'</td>'+
+        '<td class="mn">'+p.esperado+' '+p.unidad+'</td>'+
+        '<td class="mn">'+p.sistema+' '+p.unidad+'</td>'+
+        '<td class="mn" style="color:'+color+';font-weight:700">'+(p.diferencia>0?'+':'')+p.diferencia+' '+p.unidad+' ('+signo+')</td>'+
+        '<td style="font-size:12px;color:var(--text3)">'+detalle+'</td>'+
+      '</tr>';
+    }).join('');
+    html+='<div class="card" style="margin-bottom:18px"><div class="card-hdr"><div class="card-title">'+v.productosQueNoCuadran.length+' producto(s) que no cuadran</div></div>'+
+      '<div class="tw"><table><thead><tr><th>Producto</th><th>Debería tener</th><th>Sistema dice</th><th>Diferencia</th><th>Lotes</th></tr></thead><tbody>'+filasP+'</tbody></table></div></div>';
+  }
+  if(v.productosCompensados.length>0){
+    html+='<div class="card" style="margin-bottom:18px"><div class="card-body" style="font-size:13px;color:var(--text3)">'+
+      '<b>'+v.productosCompensados.length+' producto(s)</b> tienen lotes que no cuadran solos pero se <b>compensan entre sí</b> (un lote vendido de más no baja de 0 y el sobrante se descontó de otro lote del mismo producto): '+
+      v.productosCompensados.map(function(p){return p.esp;}).join(', ')+'. Están en el detalle de abajo.</div></div>';
   }
   var filas=problemas.map(function(p){
     var color=p.diferencia>0?'var(--warn)':'var(--danger)';
@@ -5200,10 +5257,11 @@ function rVerificarInventario(){
       (canEdit?'<td class="mn">'+(multi?'<span style="color:var(--text3);font-size:12px">revisar los '+p.idsTodos.length+' a mano</span>':'<button class="btn btn-icon" title="Editar lote" onclick="'+(camara.some(function(x){return x.id===p.id;})?'mEditLote':'mEditBodega')+'('+p.id+')">✏️</button>')+'</td>':'')+
     '</tr>';
   }).join('');
-  return intro+'<div class="card"><div class="card-hdr"><div class="card-title">'+problemas.length+' lote(s) que no cuadran</div></div>'+
+  html+='<div class="card"><div class="card-hdr"><div class="card-title">Detalle por lote — '+problemas.length+' lote(s)</div></div>'+
     '<div class="tw"><table><thead><tr><th>Producto</th><th>Lote</th><th>Debería tener</th><th>Sistema dice</th><th>Diferencia</th>'+(canEdit?'<th></th>':'')+'</tr></thead><tbody>'+filas+'</tbody></table></div>'+
-    (canEdit?'<div class="card-body" style="font-size:12px;color:var(--text3)">Usa el ✏️ para abrir "Editar lote" y corregir la cantidad al valor de "Debería tener" — eso sí queda registrado en la bitácora (Configuración → Auditoría).</div>':'')+
+    (canEdit?'<div class="card-body" style="font-size:12px;color:var(--text3)">Usa el ✏️ para abrir "Editar lote" y corregir la cantidad al valor de "Debería tener" — eso sí queda registrado en la bitácora (Configuración → Auditoría). Ojo: si el producto ya cuadra por producto, no hace falta corregir el lote.</div>':'')+
   '</div>';
+  return html;
 }
 
 function datosCorteDetalle(desde,hasta){
