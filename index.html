@@ -4194,7 +4194,7 @@ function rEditarPartidas(){
       '<div class="field" style="max-width:220px"><label>Condiciones</label><select id="epcond"><option value="Crédito"'+(n.condiciones==='Crédito'?' selected':'')+'>Crédito</option><option value="Contado"'+(n.condiciones==='Contado'?' selected':'')+'>Contado</option></select></div>':
       '<div style="color:var(--text3);font-size:13px">Condiciones: '+(n.condiciones||'—')+'</div>')+
   '</div></div>'+
-  '<div class="card"><div class="card-hdr"><div class="card-title">Partidas <span style="font-size:13px;color:var(--text3);font-weight:normal">— Corrige cantidad, precio o producto; el stock disponible ya considera lo reservado por esta nota</span></div></div><div class="card-body">'+
+  '<div class="card"><div class="card-hdr"><div class="card-title">Partidas <span style="font-size:13px;color:var(--text3);font-weight:normal">— '+(n.mercanciaEntregada?'Corrección de papel: la mercancía ya salió, así que esta edición NO modifica el inventario':'Corrige cantidad, precio o producto; el stock disponible ya considera lo reservado por esta nota')+'</span></div></div><div class="card-body">'+
     '<div style="display:grid;grid-template-columns:70px 1fr 82px 90px 32px;gap:6px;padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:8px">'+
       ['Cant.','Producto / Lote','Precio $','Importe $',''].map(function(h){return '<span style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase">'+h+'</span>';}).join('')+
     '</div>'+filas+
@@ -4278,7 +4278,12 @@ function gEditarPartidas(){
   });
   if(nuevas.length===0){alert('La nota debe tener al menos una partida válida');return;}
   if(errPrecio.length>0){alert('No se puede vender sin precio asignado — corrígelo en Precios pendientes:\n'+errPrecio.join('\n'));return;}
-  Object.keys(usoNuevo).forEach(function(loteIdStr){
+  // Si la mercancía de la nota ya salió (nota corregida con "Corregir nota"),
+  // esta edición es solo de papel y no descuenta nada de cámara/bodega (ver
+  // más abajo), así que no hay nada que validar contra el stock actual — antes
+  // exigía que cada lote tuviera hoy al menos lo que ya se había entregado, y
+  // eso bloqueaba corregir cualquier nota cuyos lotes ya estaban agotados.
+  if(!n.mercanciaEntregada)Object.keys(usoNuevo).forEach(function(loteIdStr){
     var loteId=parseInt(loteIdStr);
     var lote=buscarLoteVenta(loteId);
     var disponible=(lote?lote.kg:0)+(origPorLote[loteId]||0);
