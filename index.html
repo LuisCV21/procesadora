@@ -1186,6 +1186,13 @@ var gastos=load('gastos',[]);
 var cortesCerrados=load('cortes_cerrados',[]);
 // Punto de partida del estado de cuenta de caja: el efectivo que había el día que se empezó a usar el sistema
 var saldoInicialCaja=load('saldo_inicial_caja',{monto:0,fecha:today()});
+// Punto de partida de "Verificar inventario": al fijarlo (después de un conteo
+// físico completo) se guarda, por cada producto+lote, la diferencia que el
+// historial ya traía en ese momento. A partir de ahí la verificación solo
+// muestra diferencias NUEVAS — lo viejo (cargas iniciales sin pedido, procesos
+// con piezas estimadas, correcciones pasadas) queda absorbido en la base y deja
+// de aparecer como si fuera un problema actual. No borra ningún registro.
+var invBase=load('inv_base',null);
 // Por defecto solo Gerente recibe pedidos de proveedores; activable desde Configuración
 var ADMIN_RECIBE=load('admin_puede_recibir',false);
 function puedeRecibir(){return ROL==='gerente'||(ROL==='admin'&&ADMIN_RECIBE);}
@@ -5165,8 +5172,12 @@ function calcularVerificacionInventario(){
   // aunque juntos cuadraran exacto. Agrupando, el grupo completo se compara
   // contra el total una sola vez.
   var grupos={};
+  // Sin punto de partida solo se pueden verificar lotes "P-" (con pedido de
+  // origen). Con punto de partida se verifican TODOS: lo que un lote viejo
+  // traía de antes ya quedó guardado en la base.
+  var base=(invBase&&invBase.offsets)?invBase.offsets:null;
   camara.concat(bodega).forEach(function(l){
-    if(!/^P-/.test(l.lote||''))return;
+    if(!base&&!/^P-/.test(l.lote||''))return;
     var k=l.esp+'|'+l.lote;
     if(!grupos[k])grupos[k]={esp:l.esp,lote:l.lote,unidad:unidadVerificacion(l.esp,l.unidad),ids:[],sistema:0};
     grupos[k].ids.push(l.id);
@@ -5179,7 +5190,10 @@ function calcularVerificacionInventario(){
     var producido=producidoPorLote[k]||0;
     var consumido=consumidoPorLote[k]||0;
     var vendido=grp.ids.reduce(function(a,id){return a+(vendidoPorLoteId[id]||0);},0);
-    var esperado=recibido+producido-consumido-vendido;
+    // La diferencia que ya existía al fijar el punto de partida se suma a lo
+    // esperado: así "Debería tener" parte del inventario real contado y solo
+    // lo que pase DESPUÉS puede generar una diferencia.
+    var esperado=recibido+producido-consumido-vendido+(base&&base[k]?base[k]:0);
     var diferencia=Math.round((grp.sistema-esperado)*100)/100;
     // Además de cada lote, se suma por PRODUCTO: un lote que se vendió de más no puede bajar de 0 en el
     // sistema, así que ese sobrante se descuenta de otro lote del mismo producto — lote por lote aparece
@@ -5208,14 +5222,90 @@ function calcularVerificacionInventario(){
     productosCompensados:productos.filter(function(p){return Math.abs(p.diferencia)<=0.5&&p.lotes.length>0;})
   };
 }
+// Diferencia actual (sistema − historial) por producto+lote, para TODOS los
+// lotes — es lo que se congela como punto de partida.
+function diferenciasActualesPorLote(){
+  var guardada=invBase;
+  invBase=null;
+  var recibidoPorLote={},producidoPorLote={},consumidoPorLote={},vendidoPorLoteId={};
+  pedidos.forEach(function(p){
+    if(p.est&&p.est!=='recibido')return;
+    (p.partidas||[]).forEach(function(part){
+      var k=part.esp+'|'+part.lote;
+      var q=(part.kgReal!==undefined&&part.kgReal!==null)?part.kgReal:part.kg;
+      recibidoPorLote[k]=(recibidoPorLote[k]||0)+(parseFloat(q)||0);
+    });
+  });
+  procesos.forEach(function(pr){
+    if(pr.est&&pr.est!=='completado')return;
+    var kIn=pr.esp+'|'+pr.lote;
+    consumidoPorLote[kIn]=(consumidoPorLote[kIn]||0)+(parseFloat(pr.kgE)||0);
+    (pr.salidas||[]).forEach(function(s){
+      var kOut=s.esp+'|'+pr.lote;
+      producidoPorLote[kOut]=(producidoPorLote[kOut]||0)+(parseFloat(s.kg)||0);
+    });
+  });
+  notas.forEach(function(n){
+    (n.partidas||[]).forEach(function(p){
+      vendidoPorLoteId[p.loteId]=(vendidoPorLoteId[p.loteId]||0)+(parseFloat(p.cant)||0);
+    });
+  });
+  var grupos={};
+  camara.concat(bodega).forEach(function(l){
+    var k=l.esp+'|'+l.lote;
+    if(!grupos[k])grupos[k]={ids:[],sistema:0};
+    grupos[k].ids.push(l.id);
+    grupos[k].sistema+=l.kg;
+  });
+  var offsets={};
+  Object.keys(grupos).forEach(function(k){
+    var grp=grupos[k];
+    var vendido=grp.ids.reduce(function(a,id){return a+(vendidoPorLoteId[id]||0);},0);
+    var esperado=(recibidoPorLote[k]||0)+(producidoPorLote[k]||0)-(consumidoPorLote[k]||0)-vendido;
+    var dif=Math.round((grp.sistema-esperado)*100)/100;
+    if(dif!==0)offsets[k]=dif;
+  });
+  invBase=guardada;
+  return offsets;
+}
+function mFijarBaseInventario(){
+  if(ROL!=='admin')return;
+  modal('<div class="modal" style="max-width:480px">'+
+    '<div class="modal-hdr"><div class="modal-title">📌 Fijar punto de partida del inventario</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div style="margin-bottom:12px">Úsalo <b>solo justo después de un conteo físico completo</b>, cuando Cámara y Bodega ya estén corregidas al conteo.</div>'+
+      '<div class="muted" style="margin-bottom:12px">Desde ese momento, "Verificar inventario" solo mostrará diferencias <b>nuevas</b>. No se borra ninguna nota, pedido, proceso ni la bitácora — solo se deja de comparar contra el historial de antes.</div>'+
+      '<div class="field"><label>Escribe <b>FIJAR</b> para confirmar</label><input id="fbtxt" autocomplete="off" oninput="g(\'fbtxt_btn\').disabled=(this.value.trim().toUpperCase()!==\'FIJAR\')"></div>'+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button>'+
+    '<button class="btn btn-p" id="fbtxt_btn" disabled onclick="gFijarBaseInventario()">Fijar punto de partida</button></div>'+
+  '</div>');
+  setTimeout(function(){var el=g('fbtxt');if(el)el.focus();},50);
+}
+function gFijarBaseInventario(){
+  if(ROL!=='admin')return;
+  var offsets=diferenciasActualesPorLote();
+  var n=Object.keys(offsets).length;
+  invBase={fecha:today(),hora:new Date().toTimeString().slice(0,5),usuario:CUR_USER?CUR_USER.nombre:'',offsets:offsets};
+  audit('Fijó punto de partida del inventario','Caja','Verificar inventario compara desde aquí · '+n+' lote(s) con diferencia histórica absorbida');
+  save('inv_base',invBase);
+  persist();cm();nav('caja');
+}
+
 function rVerificarInventario(){
   var canEdit=ROL==='admin';
   var v=calcularVerificacionInventario();
   var problemas=v.porLote;
-  var intro='<div class="card" style="margin-bottom:18px"><div class="card-body">'+
+  var baseTxt=invBase
+    ?'<div style="font-size:13px;margin-bottom:8px">📌 <b>Punto de partida:</b> '+fmtFecha(invBase.fecha)+' '+(invBase.hora||'')+(invBase.usuario?' · '+invBase.usuario:'')+' — solo se muestran diferencias nuevas desde entonces.</div>'
+    :'<div style="font-size:13px;margin-bottom:8px;color:var(--warn)">Sin punto de partida: se compara contra todo el historial desde julio.</div>';
+  var baseBtn=canEdit?'<button class="btn btn-xs" style="margin-top:10px" onclick="mFijarBaseInventario()">📌 '+(invBase?'Volver a fijar':'Fijar')+' punto de partida (después de un conteo físico)</button>':'';
+  var intro='<div class="card" style="margin-bottom:18px"><div class="card-body">'+baseTxt+
     '<div style="font-size:13px;color:var(--text3)">Compara lo que entró (pedidos recibidos + procesos) menos lo que salió (notas de venta + procesos) contra lo que el sistema dice tener ahora, <b>por producto</b> y lote por lote. '+
     'Si un producto no cuadra, es señal de que algo se corrigió mal en algún lado (una edición directa, un dispositivo con datos viejos, etc.) — no de que falte mercancía por robo o merma, aunque también puede ser eso. '+
-    'Solo revisa lotes con código "P-" (los que tienen un pedido de origen rastreable); lotes muy viejos (de antes de julio 2026) no se pueden verificar así, y un ajuste hecho en uno de esos puede aparecer aquí como diferencia.</div>'+
+    (invBase?'Con punto de partida se revisan todos los lotes, incluidos los viejos sin pedido de origen.'
+      :'Solo revisa lotes con código "P-" (los que tienen un pedido de origen rastreable); lotes muy viejos (de antes de julio 2026) no se pueden verificar así, y un ajuste hecho en uno de esos puede aparecer aquí como diferencia.')+'</div>'+
+    baseBtn+
   '</div></div>';
   if(problemas.length===0){
     return intro+'<div class="card"><div class="card-body" style="text-align:center;padding:30px;color:var(--accent)">✅ Todo cuadra — no se encontró ningún lote con diferencia mayor a 0.5.</div></div>';
@@ -7214,6 +7304,7 @@ function aplicarDatos(data){
   if(rcCorte.tiene){cortesCerrados=rcCorte.items;podarCacheLocal('corte_',keysData.filter(function(k){return k.indexOf('corte_')===0;}));}
   else if(data.cortes_cerrados)cortesCerrados=mergeArrayPorId(cortesCerrados,data.cortes_cerrados,'mes',true);
   if(data.saldo_inicial_caja)saldoInicialCaja=data.saldo_inicial_caja;
+  if(data.inv_base)invBase=data.inv_base;
   if(data.admin_puede_recibir!==undefined&&data.admin_puede_recibir!==null)ADMIN_RECIBE=data.admin_puede_recibir;
   // Recalcula el efectivo declarado desde las transacciones ya combinadas
   // arriba, en vez de quedarse con el valor de la columna efectivo_declarado
