@@ -1,3 +1,40 @@
+# 2026-09-24: guardados simultáneos y punto de partida del inventario
+
+**Guardado con versión.** Cada registro de bodega_data que es "una fila por
+registro" (`lotecam_`, `lotebod_`, `nota_`, `pedido_`, `proceso_`, `vale_`,
+`gasto_`, `comp_`, `producto_`, `corte_`) lleva `_v` dentro de su value y se
+guarda con la función SQL `bd_guardar(p_key, p_value, p_base_v, p_kg_delta)`
+en vez del upsert ciego:
+
+- versión igual a la que vio el dispositivo → se guarda y `_v` sube;
+- versión distinta en un **lote** → se aplica solo la diferencia de kg de este
+  dispositivo sobre lo que hay ahora (dos ventas simultáneas del mismo lote
+  se restan las dos); si quedaría en negativo se rechaza;
+- versión distinta en cualquier otra cosa → **no se sobrescribe**: se avisa
+  en pantalla, queda en la bitácora ("Cambio rechazado por guardado
+  simultáneo") y se recarga la versión actual;
+- un registro que otra persona borró/movió no se revive.
+
+`SRV` (en index.html) guarda por key la versión y kg vistos del servidor; los
+guardados de una misma key van en cola (`enCola`) y la cola de pendientes
+guarda la base con la que se intentó. `next_id`/`next_folio`/`next_pedido_num`
+ya no pueden bajar, y cada dispositivo reserva bloques de 50 ids con
+`reservar_ids(n)` para que dos computadoras no generen el mismo id.
+
+También se corrigió `sincronizarRemoto`: el aviso de cambio que llegaba en
+los 5 s posteriores a un guardado propio se descartaba (la pantalla se
+quedaba con datos viejos hasta 3 min); ahora se difiere.
+
+**Pendiente conocido:** una nota nueva que descuenta varios lotes no es una
+transacción única — si un lote se rechaza (ej. quedaría en negativo), la
+nota sí se guarda y el aviso lo indica; hay que corregir ese lote a mano.
+El folio de nota todavía se toma del contador local (dos notas simultáneas
+pueden salir con el mismo folio, aunque ya no se pisan entre sí).
+
+**Punto de partida del inventario** (`inv_base`): ver Caja → Verificar
+inventario. Después de un conteo físico se fija, y la verificación solo
+muestra diferencias nuevas desde entonces (sin borrar historial).
+
 # RESUELTO (2026-09-10): sincronización por bloque completo (riesgo de dinero)
 
 ## Estado actual

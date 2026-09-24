@@ -418,9 +418,13 @@ window.addEventListener('beforeunload',function(e){
 // ══════════════════════════════════════════════════════
 function getPendientes(){try{return JSON.parse(localStorage.getItem('bmp_pending')||'{}');}catch(e){return {};}}
 function setPendientes(p){try{localStorage.setItem('bmp_pending',JSON.stringify(p));}catch(e){}}
-function marcarPendiente(key,val){
+function marcarPendiente(key,val,base){
   var p=getPendientes();
-  p[key]={val:val,ts:Date.now()};
+  // Si ya había un pendiente de esta key, se conserva su base original: es la
+  // última versión que este dispositivo vio del servidor, contra la que se
+  // tiene que comparar al reintentar (no la de un intento posterior).
+  var baseGuardada=p[key]&&p[key].base;
+  p[key]={val:val,ts:Date.now(),base:baseGuardada||base||null};
   setPendientes(p);
   actualizarBadgePendientes();
 }
@@ -443,7 +447,7 @@ function reintentarPendientes(){
   var keys=Object.keys(p);
   if(keys.length===0)return;
   keys.forEach(function(k){
-    var accion=p[k].val===PENDING_DELETE?sbDeleteReal(k):sbSetReal(k,p[k].val);
+    var accion=p[k].val===PENDING_DELETE?sbDeleteReal(k):sbSetReal(k,p[k].val,p[k].base);
     accion.then(function(r){
       if(r&&r.ok)quitarPendiente(k);
     });
@@ -453,8 +457,115 @@ function reintentarPendientes(){
 window.addEventListener('online',reintentarPendientes);
 setInterval(reintentarPendientes,8000);
 
+// ══════════════════════════════════════════════════════
+//  GUARDADO CON VERSIÓN — evita que un guardado pise el de otra persona
+// ══════════════════════════════════════════════════════
+// Cada registro (lote, nota, pedido, proceso, vale, gasto, compensación,
+// producto, corte) lleva "_v" en su value. SRV guarda, por key, la versión y
+// los kg que este dispositivo vio por última vez EN EL SERVIDOR. Al guardar se
+// manda esa versión a la función bd_guardar de Supabase:
+//   - si nadie más lo cambió, se guarda normal;
+//   - si otra persona lo cambió y es un lote, solo se aplica la diferencia de
+//     kg de este dispositivo sobre lo que hay ahora (dos ventas del mismo lote
+//     al mismo tiempo ya no se pisan: se restan las dos);
+//   - si es otra cosa (nota, pedido…), NO se sobrescribe: se avisa y se
+//     recarga la versión nueva para que la persona rehaga su cambio.
+// Antes todo era un upsert ciego: ganaba el último que guardaba.
+var SRV={};
+var FILA_VERSIONADA=/^(lotecam|lotebod|nota|pedido|proceso|vale|gasto|comp|producto|corte)_/;
+var CONTADORES={next_id:1,next_folio:1,next_pedido_num:1};
+function _esObjeto(v){return v&&typeof v==='object'&&!Array.isArray(v);}
+function registrarSrv(key,val){
+  if(!_esObjeto(val)){delete SRV[key];return;}
+  SRV[key]={v:(typeof val._v==='number'?val._v:null),kg:(typeof val.kg==='number'?val.kg:null)};
+}
+function baseDe(key){
+  var s=SRV[key];
+  return s?{v:s.v,kg:s.kg}:{v:null,kg:null};
+}
+// Los guardados de una misma key se mandan uno tras otro (nunca en paralelo):
+// así cada uno sale con la versión que dejó el anterior, en vez de dos con la
+// misma versión vieja que el servidor tomaría como choque.
+var _colaGuardado={};
+function enCola(key,fn){
+  var prev=_colaGuardado[key]||Promise.resolve();
+  var sig=prev.then(fn,fn);
+  _colaGuardado[key]=sig.then(function(){},function(){});
+  return sig;
+}
+function avisoGuardado(msg,tipo){
+  var el=document.getElementById('guardado-aviso');
+  if(!el){
+    el=document.createElement('div');
+    el.id='guardado-aviso';
+    el.style.cssText='position:fixed;bottom:20px;left:20px;max-width:420px;color:#fff;padding:12px 16px;border-radius:8px;font-size:13px;font-weight:600;z-index:10000;box-shadow:0 4px 16px rgba(0,0,0,.25);cursor:pointer';
+    el.onclick=function(){el.style.display='none';};
+    document.body.appendChild(el);
+  }
+  el.style.background=tipo==='error'?'#b3261e':'#8a5a00';
+  el.textContent=msg;
+  el.style.display='block';
+  clearTimeout(el._t);
+  el._t=setTimeout(function(){el.style.display='none';},12000);
+}
+function describirKey(key,val){
+  if(/^lote(cam|bod)_/.test(key))return 'el lote '+((val&&val.esp)||'')+' '+((val&&val.lote)||'');
+  if(/^nota_/.test(key))return 'la nota #'+((val&&val.folio)||'');
+  if(/^pedido_/.test(key))return 'el pedido '+((val&&(val.numPedido||val.prov))||'');
+  if(/^proceso_/.test(key))return 'el proceso de '+((val&&val.esp)||'')+' '+((val&&val.lote)||'');
+  return key;
+}
+// Aplica al arreglo en memoria el valor que quedó en el servidor (después de
+// combinar o de un choque) — mismo objeto que usa el resto de la app.
+function aplicarValorServidor(key,val){
+  var m=key.match(/^(lotecam|lotebod|nota|pedido|proceso)_(.+)$/);
+  if(!m||!_esObjeto(val))return;
+  var arr={lotecam:camara,lotebod:bodega,nota:notas,pedido:pedidos,proceso:procesos}[m[1]];
+  var obj=arr&&arr.find(function(x){return String(x.id)===m[2];});
+  if(obj){Object.keys(obj).forEach(function(k){if(!(k in val))delete obj[k];});Object.assign(obj,val);}
+  saveLocal(key,val);
+}
+function sbGuardarVersionado(key,val,base){
+  var esLote=/^lote(cam|bod)_/.test(key);
+  var delta=(esLote&&base.kg!==null&&_esObjeto(val)&&typeof val.kg==='number')?Math.round((val.kg-base.kg)*1000)/1000:null;
+  var body=JSON.stringify({p_key:key,p_value:val,p_base_v:CONTADORES[key]?null:base.v,p_kg_delta:delta});
+  return _trackOp(fetch(SB_URL+'/rest/v1/rpc/bd_guardar?apikey='+SB_KEY,{
+    method:'POST',headers:SB_HEADERS,body:body
+  }).then(function(r){
+    sbStatus(r.ok);
+    if(!r.ok)return null;
+    return r.json().then(function(res){
+      if(CONTADORES[key])return {ok:true};
+      if(res.status==='ok'){
+        registrarSrv(key,res.value);
+        if(_esObjeto(val))val._v=res.value._v;
+        return {ok:true};
+      }
+      if(res.status==='merged'){
+        registrarSrv(key,res.value);
+        aplicarValorServidor(key,res.value);
+        avisoGuardado('Otra persona movió '+describirKey(key,res.value)+' al mismo tiempo. Se sumaron los dos movimientos: ahora hay '+res.value.kg+' '+(res.value.unidad||'kg')+'.','aviso');
+        audit('Combinó guardado simultáneo','Sistema',describirKey(key,res.value)+' · queda en '+res.value.kg+' '+(res.value.unidad||'kg'));
+        persistAuditLog();
+        if(CUR_TAB)nav(CUR_TAB);
+        return {ok:true};
+      }
+      // conflict: no se pisó nada. Se deja constancia y se recarga lo del servidor.
+      var motivo=res.reason==='negative'?'dejaría el lote en negativo':res.reason==='deleted'?'ya fue borrado o movido por otra persona':'otra persona lo modificó antes';
+      avisoGuardado('No se guardó tu cambio en '+describirKey(key,val)+': '+motivo+'. Se recargó la versión actual — revisa y vuelve a hacerlo si hace falta.','error');
+      audit('Cambio rechazado por guardado simultáneo','Sistema',describirKey(key,val)+' · '+motivo);
+      persistAuditLog();
+      if(res.value){registrarSrv(key,res.value);aplicarValorServidor(key,res.value);}
+      else{delete SRV[key];}
+      setTimeout(function(){_rtUltimaSync=0;sincronizarRemoto();},300);
+      return {ok:true,conflicto:true};
+    });
+  }).catch(function(e){sbStatus(false);console.warn('bd_guardar error:',key,e);return null;}));
+}
+
 // Guardar en Supabase (upsert) — si falla, se guarda en la cola de pendientes
-function sbSetReal(key,val){
+function sbSetReal(key,val,base){
+  if(FILA_VERSIONADA.test(key)||CONTADORES[key])return sbGuardarVersionado(key,val,base||baseDe(key));
   var body=JSON.stringify({key:key,value:val});
   return _trackOp(fetch(SB_URL+'/rest/v1/bodega_data?on_conflict=key&apikey='+SB_KEY,{
     method:'POST',
@@ -464,10 +575,13 @@ function sbSetReal(key,val){
   .catch(function(e){sbStatus(false);console.warn('sbSet error:',key,e);return null;}));
 }
 function sbSet(key,val){
-  return sbSetReal(key,val).then(function(r){
-    if(r&&r.ok){quitarPendiente(key);}
-    else{marcarPendiente(key,val);}
-    return r;
+  return enCola(key,function(){
+    var base=baseDe(key);
+    return sbSetReal(key,val,base).then(function(r){
+      if(r&&r.ok){quitarPendiente(key);}
+      else{marcarPendiente(key,val,base);}
+      return r;
+    });
   });
 }
 
@@ -483,7 +597,7 @@ function sbDeleteReal(key){
 }
 function sbDelete(key){
   return sbDeleteReal(key).then(function(r){
-    if(r&&r.ok){quitarPendiente(key);}
+    if(r&&r.ok){quitarPendiente(key);delete SRV[key];}
     else{marcarPendiente(key,PENDING_DELETE);}
     return r;
   });
@@ -1228,7 +1342,33 @@ function persist(){
 // ══════════════════════════════════════════════════════
 function g(id){return document.getElementById(id);}
 function cm(){g('mr').innerHTML='';}
-function uid(){return ++NEXT_ID;}
+// Cada dispositivo reserva en Supabase un bloque de ids (reservar_ids) y los
+// va usando; así dos computadoras capturando al mismo tiempo nunca generan el
+// mismo id (antes ambas hacían ++NEXT_ID desde el mismo número y el segundo
+// guardado pisaba el registro del primero). Si no hay bloque (sin internet),
+// cae al contador local como antes — bd_guardar detecta un choque de ese tipo
+// y lo rechaza en vez de sobrescribir.
+var _bloqueIds={sig:0,fin:-1},_reservando=false;
+function reservarBloqueIds(){
+  if(_reservando)return;
+  _reservando=true;
+  fetch(SB_URL+'/rest/v1/rpc/reservar_ids?apikey='+SB_KEY,{method:'POST',headers:SB_HEADERS,body:JSON.stringify({p_n:50})})
+    .then(function(r){return r.ok?r.json():null;})
+    .then(function(ini){
+      if(typeof ini==='number'&&ini>0){_bloqueIds={sig:ini,fin:ini+49};if(ini+49>NEXT_ID)NEXT_ID=ini+49;}
+    })
+    .catch(function(){})
+    .then(function(){_reservando=false;});
+}
+function uid(){
+  if(_bloqueIds.sig<=_bloqueIds.fin){
+    var id=_bloqueIds.sig++;
+    if(_bloqueIds.fin-_bloqueIds.sig<10)reservarBloqueIds();
+    return id;
+  }
+  reservarBloqueIds();
+  return ++NEXT_ID;
+}
 function money(v){return '$'+parseFloat(v||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function pcomma(v){return parseFloat(v||0).toLocaleString('es-MX');}
 // Resta kg de un lote y evita que quede un residuo de redondeo (ej. 0.002) que
@@ -7240,6 +7380,8 @@ function aplicarDatos(data){
   var pend=getPendientes();
   Object.keys(pend).forEach(function(k){delete data[k];});
   var keysData=Object.keys(data);
+  // Versión y kg de cada registro tal como están en el servidor (ver bd_guardar).
+  keysData.forEach(function(k){if(FILA_VERSIONADA.test(k))registrarSrv(k,data[k]);});
 
   var rcLoteCam=reconstruirColeccionDesdeMapa(data,'lotecam_');
   if(rcLoteCam.tiene){camara=rcLoteCam.items;normalizarLotesAgotados(camara);podarCacheLocal('lotecam_',keysData.filter(function(k){return k.indexOf('lotecam_')===0;}));}
@@ -7394,6 +7536,7 @@ function arrancar(){
 var _rtTimer=null;
 var _rtActivo=false;
 var _rtUltimaSync=0;
+var _syncDiferido=null;
 
 function sincronizarRemoto(){
   // No pollear con la pestaña en segundo plano — evita quemar egress con
@@ -7403,7 +7546,15 @@ function sincronizarRemoto(){
   if(document.hidden)return;
   // Solo sincronizar si han pasado al menos 5 segundos desde el último persist propio
   var ahora=Date.now();
-  if(ahora-_rtUltimaSync<5000)return;
+  if(ahora-_rtUltimaSync<5000){
+    // Antes este aviso se descartaba: si otra computadora guardaba justo
+    // después de un guardado propio, esta pantalla se quedaba con datos
+    // viejos hasta el siguiente aviso (o 3 min) — y el siguiente guardado
+    // desde ahí pisaba lo de la otra persona. Ahora se deja para después.
+    clearTimeout(_syncDiferido);
+    _syncDiferido=setTimeout(sincronizarRemoto,5000-(ahora-_rtUltimaSync)+200);
+    return;
+  }
   sbGetAll()
     .then(function(data){
       if(!data||Object.keys(data).length===0)return;
@@ -7518,6 +7669,7 @@ sbGetAllFilas()
       rows.forEach(function(r){data[r.key]=r.value;});
       aplicarDatos(data);
       sbStatus(true);
+      reservarBloqueIds();
       if(_tieneLocal){
         // Ya estaba arrancado — solo refrescar la vista si hubo cambios
         mostrarNotifSync();
