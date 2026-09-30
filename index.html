@@ -923,6 +923,8 @@ var PRODS_DEF=[
   // — flujo de corte de Robalo (entero → cabeza + postas), ver TIPO_ROBALO_CABEZA —
   {id:85,n:'Robalo',u:'kg',cat:'robalo',soloProceso:true},
   {id:86,n:'Posta de robalo para caldo',u:'pz',cat:'robalo'},
+  // — flujo de Robalo para lomos (entero → lomos + huesos), ver TIPO_ROBALO_LOMOS —
+  {id:87,n:'Huesos para caldo',u:'pz',cat:'robalo'},
 ];
 
 var PROVS_DEF=['Pescadería Hernández','Mariscos del Golfo S.A.','Exportadores Veracruz','Mariscos Tuxpan'];
@@ -935,7 +937,15 @@ var PCT_TRANSFER_CABEZA_ROBALO=0.30;
 // La cabeza siempre se empaca en bolsas/órdenes de medio kilo — con el peso
 // total que se pesó junta, las piezas se calculan solas (no se cuentan a mano).
 var KG_BOLSA_CABEZA_ROBALO=0.5;
-var PROC_TIPOS_DEF=['Limpieza de pescado','Clasificación por talla',TIPO_ROBALO_CABEZA];
+// Robalo del que se sacan lomos: la cabeza no trae suficiente carne para
+// venderse como producto, así que se usa (con el espinazo) como "Huesos para
+// caldo". Pedido de Jannet (sept-2026): los huesos NO se reparten el costo por
+// peso -- cada bolsa/orden vale un costo fijo, eso se le resta al costo total
+// del pescado y lo que queda se reparte entre los lomos por peso. De los
+// huesos solo se captura cuántas bolsas salieron (no se pesan).
+var TIPO_ROBALO_LOMOS='Robalo (lomos + huesos para caldo)';
+var COSTO_BOLSA_HUESOS_ROBALO=25;
+var PROC_TIPOS_DEF=['Limpieza de pescado','Clasificación por talla',TIPO_ROBALO_CABEZA,TIPO_ROBALO_LOMOS];
 // Qué productos puede tomar como entrada y devolver como salida cada tipo de
 // proceso — configurable desde Configuración → Tipos de proceso. Si un tipo no
 // tiene reglas (arrays vacíos), se comporta como antes: cualquier lote marcado
@@ -943,7 +953,8 @@ var PROC_TIPOS_DEF=['Limpieza de pescado','Clasificación por talla',TIPO_ROBALO
 var PROC_REGLAS_DEF={
   'Limpieza de pescado':{entradas:['Sargo S/Ordenar'],salidas:['Sargo Limpio']},
   'Clasificación por talla':{entradas:['Sargo Limpio'],salidas:['Sargo ch.','Sargo med.','Sargo gr.']},
-  'Robalo (cabeza + postas)':{entradas:['Robalo'],salidas:['Cabeza de robalo','Posta de robalo ch.','Posta de robalo med.','Posta de robalo gr.','Posta de robalo jumbo','Posta de robalo para caldo']}
+  'Robalo (cabeza + postas)':{entradas:['Robalo'],salidas:['Cabeza de robalo','Posta de robalo ch.','Posta de robalo med.','Posta de robalo gr.','Posta de robalo jumbo','Posta de robalo para caldo']},
+  'Robalo (lomos + huesos para caldo)':{entradas:['Robalo'],salidas:['Lomo de robalo med.','Lomo de robalo gr.','Huesos para caldo']}
 };
 // Merma esperada al limpiar pescado (desvenado/destripado) — arriba de esto se
 // avisa a los admins en el dashboard para que revisen si algo salió mal.
@@ -1173,8 +1184,22 @@ function configurarProcesoRobalo(){
   if(tipoNuevo||reglaNueva)guardarProcTipo(TIPO_ROBALO_CABEZA);
   if(prodsTocados.length||tipoNuevo)audit('Configuró catálogo de Robalo','Configuracion','Robalo · Cabeza de robalo · postas ch/med/gr/jumbo/para caldo');
 }
+// Igual que configurarProcesoRobalo, para el proceso de lomos + huesos.
+function configurarProcesoRobaloLomos(){
+  var prodNuevo=null,tipoNuevo=false,reglaNueva=false;
+  if(!PRODUCTOS.some(function(p){return p.n==='Huesos para caldo';})){
+    prodNuevo={id:siguienteIdProducto(),n:'Huesos para caldo',u:'pz',cat:'robalo'};
+    PRODUCTOS.push(prodNuevo);
+  }
+  if(PROC_TIPOS.indexOf(TIPO_ROBALO_LOMOS)===-1){PROC_TIPOS.push(TIPO_ROBALO_LOMOS);tipoNuevo=true;}
+  if(!PROC_REGLAS[TIPO_ROBALO_LOMOS]){PROC_REGLAS[TIPO_ROBALO_LOMOS]=PROC_REGLAS_DEF[TIPO_ROBALO_LOMOS];reglaNueva=true;}
+  if(prodNuevo)guardarProducto(prodNuevo);
+  if(tipoNuevo||reglaNueva)guardarProcTipo(TIPO_ROBALO_LOMOS);
+  if(prodNuevo||tipoNuevo)audit('Configuró proceso de lomos de Robalo','Configuracion','Robalo → lomos med/gr + Huesos para caldo');
+}
 mergeCatalogosNuevos();
 configurarProcesoRobalo();
+configurarProcesoRobaloLomos();
 
 // Cámara: cada entrada es un LOTE — mismo producto puede tener múltiples lotes
 var camara=load('camara',[
@@ -2336,6 +2361,8 @@ function onProcTipoChange(){
     'Registra cada talla (chico/mediano/grande): cuántas piezas salieron y cuánto pesaron juntas en la báscula — el peso por pieza se calcula solo. La suma de los pesos debe dar el total de entrada.':
     esRobalo?
     'Cabeza: solo el peso total que marcó la báscula — las piezas (bolsas de medio kilo) se calculan solas. Postas: cuántas piezas y su peso total en báscula — el peso por pieza se calcula solo. Del valor que le tocaría a la cabeza por su peso, el '+(PCT_TRANSFER_CABEZA_ROBALO*100)+'% se transfiere al costo de las postas.':
+    tipo===TIPO_ROBALO_LOMOS?
+    'Lomos: el peso en kg de cada tamaño. Huesos para caldo: solo cuántas bolsas/órdenes salieron (no se pesan). Cada bolsa de huesos cuesta '+money(COSTO_BOLSA_HUESOS_ROBALO)+'; eso se resta del costo del pescado y el resto se reparte entre los lomos por peso. La merma incluye el peso de los huesos.':
     lista.length===1?
     'La salida es siempre "'+lista[0].n+'" — se selecciona sola.':
     'Define los productos resultantes. La merma se calcula automáticamente (entrada − suma de salidas).';
@@ -2375,6 +2402,9 @@ function updProcSalidaUnidad(i){
   // que se pesó junta basta, las piezas se calculan solas (no se cuentan a
   // mano). Las postas sí varían, ahí se cuentan las piezas y se pesan juntas.
   var esCabezaRobalo=esRobalo&&esp==='Cabeza de robalo';
+  // Huesos para caldo (proceso de lomos): solo se cuentan las bolsas, no se
+  // pesan -- se ocultan peso total y peso x pieza.
+  var esHuesos=esSalidaSinPeso(tipo,esp);
   // Cantidad: en la cabeza de Robalo no se captura a mano, se deriva del peso
   // total ÷ tamaño de bolsa — se deshabilita y se auto-llena.
   var cantInput=g('psk'+i);
@@ -2392,13 +2422,13 @@ function updProcSalidaUnidad(i){
   var pesoGw=g('pspgw'+i);
   // En la cabeza y las postas de Robalo el peso x pieza no se captura a mano:
   // se oculta el campo (sigue calculándose por dentro a partir del peso total).
-  if(pesoGw)pesoGw.style.display=(esPieza&&!esRobalo)?'':'none';
+  if(pesoGw)pesoGw.style.display=(esPieza&&!esRobalo&&!esHuesos)?'':'none';
   // "Peso total (kg)" es lo que Janet realmente lee de la báscula (ej. 12
   // piezas que juntas pesaron 3.635 kg) — a partir de eso se calcula solo el
   // peso x pieza (y en la cabeza, también las piezas), en vez de pedirle que
   // haga la división a mano. En "Ordenado" no aplica: ahí solo importa la
   // cantidad y el peso x pieza directo.
-  var mostrarTotal=esPieza&&tipo!=='Ordenado';
+  var mostrarTotal=esPieza&&tipo!=='Ordenado'&&!esHuesos;
   var totw=g('psptw'+i);
   if(totw)totw.style.display=mostrarTotal?'':'none';
   if(!mostrarTotal){var totInp=g('pspt'+i);if(totInp)totInp.value='';}
@@ -2406,6 +2436,9 @@ function updProcSalidaUnidad(i){
   // valores de un producto anterior — ej. al cambiar de una posta a la cabeza.
   calcPesoPorPieza(i);
 }
+// Salidas que solo se cuentan (sin peso): no suman a los kg de salida, así
+// que su peso queda dentro de la merma.
+function esSalidaSinPeso(tipo,esp){return tipo===TIPO_ROBALO_LOMOS&&esp==='Huesos para caldo';}
 function calcPesoPorPieza(i){
   var tipo=g('p1')?g('p1').value:'';
   var esp=g('psp'+i)?g('psp'+i).value:'';
@@ -2432,6 +2465,7 @@ function calcProcMerma(){
     if(!g('psp'+i))continue;
     var u=procSalidaUnidad(i);
     var cant=parseFloat(g('psk'+i)?g('psk'+i).value:0)||0;
+    if(esSalidaSinPeso(g('p1')?g('p1').value:'',g('psp'+i).value))continue;
     if(u&&u!=='kg'){
       var pesoG=parseFloat(g('pspg'+i)?g('pspg'+i).value:0)||0;
       if(cant>0&&pesoG<=0)faltaPeso=true;
@@ -2474,7 +2508,10 @@ function gProceso(){
     // Cuando la salida se mide por pieza, el peso x pieza convierte piezas a kg
     // equivalentes para poder sacar una merma real (ej. 123 filetes de 230g).
     var pesoUnitG=null,kgEquiv;
-    if(unidadSal!=='kg'){
+    var sinPeso=esSalidaSinPeso(t,esp);
+    if(sinPeso){
+      kgEquiv=0;
+    } else if(unidadSal!=='kg'){
       pesoUnitG=parseFloat(g('pspg'+i)?g('pspg'+i).value:0)||0;
       if(pesoUnitG<=0){
         // En la cabeza y las postas de Robalo el campo "Peso x pieza" está
@@ -2490,7 +2527,7 @@ function gProceso(){
     // Peso promedio por pieza (kg) — se guarda en el lote de Cámara resultante
     // como referencia (ej. "~303g/pieza"), útil para cotizar por pieza después.
     var pesoProm=pesoUnitG?parseFloat((pesoUnitG/1000).toFixed(4)):null;
-    salidas.push({esp:esp,kg:kg,precio:precio,unidad:unidadSal,pesoUnitG:pesoUnitG,kgEquiv:parseFloat(kgEquiv.toFixed(3)),pesoProm:pesoProm||undefined});
+    salidas.push({esp:esp,kg:kg,precio:precio,unidad:unidadSal,pesoUnitG:pesoUnitG,kgEquiv:parseFloat(kgEquiv.toFixed(3)),pesoProm:pesoProm||undefined,sinPeso:sinPeso||undefined});
     kgEquivTotal+=kgEquiv;
   }
   if(salidas.length===0){alert('Agrega al menos un producto de salida');return;}
@@ -2504,7 +2541,23 @@ function gProceso(){
   // que una chica (muchas piezas ligeras), lo cual no refleja cuánto pesó cada una.
   var costoTotalEntrada=kgE*(loteOrig.costo||0);
   var cabezaRobalo=t===TIPO_ROBALO_CABEZA?salidas.find(function(s){return s.esp==='Cabeza de robalo';}):null;
-  if(cabezaRobalo){
+  var huesosRobalo=t===TIPO_ROBALO_LOMOS?salidas.find(function(s){return s.esp==='Huesos para caldo';}):null;
+  if(huesosRobalo){
+    // Costo fijo por bolsa de huesos; lo que resta del costo del pescado se
+    // reparte entre los lomos por peso (ej. pescado de $1,000, 4 bolsas de
+    // huesos → $100, los lomos se reparten los $900 restantes).
+    var valorHuesos=huesosRobalo.kg*COSTO_BOLSA_HUESOS_ROBALO;
+    if(valorHuesos>costoTotalEntrada){alert('El costo de los huesos ('+money(valorHuesos)+') supera el costo total del pescado ('+money(costoTotalEntrada)+') — revisa la cantidad de bolsas o el costo del lote.');return;}
+    huesosRobalo.costoPorUnidad=COSTO_BOLSA_HUESOS_ROBALO;
+    var kgLomos=salidas.reduce(function(a,s){return s===huesosRobalo?a:a+s.kgEquiv;},0);
+    if(kgLomos<=0){alert('Registra el peso de los lomos que salieron.');return;}
+    var valorLomos=costoTotalEntrada-valorHuesos;
+    salidas.forEach(function(s){
+      if(s===huesosRobalo)return;
+      var costoAsignado=valorLomos*(s.kgEquiv/kgLomos);
+      s.costoPorUnidad=s.kg>0?costoAsignado/s.kg:(loteOrig.costo||0);
+    });
+  } else if(cabezaRobalo){
     // La cabeza no se queda con todo el valor que le tocaría por su peso: en la
     // procesadora se le transfiere un % de ese valor a las postas (ej. pescado
     // de $100, cabeza pesa 20% → $20 de valor natural, se transfieren $6 (30%)
@@ -2639,7 +2692,7 @@ function mEditProceso(id){
   if(!p)return;
   if(!p.salidas||p.salidas.length===0){alert('Este registro no tiene productos de salida individuales para editar');return;}
   var rows=p.salidas.map(function(s,i){
-    var esNoKg=(s.unidad||'kg')!=='kg';
+    var esNoKg=(s.unidad||'kg')!=='kg'&&!s.sinPeso;
     return '<div style="display:grid;grid-template-columns:1fr 100px 130px;gap:8px;align-items:end;margin-bottom:8px">'+
       '<div class="field"><label>Producto</label><input type="text" value="'+s.esp+'" disabled></div>'+
       '<div class="field"><label>Cantidad</label><input type="text" value="'+s.kg+' '+(s.unidad||'kg')+'" disabled></div>'+
@@ -2660,7 +2713,9 @@ function gEditProceso(id){
   var kgEquivTotal=0;
   for(var i=0;i<p.salidas.length;i++){
     var s=p.salidas[i];
-    if((s.unidad||'kg')!=='kg'){
+    if(s.sinPeso){
+      s.kgEquiv=0;
+    } else if((s.unidad||'kg')!=='kg'){
       var pesoG=parseFloat(g('epg'+i)?g('epg'+i).value:0)||0;
       if(pesoG<=0){alert('Indica el peso por pieza (g) de "'+s.esp+'" para poder calcular la merma');return;}
       s.pesoUnitG=pesoG;
