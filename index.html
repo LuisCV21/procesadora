@@ -2272,7 +2272,7 @@ function buildProcSalida(i,po){
   return '<div id="ps-row-'+i+'" style="display:grid;grid-template-columns:1fr 90px 90px 110px 130px 28px;gap:8px;align-items:end;margin-bottom:8px">'+
     '<div class="field"><label>Producto de salida</label><select id="psp'+i+'" onchange="updProcSalidaUnidad('+i+')"><option value="">Seleccionar...</option>'+po+'</select></div>'+
     '<div class="field"><label id="pskl'+i+'">Peso</label><input id="psk'+i+'" type="number" placeholder="0" min="0" oninput="calcPesoPorPieza('+i+')"></div>'+
-    '<div class="field" id="psptw'+i+'" style="display:none"><label>Peso total (kg)</label><input id="pspt'+i+'" type="number" placeholder="0" min="0" oninput="calcPesoPorPieza('+i+')"></div>'+
+    '<div class="field" id="psptw'+i+'" style="display:none"><label id="psptl'+i+'">Peso total (kg)</label><input id="pspt'+i+'" type="number" placeholder="0" min="0" oninput="calcPesoPorPieza('+i+')"></div>'+
     '<div class="field" id="pspgw'+i+'"><label id="pspgl'+i+'">Peso x pieza (g)</label><input id="pspg'+i+'" type="number" placeholder="N/A" min="0" disabled oninput="calcProcMerma()"></div>'+
     (isAdmin?'<div class="field"><label>Precio venta</label><input id="pspv'+i+'" type="number" placeholder="Opcional" min="0"></div>':
       '<div class="field"><label>Precio venta</label><input type="text" value="Lo asigna el admin" disabled style="background:var(--bg4);color:var(--text3);font-size:12px"></div>')+
@@ -2362,7 +2362,7 @@ function onProcTipoChange(){
     esRobalo?
     'Cabeza: solo el peso total que marcó la báscula — las piezas (bolsas de medio kilo) se calculan solas. Postas: cuántas piezas y su peso total en báscula — el peso por pieza se calcula solo. Del valor que le tocaría a la cabeza por su peso, el '+(PCT_TRANSFER_CABEZA_ROBALO*100)+'% se transfiere al costo de las postas.':
     tipo===TIPO_ROBALO_LOMOS?
-    'Lomos: el peso en kg de cada tamaño. Huesos para caldo: solo cuántas bolsas/órdenes salieron (no se pesan). Cada bolsa de huesos cuesta '+money(COSTO_BOLSA_HUESOS_ROBALO)+'; eso se resta del costo del pescado y el resto se reparte entre los lomos por peso. La merma incluye el peso de los huesos.':
+    'Lomos: el peso en kg de cada tamaño. Huesos para caldo: cuántas bolsas/órdenes salieron y, si se pesaron, el peso total (opcional — solo sirve para que la merma salga real; si no se pone, la merma incluye el peso de los huesos). Cada bolsa de huesos cuesta '+money(COSTO_BOLSA_HUESOS_ROBALO)+'; eso se resta del costo del pescado y el resto se reparte entre los lomos por peso.':
     lista.length===1?
     'La salida es siempre "'+lista[0].n+'" — se selecciona sola.':
     'Define los productos resultantes. La merma se calcula automáticamente (entrada − suma de salidas).';
@@ -2402,8 +2402,9 @@ function updProcSalidaUnidad(i){
   // que se pesó junta basta, las piezas se calculan solas (no se cuentan a
   // mano). Las postas sí varían, ahí se cuentan las piezas y se pesan juntas.
   var esCabezaRobalo=esRobalo&&esp==='Cabeza de robalo';
-  // Huesos para caldo (proceso de lomos): solo se cuentan las bolsas, no se
-  // pesan -- se ocultan peso total y peso x pieza.
+  // Huesos para caldo (proceso de lomos): lo obligatorio es cuántas bolsas
+  // salieron; el peso total es opcional (solo sirve para que la merma salga
+  // real, no cambia el costo de los lomos) -- el peso x pieza se oculta.
   var esHuesos=esSalidaSinPeso(tipo,esp);
   // Cantidad: en la cabeza de Robalo no se captura a mano, se deriva del peso
   // total ÷ tamaño de bolsa — se deshabilita y se auto-llena.
@@ -2428,7 +2429,9 @@ function updProcSalidaUnidad(i){
   // peso x pieza (y en la cabeza, también las piezas), en vez de pedirle que
   // haga la división a mano. En "Ordenado" no aplica: ahí solo importa la
   // cantidad y el peso x pieza directo.
-  var mostrarTotal=esPieza&&tipo!=='Ordenado'&&!esHuesos;
+  var mostrarTotal=esPieza&&tipo!=='Ordenado';
+  var totLbl=g('psptl'+i);
+  if(totLbl)totLbl.textContent=esHuesos?'Peso total (kg) — opcional':'Peso total (kg)';
   var totw=g('psptw'+i);
   if(totw)totw.style.display=mostrarTotal?'':'none';
   if(!mostrarTotal){var totInp=g('pspt'+i);if(totInp)totInp.value='';}
@@ -2436,8 +2439,8 @@ function updProcSalidaUnidad(i){
   // valores de un producto anterior — ej. al cambiar de una posta a la cabeza.
   calcPesoPorPieza(i);
 }
-// Salidas que solo se cuentan (sin peso): no suman a los kg de salida, así
-// que su peso queda dentro de la merma.
+// Salidas cuyo peso es opcional: si no se pesan, no suman a los kg de salida
+// y su peso queda dentro de la merma.
 function esSalidaSinPeso(tipo,esp){return tipo===TIPO_ROBALO_LOMOS&&esp==='Huesos para caldo';}
 function calcPesoPorPieza(i){
   var tipo=g('p1')?g('p1').value:'';
@@ -2451,6 +2454,9 @@ function calcPesoPorPieza(i){
     return;
   }
   var piezas=parseFloat(g('psk'+i)?g('psk'+i).value:0)||0;
+  // Huesos: si se borra el peso total (es opcional), también el peso x pieza
+  // que se había calculado, para que no se quede un valor viejo en la merma.
+  if(esSalidaSinPeso(tipo,esp)&&!(piezas>0&&totalKg>0)){var pgH=g('pspg'+i);if(pgH)pgH.value='';}
   if(piezas>0&&totalKg>0){
     var pg=g('pspg'+i);
     if(pg)pg.value=(totalKg*1000/piezas).toFixed(1);
@@ -2465,7 +2471,11 @@ function calcProcMerma(){
     if(!g('psp'+i))continue;
     var u=procSalidaUnidad(i);
     var cant=parseFloat(g('psk'+i)?g('psk'+i).value:0)||0;
-    if(esSalidaSinPeso(g('p1')?g('p1').value:'',g('psp'+i).value))continue;
+    if(esSalidaSinPeso(g('p1')?g('p1').value:'',g('psp'+i).value)){
+      var pgOpc=parseFloat(g('pspg'+i)?g('pspg'+i).value:0)||0;
+      kgSalEquiv+=cant*pgOpc/1000;
+      continue;
+    }
     if(u&&u!=='kg'){
       var pesoG=parseFloat(g('pspg'+i)?g('pspg'+i).value:0)||0;
       if(cant>0&&pesoG<=0)faltaPeso=true;
@@ -2508,9 +2518,12 @@ function gProceso(){
     // Cuando la salida se mide por pieza, el peso x pieza convierte piezas a kg
     // equivalentes para poder sacar una merma real (ej. 123 filetes de 230g).
     var pesoUnitG=null,kgEquiv;
-    var sinPeso=esSalidaSinPeso(t,esp);
-    if(sinPeso){
-      kgEquiv=0;
+    var sinPeso=false;
+    if(esSalidaSinPeso(t,esp)){
+      // Peso opcional: si se capturó el peso total, cuenta para la merma.
+      pesoUnitG=parseFloat(g('pspg'+i)?g('pspg'+i).value:0)||null;
+      kgEquiv=pesoUnitG?kg*pesoUnitG/1000:0;
+      sinPeso=!pesoUnitG;
     } else if(unidadSal!=='kg'){
       pesoUnitG=parseFloat(g('pspg'+i)?g('pspg'+i).value:0)||0;
       if(pesoUnitG<=0){
