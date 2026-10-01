@@ -965,7 +965,7 @@ var PROC_REGLAS_DEF={
   'Clasificación por talla':{entradas:['Sargo Limpio'],salidas:['Sargo ch.','Sargo med.','Sargo gr.']},
   'Robalo (cabeza + postas)':{entradas:['Robalo'],salidas:['Cabeza de robalo','Posta de robalo ch.','Posta de robalo med.','Posta de robalo gr.','Posta de robalo jumbo','Posta de robalo para caldo']},
   'Robalo (lomos + huesos para caldo)':{entradas:['Robalo'],salidas:['Lomo de robalo med.','Lomo de robalo gr.','Huesos para caldo']},
-  'Chocomite en postas':{entradas:['Chocomite gr.','Chocomite med.','Chocomite ch.','Chocomite jumbo'],salidas:['Posta ch.']}
+  'Chocomite en postas':{entradas:['Chocomite gr.','Chocomite med.','Chocomite ch.','Chocomite jumbo'],salidas:['Posta ch.','Huesos para caldo']}
 };
 // Merma esperada al limpiar pescado (desvenado/destripado) — arriba de esto se
 // avisa a los admins en el dashboard para que revisen si algo salió mal.
@@ -1209,14 +1209,15 @@ function configurarProcesoRobaloLomos(){
   if(prodNuevo||tipoNuevo)audit('Configuró proceso de lomos de Robalo','Configuracion','Robalo → lomos med/gr + Huesos para caldo');
 }
 // Da de alta el tipo de proceso "Chocomite en postas" con sus reglas. NO crea ningún producto:
-// la única salida es "Posta ch." (en piezas), que ya existe en el catálogo.
+// las salidas son "Posta ch." (piezas) y "Huesos para caldo" (el mismo del proceso de lomos de
+// robalo, en bolsas), que ya existen en el catálogo.
 function configurarProcesoChocomitePostas(){
   var tipoNuevo=false,reglaNueva=false;
   if(PROC_TIPOS.indexOf(TIPO_CHOCOMITE_POSTAS)===-1){PROC_TIPOS.push(TIPO_CHOCOMITE_POSTAS);tipoNuevo=true;}
   if(!PROC_REGLAS[TIPO_CHOCOMITE_POSTAS]){PROC_REGLAS[TIPO_CHOCOMITE_POSTAS]=PROC_REGLAS_DEF[TIPO_CHOCOMITE_POSTAS];reglaNueva=true;}
   // Corrección de la primera versión, que daba como salida "Posta de chocomite": la salida es "Posta ch.".
   var r=PROC_REGLAS[TIPO_CHOCOMITE_POSTAS];
-  if(r&&r.salidas&&r.salidas.length===1&&r.salidas[0]==='Posta de chocomite'){r.salidas=['Posta ch.'];reglaNueva=true;}
+  if(r&&r.salidas&&r.salidas.length===1&&(r.salidas[0]==='Posta de chocomite'||r.salidas[0]==='Posta ch.')){r.salidas=['Posta ch.','Huesos para caldo'];reglaNueva=true;}
   if(tipoNuevo||reglaNueva)guardarProcTipo(TIPO_CHOCOMITE_POSTAS);
   if(tipoNuevo)audit('Configuró proceso Chocomite en postas','Configuracion','Entrada: chocomite en piezas · Salida: Posta ch. (pz)');
 }
@@ -2385,6 +2386,8 @@ function onProcTipoChange(){
     'Registra cada talla (chico/mediano/grande): cuántas piezas salieron y cuánto pesaron juntas en la báscula — el peso por pieza se calcula solo. La suma de los pesos debe dar el total de entrada.':
     esRobalo?
     'Cabeza: solo el peso total que marcó la báscula — las piezas (bolsas de medio kilo) se calculan solas. Postas: cuántas piezas y su peso total en báscula — el peso por pieza se calcula solo. Del valor que le tocaría a la cabeza por su peso, el '+(PCT_TRANSFER_CABEZA_ROBALO*100)+'% se transfiere al costo de las postas.':
+    tipo===TIPO_CHOCOMITE_POSTAS?
+    'Postas: cuántas piezas salieron y su peso total en báscula — el peso por pieza se calcula solo. Huesos para caldo: cuántas bolsas/órdenes salieron y, si se pesaron, el peso total (opcional — solo sirve para que la merma salga real; si no se pone, la merma incluye el peso de los huesos). Cada bolsa de huesos cuesta '+money(COSTO_BOLSA_HUESOS_ROBALO)+'; eso se resta del costo de las piezas y el resto se reparte entre las postas.':
     tipo===TIPO_ROBALO_LOMOS?
     'Lomos: el peso en kg de cada tamaño. Huesos para caldo: cuántas bolsas/órdenes salieron y, si se pesaron, el peso total (opcional — solo sirve para que la merma salga real; si no se pone, la merma incluye el peso de los huesos). Cada bolsa de huesos cuesta '+money(COSTO_BOLSA_HUESOS_ROBALO)+'; eso se resta del costo del pescado y el resto se reparte entre los lomos por peso.':
     lista.length===1?
@@ -2477,7 +2480,8 @@ function updProcSalidaUnidad(i){
 }
 // Salidas cuyo peso es opcional: si no se pesan, no suman a los kg de salida
 // y su peso queda dentro de la merma.
-function esSalidaSinPeso(tipo,esp){return tipo===TIPO_ROBALO_LOMOS&&esp==='Huesos para caldo';}
+function esTipoConHuesos(tipo){return tipo===TIPO_ROBALO_LOMOS||tipo===TIPO_CHOCOMITE_POSTAS;}
+function esSalidaSinPeso(tipo,esp){return esTipoConHuesos(tipo)&&esp==='Huesos para caldo';}
 function calcPesoPorPieza(i){
   var tipo=g('p1')?g('p1').value:'';
   var esp=g('psp'+i)?g('psp'+i).value:'';
@@ -2605,7 +2609,7 @@ function gProceso(){
   // que una chica (muchas piezas ligeras), lo cual no refleja cuánto pesó cada una.
   var costoTotalEntrada=kgE*(loteOrig.costo||0); // costo por unidad del lote (por pieza si el lote es en piezas)
   var cabezaRobalo=t===TIPO_ROBALO_CABEZA?salidas.find(function(s){return s.esp==='Cabeza de robalo';}):null;
-  var huesosRobalo=t===TIPO_ROBALO_LOMOS?salidas.find(function(s){return s.esp==='Huesos para caldo';}):null;
+  var huesosRobalo=esTipoConHuesos(t)?salidas.find(function(s){return s.esp==='Huesos para caldo';}):null;
   if(huesosRobalo){
     // Costo fijo por bolsa de huesos; lo que resta del costo del pescado se
     // reparte entre los lomos por peso (ej. pescado de $1,000, 4 bolsas de
@@ -2614,7 +2618,7 @@ function gProceso(){
     if(valorHuesos>costoTotalEntrada){alert('El costo de los huesos ('+money(valorHuesos)+') supera el costo total del pescado ('+money(costoTotalEntrada)+') — revisa la cantidad de bolsas o el costo del lote.');return;}
     huesosRobalo.costoPorUnidad=COSTO_BOLSA_HUESOS_ROBALO;
     var kgLomos=salidas.reduce(function(a,s){return s===huesosRobalo?a:a+s.kgEquiv;},0);
-    if(kgLomos<=0){alert('Registra el peso de los lomos que salieron.');return;}
+    if(kgLomos<=0){alert(t===TIPO_CHOCOMITE_POSTAS?'Registra el peso total de las postas que salieron.':'Registra el peso de los lomos que salieron.');return;}
     var valorLomos=costoTotalEntrada-valorHuesos;
     salidas.forEach(function(s){
       if(s===huesosRobalo)return;
