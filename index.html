@@ -937,6 +937,16 @@ var PCT_TRANSFER_CABEZA_ROBALO=0.30;
 // La cabeza siempre se empaca en bolsas/órdenes de medio kilo — con el peso
 // total que se pesó junta, las piezas se calculan solas (no se cuentan a mano).
 var KG_BOLSA_CABEZA_ROBALO=0.5;
+// Chocomite ya clasificado en PIEZAS (ch./med./gr.) que se corta en postas. A diferencia de
+// los demás procesos, aquí NO se toma el lote completo: se indica cuántas piezas entran y el
+// resto del lote se queda como está. La entrada se descuenta en piezas (unidad del lote) y la
+// merma se calcula con el peso promedio por pieza del lote (pesoProm).
+var TIPO_CHOCOMITE_POSTAS='Chocomite en postas';
+var PROC_PARCIAL_PIEZAS=[TIPO_CHOCOMITE_POSTAS];
+function esProcesoParcial(tipo){return PROC_PARCIAL_PIEZAS.indexOf(tipo)!==-1;}
+// kg equivalentes de la entrada de un proceso (peso real): para entradas en piezas se guarda
+// aparte; los procesos de siempre solo traen kgE.
+function kgEntradaEq(p){return p.kgEquivE!=null?p.kgEquivE:p.kgE;}
 // Robalo del que se sacan lomos: la cabeza no trae suficiente carne para
 // venderse como producto, así que se usa (con el espinazo) como "Huesos para
 // caldo". Pedido de Jannet (sept-2026): los huesos NO se reparten el costo por
@@ -954,7 +964,8 @@ var PROC_REGLAS_DEF={
   'Limpieza de pescado':{entradas:['Sargo S/Ordenar'],salidas:['Sargo Limpio']},
   'Clasificación por talla':{entradas:['Sargo Limpio'],salidas:['Sargo ch.','Sargo med.','Sargo gr.']},
   'Robalo (cabeza + postas)':{entradas:['Robalo'],salidas:['Cabeza de robalo','Posta de robalo ch.','Posta de robalo med.','Posta de robalo gr.','Posta de robalo jumbo','Posta de robalo para caldo']},
-  'Robalo (lomos + huesos para caldo)':{entradas:['Robalo'],salidas:['Lomo de robalo med.','Lomo de robalo gr.','Huesos para caldo']}
+  'Robalo (lomos + huesos para caldo)':{entradas:['Robalo'],salidas:['Lomo de robalo med.','Lomo de robalo gr.','Huesos para caldo']},
+  'Chocomite en postas':{entradas:['Chocomite gr.','Chocomite med.','Chocomite ch.','Chocomite jumbo'],salidas:['Posta de chocomite']}
 };
 // Merma esperada al limpiar pescado (desvenado/destripado) — arriba de esto se
 // avisa a los admins en el dashboard para que revisen si algo salió mal.
@@ -1197,9 +1208,24 @@ function configurarProcesoRobaloLomos(){
   if(tipoNuevo||reglaNueva)guardarProcTipo(TIPO_ROBALO_LOMOS);
   if(prodNuevo||tipoNuevo)audit('Configuró proceso de lomos de Robalo','Configuracion','Robalo → lomos med/gr + Huesos para caldo');
 }
+// Migración puntual para instalaciones existentes: da de alta el producto "Posta de chocomite"
+// (en piezas) y el tipo de proceso "Chocomite en postas" con sus reglas, sin tocar lo demás.
+function configurarProcesoChocomitePostas(){
+  var prodNuevo=null,tipoNuevo=false,reglaNueva=false;
+  if(!PRODUCTOS.some(function(p){return p.n==='Posta de chocomite';})){
+    prodNuevo=Object.assign({id:siguienteIdProducto()},{n:'Posta de chocomite',u:'pz',cat:'chocomite'});
+    PRODUCTOS.push(prodNuevo);
+  }
+  if(PROC_TIPOS.indexOf(TIPO_CHOCOMITE_POSTAS)===-1){PROC_TIPOS.push(TIPO_CHOCOMITE_POSTAS);tipoNuevo=true;}
+  if(!PROC_REGLAS[TIPO_CHOCOMITE_POSTAS]){PROC_REGLAS[TIPO_CHOCOMITE_POSTAS]=PROC_REGLAS_DEF[TIPO_CHOCOMITE_POSTAS];reglaNueva=true;}
+  if(prodNuevo)guardarProducto(prodNuevo);
+  if(tipoNuevo||reglaNueva)guardarProcTipo(TIPO_CHOCOMITE_POSTAS);
+  if(prodNuevo||tipoNuevo)audit('Configuró catálogo de Chocomite en postas','Configuracion','Posta de chocomite (pz) · proceso Chocomite en postas');
+}
 mergeCatalogosNuevos();
 configurarProcesoRobalo();
 configurarProcesoRobaloLomos();
+configurarProcesoChocomitePostas();
 
 // Cámara: cada entrada es un LOTE — mismo producto puede tener múltiples lotes
 var camara=load('camara',[
@@ -2049,7 +2075,7 @@ function sincronizarUnidadProceso(esp,lote,unidad){
       if((s.unidad||'kg')!=='kg')return a+(s.kg*(s.pesoUnitG||0)/1000);
       return a+s.kg;
     },0);
-    p.merma=parseFloat((p.kgE-kgEquivTotal).toFixed(3));
+    p.merma=parseFloat((kgEntradaEq(p)-kgEquivTotal).toFixed(3));
     tocados.push(p);
   });
   guardarFilas('proceso',tocados,'id');
@@ -2195,7 +2221,7 @@ function rProc(){
   var ymProc=MES_SEL.procesos;
   var procesosFilt=procesos.filter(function(p){return p.fecha&&p.fecha.slice(0,7)===ymProc;});
   var mT=procesosFilt.reduce(function(a,p){return a+p.merma;},0);
-  var kgP=procesosFilt.reduce(function(a,p){return a+p.kgE;},0);
+  var kgP=procesosFilt.reduce(function(a,p){return a+kgEntradaEq(p);},0);
   var mp=kgP>0?Math.round(mT/kgP*100):0;
   return '<div class="stat-grid">'+
     '<div class="stat"><div class="stat-lbl">Procesos registrados</div><div class="stat-val">'+procesosFilt.length+'</div></div>'+
@@ -2212,7 +2238,7 @@ function rProc(){
     var salidasStr=p.salidas&&p.salidas.length>0?p.salidas.map(function(s){return s.kg.toFixed(1)+' '+(s.unidad||'kg')+' '+s.esp+(s.pesoUnitG?' ('+s.pesoUnitG+'g c/u)':'');}).join(', '):p.kgS+' kg (salida)';
     return '<tr><td class="mn">'+fmtFecha(p.fecha)+'</td><td class="pr">'+p.tipo+'</td>'+
       '<td style="font-size:14px">'+p.esp+'<div style="font-size:12px;color:var(--text3)">Lote '+p.lote+'</div></td>'+
-      '<td class="mn">'+p.kgE+' kg</td>'+
+      '<td class="mn">'+(p.unidadE==='pz'?p.kgE+' pz <span style="font-size:11px;color:var(--text3)">(~'+kgEntradaEq(p)+' kg)</span>':p.kgE+' kg')+'</td>'+
       '<td style="font-size:13px;color:var(--info)">'+salidasStr+'</td>'+
       '<td class="mn" style="color:'+(p.merma>3?'var(--danger)':p.merma>1?'var(--warn)':'inherit')+'">'+p.merma.toFixed(2)+' kg'+(p.estimado?' <span style="font-size:11px;color:var(--text3)">(estimado)</span>':'')+'</td>'+
       '<td style="color:var(--text3);font-size:13px">'+(p.notas||'—')+'</td>'+
@@ -2224,7 +2250,7 @@ function rProc(){
     PROC_TIPOS.map(function(tipo){
       var ps=procesosFilt.filter(function(p){return p.tipo===tipo;});
       var m=ps.reduce(function(a,p){return a+p.merma;},0);
-      var e=ps.reduce(function(a,p){return a+p.kgE;},0);
+      var e=ps.reduce(function(a,p){return a+kgEntradaEq(p);},0);
       var pct=e>0?Math.round(m/e*100):0;
       return '<div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px"><span style="color:var(--text);font-weight:500">'+tipo+'</span><span style="color:var(--text3)">'+m.toFixed(1)+' kg perdidos · '+pct+'% merma</span></div><div class="pb"><div class="pf" style="width:'+Math.min(pct*5,100)+'%;background:'+(pct>15?'var(--danger)':pct>8?'var(--warn)':'var(--accent)')+'"></div></div></div>';
     }).join('')+
@@ -2309,7 +2335,7 @@ function refreshLoteEntradaOptions(){
   });
   var cur=sel.value;
   sel.innerHTML='<option value="">Seleccionar lote...</option>'+
-    lotesDisp.map(function(i){return '<option value="'+i.id+'">'+i.esp+' — Lote '+i.lote+' ('+i.kg.toFixed(1)+' kg)</option>';}).join('');
+    lotesDisp.map(function(i){return '<option value="'+i.id+'">'+i.esp+' — Lote '+i.lote+' ('+(i.unidad==='pz'?Math.round(i.kg*100)/100+' pz':i.kg.toFixed(1)+' kg')+')</option>';}).join('');
   sel.value=lotesDisp.some(function(i){return String(i.id)===cur;})?cur:'';
 }
 // Lista de productos permitidos como salida para un tipo de proceso, según
@@ -2380,6 +2406,18 @@ function actualizarEntradaAuto(){
   if(!p3)return;
   var loteId=parseInt(g('p2')?g('p2').value:0)||0;
   var lote=camara.find(function(x){return x.id===loteId;});
+  var tipoSel=g('p1')?g('p1').value:'';
+  if(esProcesoParcial(tipoSel)){
+    // Aquí SÍ se captura a mano: cuántas piezas del lote se van a cortar.
+    p3.disabled=false;
+    p3.step='1';p3.min='1';
+    if(lote){p3.max=lote.kg;p3.placeholder='máx. '+Math.round(lote.kg*100)/100;}
+    // Si cambió el lote y lo escrito ya no cabe, se limpia.
+    if(!lote||parseFloat(p3.value)>lote.kg)p3.value='';
+    if(lbl)lbl.textContent='Piezas que entran al proceso'+(lote?' (de las '+Math.round(lote.kg*100)/100+' del lote)':'');
+    return;
+  }
+  p3.step='any';p3.removeAttribute('max');
   p3.value=lote?lote.kg:'';
   p3.disabled=true;
   if(lbl)lbl.textContent='Kg que entran al proceso (todo el lote)';
@@ -2465,6 +2503,12 @@ function calcPesoPorPieza(i){
 }
 function calcProcMerma(){
   var kgE=parseFloat(g('p3')?g('p3').value:0)||0;
+  // Entrada en piezas (lote chocomite): se convierte a kg con el peso promedio por pieza del lote.
+  var loteSel=camara.find(function(x){return x.id===(parseInt(g('p2')?g('p2').value:0)||0);});
+  var sinPesoProm=false;
+  if(loteSel&&loteSel.unidad==='pz'){
+    if(loteSel.pesoProm>0)kgE=kgE*loteSel.pesoProm;else sinPesoProm=true;
+  }
   var kgSalEquiv=0;
   var faltaPeso=false;
   for(var i=0;i<_procSalidas;i++){
@@ -2490,7 +2534,7 @@ function calcProcMerma(){
   if(!el||!vm)return;
   if(kgE<=0){el.style.display='none';return;}
   el.style.display='';
-  vm.textContent=faltaPeso?'Falta indicar el peso x pieza para calcular la merma':(merma.toFixed(2)+' kg'+(merma<0?' (⚠ las salidas superan la entrada)':''));
+  vm.textContent=sinPesoProm?'Este lote no tiene peso promedio por pieza: no se puede calcular la merma':faltaPeso?'Falta indicar el peso x pieza para calcular la merma':(merma.toFixed(2)+' kg'+(merma<0?' (⚠ las salidas superan la entrada)':''));
 }
 
 function gProceso(){
@@ -2502,7 +2546,16 @@ function gProceso(){
   if(!t||!loteId||!kgE){alert('Completa tipo de proceso, lote y kg de entrada');return;}
   var loteOrig=camara.find(function(x){return x.id===loteId;});
   if(!loteOrig){alert('Lote no encontrado');return;}
-  if(kgE>loteOrig.kg){alert('Los kg de entrada ('+kgE+') superan el stock disponible del lote ('+loteOrig.kg.toFixed(1)+' kg)');return;}
+  var entradaEnPiezas=loteOrig.unidad==='pz';
+  if(kgE>loteOrig.kg+1e-9){alert(entradaEnPiezas?'Las piezas de entrada ('+kgE+') superan las que hay en el lote ('+Math.round(loteOrig.kg*100)/100+' pz)':'Los kg de entrada ('+kgE+') superan el stock disponible del lote ('+loteOrig.kg.toFixed(1)+' kg)');return;}
+  // Entrada en piezas: kgE son PIEZAS (unidad del lote: así se descuenta, se revierte y se audita);
+  // el peso real equivalente sale del peso promedio por pieza del lote.
+  var kgEquivE=kgE;
+  if(entradaEnPiezas){
+    if(!(loteOrig.pesoProm>0)){alert('Este lote no tiene peso promedio por pieza, no se puede calcular la merma. Captúralo primero en el lote.');return;}
+    if(Math.abs(kgE-Math.round(kgE))>1e-9){alert('Las piezas de entrada deben ser un número entero');return;}
+    kgEquivE=parseFloat((kgE*loteOrig.pesoProm).toFixed(3));
+  }
 
   // Recopilar productos de salida — cada uno lleva la unidad real del producto
   // (Configuración > Productos), no siempre kg (ej. milanesas se cuentan por pieza).
@@ -2545,14 +2598,14 @@ function gProceso(){
   }
   if(salidas.length===0){alert('Agrega al menos un producto de salida');return;}
   var kgSal=salidas.reduce(function(a,s){return a+s.kg;},0);
-  var merma=parseFloat((kgE-kgEquivTotal).toFixed(3));
-  var estimado=salidas.some(function(s){return s.unidad!=='kg';});
+  var merma=parseFloat((kgEquivE-kgEquivTotal).toFixed(3));
+  var estimado=salidas.some(function(s){return s.unidad!=='kg';})||entradaEnPiezas;
 
   // Costo por unidad de salida: se reparte el costo total del insumo por PESO
   // real (kgEquiv), no por cantidad de unidades — si se repartiera por cantidad,
   // una talla grande (pocas piezas pesadas) saldría con el mismo costo unitario
   // que una chica (muchas piezas ligeras), lo cual no refleja cuánto pesó cada una.
-  var costoTotalEntrada=kgE*(loteOrig.costo||0);
+  var costoTotalEntrada=kgE*(loteOrig.costo||0); // costo por unidad del lote (por pieza si el lote es en piezas)
   var cabezaRobalo=t===TIPO_ROBALO_CABEZA?salidas.find(function(s){return s.esp==='Cabeza de robalo';}):null;
   var huesosRobalo=t===TIPO_ROBALO_LOMOS?salidas.find(function(s){return s.esp==='Huesos para caldo';}):null;
   if(huesosRobalo){
@@ -2626,6 +2679,7 @@ function gProceso(){
   var procNuevo={id:uid(),fecha:f,tipo:t,esp:loteOrig.esp,lote:loteOrig.lote,loteId:loteOrig.id,
     kgE:kgE,kgS:kgSal,merma:merma,estimado:estimado,notas:notas_,est:'completado',
     salidas:salidas};
+  if(entradaEnPiezas){procNuevo.unidadE='pz';procNuevo.kgEquivE=kgEquivE;}
   procesos.push(procNuevo);
   _procSalidas=1;
   guardarFila('lotecam',loteOrig,'id');
@@ -2680,7 +2734,7 @@ function revertirProceso(p){
     loteEntrada.kg=parseFloat((loteEntrada.kg+p.kgE).toFixed(3));
     guardarFila(coleccionDeLote(loteEntrada),loteEntrada,'id');
   } else {
-    var loteRecreado={id:uid(),esp:p.esp,lote:p.lote,kg:p.kgE,unidad:'kg',ent:p.fecha,cad:null,est:'ok',costo:0};
+    var loteRecreado={id:uid(),esp:p.esp,lote:p.lote,kg:p.kgE,unidad:(p.unidadE==='pz'?'pz':'kg'),ent:p.fecha,cad:null,est:'ok',costo:0};
     camara.push(loteRecreado);
     guardarFila('lotecam',loteRecreado,'id');
     avisos.push('No se encontró el lote de entrada original ('+p.esp+' · Lote '+p.lote+'); se creó uno nuevo en Cámara — revisa costo y caducidad.');
@@ -2738,7 +2792,7 @@ function gEditProceso(id){
     }
     kgEquivTotal+=s.kgEquiv;
   }
-  p.merma=parseFloat((p.kgE-kgEquivTotal).toFixed(3));
+  p.merma=parseFloat((kgEntradaEq(p)-kgEquivTotal).toFixed(3));
   p.estimado=p.salidas.some(function(s){return (s.unidad||'kg')!=='kg';});
   guardarFila('proceso',p,'id');persist();cm();nav('procesos');
 }
@@ -6367,7 +6421,7 @@ function rRep(){
   var cobrado=notasFilt.filter(function(n){return n.pagada;}).reduce(function(a,n){return a+n.total;},0);
   var porCobrar=ventaTotal-cobrado;
   var mT=procesosFilt.reduce(function(a,p){return a+p.merma;},0);
-  var kgP=procesosFilt.reduce(function(a,p){return a+p.kgE;},0);
+  var kgP=procesosFilt.reduce(function(a,p){return a+kgEntradaEq(p);},0);
   var mp=kgP>0?Math.round(mT/kgP*100):0;
   var compras=pedidosFilt.reduce(function(a,p){return a+(p.total||p.costo||0);},0);
 
@@ -7529,6 +7583,7 @@ function aplicarDatos(data){
   // existieran productos/tipos de proceso nuevos — completar con lo del código.
   mergeCatalogosNuevos();
   configurarProcesoRobalo();
+  configurarProcesoChocomitePostas();
   // Migración puntual: instalaciones que todavía guardan el catálogo como un
   // array completo bajo una sola clave se pasan al esquema de una fila por
   // item la primera vez que se detecta el blob viejo — de ahí en adelante ya
