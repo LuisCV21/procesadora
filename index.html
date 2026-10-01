@@ -965,7 +965,7 @@ var PROC_REGLAS_DEF={
   'Clasificación por talla':{entradas:['Sargo Limpio'],salidas:['Sargo ch.','Sargo med.','Sargo gr.']},
   'Robalo (cabeza + postas)':{entradas:['Robalo'],salidas:['Cabeza de robalo','Posta de robalo ch.','Posta de robalo med.','Posta de robalo gr.','Posta de robalo jumbo','Posta de robalo para caldo']},
   'Robalo (lomos + huesos para caldo)':{entradas:['Robalo'],salidas:['Lomo de robalo med.','Lomo de robalo gr.','Huesos para caldo']},
-  'Chocomite en postas':{entradas:['Chocomite gr.','Chocomite med.','Chocomite ch.','Chocomite jumbo'],salidas:['Posta de chocomite']}
+  'Chocomite en postas':{entradas:['Chocomite gr.','Chocomite med.','Chocomite ch.','Chocomite jumbo'],salidas:['Posta ch.']}
 };
 // Merma esperada al limpiar pescado (desvenado/destripado) — arriba de esto se
 // avisa a los admins en el dashboard para que revisen si algo salió mal.
@@ -1208,19 +1208,17 @@ function configurarProcesoRobaloLomos(){
   if(tipoNuevo||reglaNueva)guardarProcTipo(TIPO_ROBALO_LOMOS);
   if(prodNuevo||tipoNuevo)audit('Configuró proceso de lomos de Robalo','Configuracion','Robalo → lomos med/gr + Huesos para caldo');
 }
-// Migración puntual para instalaciones existentes: da de alta el producto "Posta de chocomite"
-// (en piezas) y el tipo de proceso "Chocomite en postas" con sus reglas, sin tocar lo demás.
+// Da de alta el tipo de proceso "Chocomite en postas" con sus reglas. NO crea ningún producto:
+// la única salida es "Posta ch." (en piezas), que ya existe en el catálogo.
 function configurarProcesoChocomitePostas(){
-  var prodNuevo=null,tipoNuevo=false,reglaNueva=false;
-  if(!PRODUCTOS.some(function(p){return p.n==='Posta de chocomite';})){
-    prodNuevo=Object.assign({id:siguienteIdProducto()},{n:'Posta de chocomite',u:'pz',cat:'chocomite'});
-    PRODUCTOS.push(prodNuevo);
-  }
+  var tipoNuevo=false,reglaNueva=false;
   if(PROC_TIPOS.indexOf(TIPO_CHOCOMITE_POSTAS)===-1){PROC_TIPOS.push(TIPO_CHOCOMITE_POSTAS);tipoNuevo=true;}
   if(!PROC_REGLAS[TIPO_CHOCOMITE_POSTAS]){PROC_REGLAS[TIPO_CHOCOMITE_POSTAS]=PROC_REGLAS_DEF[TIPO_CHOCOMITE_POSTAS];reglaNueva=true;}
-  if(prodNuevo)guardarProducto(prodNuevo);
+  // Corrección de la primera versión, que daba como salida "Posta de chocomite": la salida es "Posta ch.".
+  var r=PROC_REGLAS[TIPO_CHOCOMITE_POSTAS];
+  if(r&&r.salidas&&r.salidas.length===1&&r.salidas[0]==='Posta de chocomite'){r.salidas=['Posta ch.'];reglaNueva=true;}
   if(tipoNuevo||reglaNueva)guardarProcTipo(TIPO_CHOCOMITE_POSTAS);
-  if(prodNuevo||tipoNuevo)audit('Configuró catálogo de Chocomite en postas','Configuracion','Posta de chocomite (pz) · proceso Chocomite en postas');
+  if(tipoNuevo)audit('Configuró proceso Chocomite en postas','Configuracion','Entrada: chocomite en piezas · Salida: Posta ch. (pz)');
 }
 mergeCatalogosNuevos();
 configurarProcesoRobalo();
