@@ -1666,6 +1666,7 @@ function rPrecios(){
   return '<div class="stat-grid" style="margin-bottom:18px">'+
     '<div class="stat"><div class="stat-lbl">Lotes en inventario sin precio</div><div class="stat-val c-warn">'+_PRECIOS_INV.length+'</div></div>'+
   '</div>'+
+  (_PRECIOS_INV.length?'<div style="margin-bottom:14px"><button class="btn btn-p" onclick="mPreciosMasivo()">✍️ Capturar todos los precios juntos</button></div>':'')+
   (_PRECIOS_INV.length===0?'<div class="card"><div class="card-body" style="text-align:center;padding:40px;color:var(--text3)">🎉 No hay nada pendiente de precio.</div></div>':
   '<div class="card"><div class="card-hdr"><div class="card-title">📦 Inventario (Cámara / Bodega)</div></div>'+
   '<div class="tw"><table><thead><tr><th>Producto</th><th>Lote</th><th>Cantidad disponible</th><th>Costo</th><th>Precio de venta</th><th></th></tr></thead><tbody>'+
@@ -1678,6 +1679,54 @@ function rPrecios(){
       '<td><button class="btn btn-xs btn-p" onclick="guardarPrecioInv('+i+')">Guardar</button></td></tr>';
   }).join('')+
   '</tbody></table></div></div>');
+}
+// Captura masiva: lista todos los lotes sin precio, se escriben los que se
+// quiera y se guardan juntos. Los que se dejen vacíos siguen pendientes.
+function mPreciosMasivo(){
+  var info=preciosPendientesInfo();
+  if(!info.inv.length){alert('No hay nada pendiente de precio.');return;}
+  var filas=info.inv.map(function(item){
+    var k=precioDraftKey(item),d=_PRECIOS_DRAFT[k]||'';
+    return '<tr><td class="pr">'+item.esp+'</td>'+
+      '<td style="font-size:13px;color:var(--text3)">'+(item.origen==='camara'?'Cámara':'Bodega')+' '+(item.lote||'—')+'</td>'+
+      '<td class="mn">'+item.kg.toFixed(1)+'</td>'+
+      '<td class="mn">'+money(item.costo)+'</td>'+
+      '<td><input class="pm-in" data-k="'+k+'" data-origen="'+item.origen+'" data-id="'+item.id+'" type="number" min="0" placeholder="$0" value="'+d+'" oninput="setPrecioDraftKey(this.dataset.k,this.value)" style="width:100px;padding:6px 8px;border:2px solid var(--border);border-radius:var(--r);font-size:14px"></td></tr>';
+  }).join('');
+  modal('<div class="modal" style="max-width:760px"><div class="modal-hdr"><div class="modal-title">✍️ Capturar precios de venta</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div style="font-size:13px;color:var(--text2);margin-bottom:10px">Escribe el precio de los productos que quieras y al final presiona <b>Guardar todos</b>. Los que dejes vacíos se quedan pendientes.</div>'+
+      '<div class="tw" style="max-height:60vh;overflow-y:auto"><table><thead><tr><th>Producto</th><th>Lote</th><th>Cantidad</th><th>Costo</th><th>Precio de venta</th></tr></thead><tbody>'+filas+'</tbody></table></div>'+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cerrar</button><button class="btn btn-p" onclick="guardarPreciosMasivo()">Guardar todos</button></div>'+
+  '</div>');
+}
+function setPrecioDraftKey(k,val){
+  if(val===''||val==null)delete _PRECIOS_DRAFT[k];else _PRECIOS_DRAFT[k]=val;
+}
+function guardarPreciosMasivo(){
+  var inputs=document.querySelectorAll('#mr .pm-in');
+  var guardados=0,yaTenian=0,invalidos=0;
+  inputs.forEach(function(inp){
+    var raw=inp.value;if(raw===''||raw==null)return; // vacío → sigue pendiente
+    var v=parseFloat(raw);
+    if(!(v>0)){invalidos++;return;}
+    var arr=inp.dataset.origen==='camara'?camara:bodega;
+    var lote=arr.find(function(x){return String(x.id)===inp.dataset.id;});
+    if(!lote)return;
+    if(lote.precio){yaTenian++;delete _PRECIOS_DRAFT[inp.dataset.k];return;} // otra persona ya le puso precio
+    lote.precio=v;
+    guardarFila(inp.dataset.origen==='camara'?'lotecam':'lotebod',lote,'id');
+    audit('Asignó precio de venta','Configuracion',lote.esp+' · '+money(v)+' · Lote '+lote.lote);
+    delete _PRECIOS_DRAFT[inp.dataset.k];
+    guardados++;
+  });
+  if(!guardados&&!yaTenian&&!invalidos){alert('No escribiste ningún precio.');return;}
+  persist();cm();nav('precios');
+  var msg=guardados+' precio'+(guardados!==1?'s':'')+' guardado'+(guardados!==1?'s':'')+'.';
+  if(yaTenian)msg+='\n'+yaTenian+' ya tenían precio (alguien más lo puso) y no se cambiaron.';
+  if(invalidos)msg+='\n'+invalidos+' con precio inválido se omitieron (siguen pendientes).';
+  alert(msg);
 }
 function guardarPrecioInv(i){
   var item=_PRECIOS_INV[i];if(!item)return;
