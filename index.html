@@ -1595,7 +1595,9 @@ function nav(tab){
   g('page-sub').textContent=info.s;
   updateBadges();
   var fns={dashboard:rDash,precios:rPrecios,camara:rCam,bodega:rBodega,procesos:rProc,pedidos:rPed,notas:rNotas,'nueva-nota':rNuevaNota,'editar-partidas':rEditarPartidas,caja:rCaja,reportes:rRep,config:rConfig};
+  var _ae=document.activeElement,_aeId=(_ae&&/^pp-inv-/.test(_ae.id))?_ae.id:null;
   g('content').innerHTML=fns[tab]?fns[tab]():'';
+  if(_aeId&&g(_aeId))g(_aeId).focus(); // no perder el cursor al redibujar por sincronización
   g('topbar-act').innerHTML=tbAct(tab);
   renderMesBanner();
 }
@@ -1648,6 +1650,15 @@ function preciosPendientesInfo(){
   return {inv:listaInv,ped:[]};
 }
 var _PRECIOS_INV=[];
+// Borradores de precio: se conservan al guardar otro renglón y cuando la
+// pantalla se redibuja por cambios de otros usuarios (sincronización).
+var _PRECIOS_DRAFT={};
+function precioDraftKey(item){return item.origen+':'+item.id;}
+function setPrecioDraft(i,val){
+  var item=_PRECIOS_INV[i];if(!item)return;
+  if(val===''||val==null)delete _PRECIOS_DRAFT[precioDraftKey(item)];
+  else _PRECIOS_DRAFT[precioDraftKey(item)]=val;
+}
 function rPrecios(){
   if(ROL!=='admin')return '<div class="card"><div class="card-body" style="text-align:center;padding:30px;color:var(--text3)">Solo el administrador puede asignar precios.</div></div>';
   var info=preciosPendientesInfo();
@@ -1663,7 +1674,7 @@ function rPrecios(){
       '<td style="font-size:13px;color:var(--text3)">'+(item.origen==='camara'?'Cámara':'Bodega')+' '+(item.lote||'—')+'</td>'+
       '<td class="mn">'+item.kg.toFixed(1)+'</td>'+
       '<td class="mn">'+money(item.costo)+'</td>'+
-      '<td><input id="pp-inv-'+i+'" type="number" min="0" placeholder="$0" style="width:100px;padding:6px 8px;border:2px solid var(--border);border-radius:var(--r);font-size:14px"></td>'+
+      '<td><input id="pp-inv-'+i+'" type="number" min="0" placeholder="$0" value="'+(_PRECIOS_DRAFT[precioDraftKey(item)]||'')+'" oninput="setPrecioDraft('+i+',this.value)" style="width:100px;padding:6px 8px;border:2px solid var(--border);border-radius:var(--r);font-size:14px"></td>'+
       '<td><button class="btn btn-xs btn-p" onclick="guardarPrecioInv('+i+')">Guardar</button></td></tr>';
   }).join('')+
   '</tbody></table></div></div>');
@@ -1676,6 +1687,7 @@ function guardarPrecioInv(i){
   var lote=arr.find(function(x){return x.id===item.id;});
   if(lote){lote.precio=v;guardarFila(item.origen==='camara'?'lotecam':'lotebod',lote,'id');}
   audit('Asignó precio de venta','Configuracion',item.esp+' · '+money(v)+' · Lote '+item.lote);
+  delete _PRECIOS_DRAFT[precioDraftKey(item)];
   persist();nav('precios');
 }
 
