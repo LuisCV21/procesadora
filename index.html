@@ -3347,7 +3347,7 @@ function pagarPedido(id){
           '<span style="font-size:14px;color:var(--text)">'+s.nombre+'</span>'+
           '<div style="display:flex;align-items:center;gap:8px">'+
             '<span style="font-weight:700;color:var(--accent)">'+money(s.saldo)+'</span>'+
-            '<button class="btn btn-xs btn-p" onclick="aplicarSaldoCompPedido('+id+',\''+s.nombre+'\','+s.saldo+','+pendiente+')">Aplicar</button>'+
+            '<button class="btn btn-xs btn-p" onclick="mAplicarSaldoComp('+id+',\''+s.nombre+'\')">Aplicar</button>'+
           '</div></div>';
       }).join('')+
     '</div>':'';
@@ -3372,41 +3372,103 @@ function pagarPedido(id){
   '</div>');
 }
 
-function aplicarSaldoCompPedido(pedidoId,sucursal,saldoDisp,pendiente){
+// Aplicar el saldo de compensación de una sucursal a un pedido: quien registra
+// ELIGE a qué notas de la sucursal se aplica (la sucursal a veces liquida una
+// nota más chica y no la que sigue por orden). El orden por folio solo se
+// sugiere. pedidoId queda en el pedido y en cada abono de nota: es el rastro
+// que usa revertirPedido() para deshacer exactamente esto.
+var _saldoCompCtx=null;
+function _escH(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function _r2(x){return Math.round(x*100)/100;}
+function mAplicarSaldoComp(pedidoId,sucursal){
   var p=pedidos.find(function(x){return x.id===pedidoId;});if(!p)return;
-  var saldoReal=saldoCompSucursal(sucursal);
-  if(saldoReal<=0){alert('Sin saldo disponible para '+sucursal);return;}
-  var aplicar=Math.min(saldoReal,pendiente);
-  var fecha=today();
-  var hora=new Date().toTimeString().slice(0,5);
-  if(!p.abonos)p.abonos=[];
-  // pedidoId en ambos lados (aquí y en los abonos fantasma de las notas de abajo)
-  // es el rastro que usa revertirPedido() para deshacer exactamente esto si el
-  // pedido se corrige después — sin esa referencia, revertir el pedido dejaba
-  // las notas de la sucursal marcadas como pagadas de más, con el saldo de
-  // compensación efectivamente perdido (ni el pedido ni las notas lo reflejaban).
-  p.abonos.push({monto:aplicar,forma:'compensacion-'+sucursal,fecha:fecha,hora:hora,nota:'Saldo de '+sucursal+' aplicado al pedido',pedidoId:pedidoId});
-  p.montoPagado=(p.montoPagado||0)+aplicar;
-  if(p.montoPagado>=(p.total||p.costo||0))p.pagado=true;
-  // Registrar como compensación usada — agregar abono fantasma en notas para que se descuente del saldo
-  // Buscamos la nota más antigua de esa sucursal para reducir el saldo disponible
-  var notasSuc=notas.filter(function(n){return n.cliente===sucursal&&!n.pagada&&n.est==='entregada';})
-    .sort(function(a,b){return a.folio-b.folio;});
-  var restante=aplicar;
-  for(var i=0;i<notasSuc.length&&restante>0;i++){
-    var n=notasSuc[i];
-    var ab=n.abonos?n.abonos.reduce(function(a,b){return a+b.monto;},0):0;
-    var pend=Math.max(0,n.total-ab);
-    if(pend<=0)continue;
-    var aplicarN=Math.min(restante,pend);
-    if(!n.abonos)n.abonos=[];
-    n.abonos.push({monto:aplicarN,forma:'compensacion',fecha:fecha,hora:hora,nota:'Aplicado a pedido '+( p.numPedido||p.prov),pedidoId:pedidoId});
-    var nuevoAb=n.abonos.reduce(function(a,b){return a+b.monto;},0);
-    if(nuevoAb>=n.total){n.pagada=true;n.est='pagada';}
-    restante-=aplicarN;
-    guardarFila('nota',n,'id');
+  var saldo=saldoCompSucursal(sucursal);
+  if(saldo<=0){alert('Sin saldo disponible para '+sucursal);return;}
+  var pendPed=_r2((p.total||p.costo||0)-(p.montoPagado||0));
+  var max=_r2(Math.min(saldo,pendPed));
+  var lista=notas.filter(function(n){return n.cliente===sucursal&&!n.pagada&&n.est==='entregada';})
+    .sort(function(a,b){return a.folio-b.folio;})
+    .map(function(n){
+      var ab=n.abonos?n.abonos.reduce(function(a,b){return a+b.monto;},0):0;
+      return {id:n.id,folio:n.folio,fecha:n.fecha,total:n.total,pend:_r2(n.total-ab)};
+    }).filter(function(n){return n.pend>0.005;});
+  if(!lista.length){alert('No hay notas pendientes de '+sucursal+' a las que aplicar el saldo.');return;}
+  var resto=max;
+  lista.forEach(function(n){n.sug=_r2(Math.min(resto,n.pend));resto=_r2(resto-n.sug);});
+  _saldoCompCtx={pedidoId:pedidoId,sucursal:sucursal,max:max,notas:lista};
+  var filas=lista.map(function(n,i){
+    return '<tr><td class="mn">#'+n.folio+'</td><td style="font-size:13px;color:var(--text3)">'+fmtFecha(n.fecha)+'</td>'+
+      '<td class="mn">'+money(n.total)+'</td><td class="mn" style="color:var(--warn)">'+money(n.pend)+'</td>'+
+      '<td><input id="sc-i'+i+'" type="number" min="0" step="0.01" value="'+(n.sug>0?n.sug:'')+'" placeholder="0" oninput="updSaldoComp()" style="width:110px;padding:6px 8px;border:2px solid var(--border);border-radius:var(--r);font-size:14px"></td>'+
+      '<td><button class="btn btn-xs" type="button" onclick="pagarNotaSaldoComp('+i+')">Pagar esta</button></td></tr>';
+  }).join('');
+  modal('<div class="modal" style="max-width:720px"><div class="modal-hdr"><div class="modal-title">Aplicar saldo de '+_escH(sucursal)+' — '+_escH(p.numPedido||p.prov)+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div style="background:var(--accent-dim);border:1px solid var(--accent-glow);border-radius:var(--r);padding:10px 14px;margin-bottom:12px;font-size:14px">Saldo de '+_escH(sucursal)+': <b>'+money(saldo)+'</b> · Pendiente del pedido: <b>'+money(pendPed)+'</b> · Máximo a aplicar: <b>'+money(max)+'</b></div>'+
+      '<div style="font-size:13px;color:var(--text2);margin-bottom:10px">Elige a qué nota(s) se aplica. Ya viene sugerido por orden (la más antigua primero); cámbialo si la sucursal pagó otra.</div>'+
+      '<div class="tw"><table><thead><tr><th>Nota</th><th>Fecha</th><th>Total</th><th>Pendiente</th><th>Aplicar</th><th></th></tr></thead><tbody>'+filas+'</tbody></table></div>'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px"><span>Asignado: <b id="sc-tot">$0.00</b> de '+money(max)+'</span><span id="sc-msg" style="font-size:13px"></span></div>'+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" id="sc-ok" onclick="aplicarSaldoCompPedido()">Aplicar saldo</button></div>'+
+  '</div>');
+  updSaldoComp();
+}
+function _scVals(){
+  var c=_saldoCompCtx;if(!c)return [];
+  return c.notas.map(function(n,i){var e=g('sc-i'+i);return _r2(parseFloat(e?e.value:0)||0);});
+}
+function updSaldoComp(){
+  var c=_saldoCompCtx;if(!c)return;
+  var v=_scVals(),tot=_r2(v.reduce(function(a,b){return a+b;},0));
+  var exceso=v.some(function(x,i){return x>c.notas[i].pend+0.005||x<0;});
+  var msg='',ok=tot>0;
+  if(tot>c.max+0.005){msg='Te pasas del máximo';ok=false;}
+  else if(exceso){msg='Una nota recibe más de lo que debe';ok=false;}
+  g('sc-tot').textContent=money(tot);
+  g('sc-tot').style.color=ok||tot===0?'':'var(--danger)';
+  g('sc-msg').textContent=msg;g('sc-msg').style.color='var(--danger)';
+  g('sc-ok').disabled=!ok;
+}
+function pagarNotaSaldoComp(i){
+  var c=_saldoCompCtx;if(!c)return;
+  var v=_scVals(),otros=0;v.forEach(function(x,k){if(k!==i)otros+=x;});
+  var libre=_r2(Math.max(0,c.max-otros));
+  var e=g('sc-i'+i);if(e)e.value=_r2(Math.min(c.notas[i].pend,libre))||'';
+  updSaldoComp();
+}
+var _aplicandoSaldoComp=false;
+function aplicarSaldoCompPedido(){
+  var c=_saldoCompCtx;if(!c||_aplicandoSaldoComp)return;
+  var p=pedidos.find(function(x){return x.id===c.pedidoId;});if(!p)return;
+  var v=_scVals(),tot=_r2(v.reduce(function(a,b){return a+b;},0));
+  // Se revalida contra el estado actual (otro usuario pudo mover saldo o notas).
+  var saldoReal=saldoCompSucursal(c.sucursal);
+  var pendPed=_r2((p.total||p.costo||0)-(p.montoPagado||0));
+  if(tot<=0||tot>Math.min(saldoReal,pendPed)+0.005){alert('El saldo o el pedido cambió. Vuelve a abrir esta ventana.');cm();return;}
+  var cambiadas=[];
+  for(var i=0;i<c.notas.length;i++){
+    if(v[i]<=0)continue;
+    var n=notas.find(function(x){return x.id===c.notas[i].id;});
+    var ab=n&&n.abonos?n.abonos.reduce(function(a,b){return a+b.monto;},0):0;
+    if(!n||n.pagada||v[i]>_r2(n.total-ab)+0.005){alert('La nota #'+c.notas[i].folio+' cambió. Vuelve a abrir esta ventana.');cm();return;}
+    cambiadas.push({n:n,m:v[i]});
   }
-  guardarFila('pedido',p,'id');persist();cm();nav('pedidos');
+  _aplicandoSaldoComp=true;
+  var fecha=today(),hora=new Date().toTimeString().slice(0,5);
+  if(!p.abonos)p.abonos=[];
+  p.abonos.push({monto:tot,forma:'compensacion-'+c.sucursal,fecha:fecha,hora:hora,nota:'Saldo de '+c.sucursal+' aplicado al pedido',pedidoId:c.pedidoId});
+  p.montoPagado=(p.montoPagado||0)+tot;
+  if(p.montoPagado>=(p.total||p.costo||0)-0.005)p.pagado=true;
+  cambiadas.forEach(function(x){
+    var n=x.n;
+    if(!n.abonos)n.abonos=[];
+    n.abonos.push({monto:x.m,forma:'compensacion',fecha:fecha,hora:hora,nota:'Aplicado a pedido '+(p.numPedido||p.prov),pedidoId:c.pedidoId});
+    var nuevoAb=n.abonos.reduce(function(a,b){return a+b.monto;},0);
+    if(nuevoAb>=n.total-0.005){n.pagada=true;n.est='pagada';}
+    guardarFila('nota',n,'id');
+  });
+  audit('Aplicó saldo de sucursal a pedido','Pedidos',c.sucursal+' · '+money(tot)+' → '+(p.numPedido||p.prov)+' · notas '+cambiadas.map(function(x){return '#'+x.n.folio+' '+money(x.m);}).join(', '));
+  guardarFila('pedido',p,'id');persist();cm();_saldoCompCtx=null;_aplicandoSaldoComp=false;nav('pedidos');
 }
 
 // Candado síncrono contra doble clic — mismo patrón que _recibiendoIds en
