@@ -2878,6 +2878,7 @@ function rPed(){
   '</div>'+
   '<div class="card"><div class="card-hdr" style="flex-wrap:wrap;gap:8px"><div class="card-title">Órdenes de compra a proveedores</div>'+
     selectorMes('pedidos')+
+    '<button class="btn" onclick="mRelacionCompras()">📊 Relación de compras</button>'+
     (isAdmin?'<button class="btn" onclick="mAccionesPedido()">🗑 Eliminar / Corregir</button>':'')+
     (canEdit?'<button class="btn btn-p" onclick="mPedido()">+ Nuevo pedido</button>':'<span style="font-size:13px;color:var(--text3)">Solo lectura</span>')+
   '</div><div class="tw"><table><thead><tr><th>Folio</th><th>Proveedor</th><th>Productos</th><th>Total</th><th>Entrega</th><th>Cond.</th><th>Estado</th><th>Pago</th><th>Acciones</th></tr></thead><tbody>'+
@@ -2901,6 +2902,86 @@ function rPed(){
     '</tr>';
   }).join(''))+
   '</tbody></table></div></div>';
+}
+
+// Relación de compras: lo mismo que la relación de venta pero con los pedidos a
+// proveedores. Periodo por fecha del pedido, proveedor opcional, y si se
+// incluyen los pedidos que todavía no llegan.
+function mRelacionCompras(){
+  var hoy=today();
+  var primerDiaMes=hoy.slice(0,8)+'01';
+  var provs=[];
+  pedidos.forEach(function(p){if(p.prov&&provs.indexOf(p.prov)<0)provs.push(p.prov);});
+  provs.sort(function(a,b){return a.localeCompare(b);});
+  modal('<div class="modal" style="max-width:420px"><div class="modal-hdr"><div class="modal-title">Relación de compras</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<p style="font-size:13px;color:var(--text3);margin-bottom:14px">Lista cada pedido a proveedor del periodo con su total, lo pagado y lo que se debe.</p>'+
+      '<div class="field" style="margin-bottom:10px"><label>Desde</label><input id="rc1" type="date" value="'+primerDiaMes+'"></div>'+
+      '<div class="field" style="margin-bottom:10px"><label>Hasta</label><input id="rc2" type="date" value="'+hoy+'"></div>'+
+      '<div class="field" style="margin-bottom:10px"><label>Proveedor</label><select id="rc3"><option value="">Todos</option>'+
+        provs.map(function(x){return '<option value="'+x.replace(/"/g,'&quot;')+'">'+x+'</option>';}).join('')+'</select></div>'+
+      '<div class="field" style="margin-bottom:10px"><label>Pedidos</label><select id="rc4"><option value="recibidos">Solo recibidos</option><option value="todos">Todos (incluye los que faltan por llegar)</option></select></div>'+
+      '<label style="display:flex;gap:8px;align-items:center;font-size:14px"><input id="rc5" type="checkbox" checked> Incluir el detalle de productos</label>'+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button><button class="btn btn-p" onclick="gRelacionCompras()">Generar</button></div>'+
+  '</div>');
+}
+function gRelacionCompras(){
+  var desde=g('rc1').value,hasta=g('rc2').value;
+  if(!desde||!hasta){alert('Elige el periodo');return;}
+  var prov=g('rc3').value,todos=g('rc4').value==='todos',detalle=g('rc5').checked;
+  cm();
+  imprimirRelacionCompras(desde,hasta,prov,todos,detalle);
+}
+function imprimirRelacionCompras(desde,hasta,prov,todos,detalle){
+  var lista=pedidos.filter(function(p){
+    if(!p.fecha||p.fecha<desde||p.fecha>hasta)return false;
+    if(prov&&p.prov!==prov)return false;
+    if(!todos&&p.est!=='recibido')return false;
+    return true;
+  }).sort(function(a,b){return a.fecha===b.fecha?(a.numPedido||'').localeCompare(b.numPedido||''):a.fecha.localeCompare(b.fecha);});
+  function monto(p){return parseFloat(p.total||p.costo||0)||0;}
+  function pagado(p){return Math.min(monto(p),parseFloat(p.montoPagado||0)||(p.pagado?monto(p):0));}
+  var filas='',tTot=0,tPag=0,porProv={};
+  lista.forEach(function(p){
+    var tot=monto(p),pag=pagado(p),pend=Math.max(0,tot-pag);
+    tTot+=tot;tPag+=pag;
+    var pv=porProv[p.prov]||(porProv[p.prov]={n:0,tot:0,pag:0});pv.n++;pv.tot+=tot;pv.pag+=pag;
+    var prods='';
+    if(detalle){
+      prods='<div style="color:#555;font-size:10.5px;margin-top:2px">'+(p.partidas||[]).map(function(pt){
+        var kg=parseFloat(pt.kgReal!=null?pt.kgReal:pt.kg)||0,c=parseFloat(pt.costoAjust!=null?pt.costoAjust:pt.costo)||0;
+        return pt.esp+' '+kg+' '+(pt.unidad||'kg')+' × '+money(c);
+      }).join(' · ')+'</div>';
+    }
+    filas+='<tr><td>'+(p.numPedido||'—')+'</td><td>'+p.prov+prods+'</td><td>'+fmtFecha(p.fecha)+'</td>'+
+      '<td>'+(p.condiciones||'—')+(p.est==='pendiente'?' <span style="color:#b87a00">(por llegar)</span>':'')+'</td>'+
+      '<td style="text-align:right">'+money(tot)+'</td>'+
+      '<td style="text-align:right">'+money(pag)+'</td>'+
+      '<td style="text-align:right'+(pend>0.005?';color:#b8341a;font-weight:700':'')+'">'+money(pend)+'</td></tr>';
+  });
+  var resumen=Object.keys(porProv).sort().map(function(k){var v=porProv[k];
+    return '<tr><td>'+k+'</td><td style="text-align:right">'+v.n+'</td><td style="text-align:right">'+money(v.tot)+'</td><td style="text-align:right">'+money(v.pag)+'</td><td style="text-align:right">'+money(Math.max(0,v.tot-v.pag))+'</td></tr>';
+  }).join('');
+  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Relación de compras '+fmtFecha(desde)+' a '+fmtFecha(hasta)+'</title><style>'+
+    'body{font-family:Arial,sans-serif;padding:24px;font-size:12px;color:#111}'+
+    'h2{color:#1a3a6b;margin-bottom:4px}h3{color:#1a3a6b;margin:22px 0 6px}p{color:#666;margin-bottom:16px}'+
+    'table{width:100%;border-collapse:collapse}th{background:#1a3a6b;color:#fff;padding:6px 8px;text-align:left;font-size:11px}'+
+    'td{padding:5px 8px;border-bottom:1px solid #eee;vertical-align:top}tr:nth-child(even) td{background:#f8f9fa}'+
+    'tfoot td{font-weight:700;border-top:2px solid #1a3a6b;border-bottom:none}'+
+    'tr{page-break-inside:avoid}thead{display:table-header-group}'+
+    '@media print{body{padding:8px}}'+
+  '</style></head><body>'+
+  '<h2>Relación de compras a proveedores</h2>'+
+  '<p>Periodo: '+fmtFecha(desde)+' a '+fmtFecha(hasta)+(prov?' · Proveedor: '+prov:'')+' · '+(todos?'Todos los pedidos':'Solo recibidos')+' · Generado el '+new Date().toLocaleDateString('es-MX')+'</p>'+
+  '<table><thead><tr><th>Pedido</th><th>Proveedor</th><th>Fecha</th><th>Cond.</th><th style="text-align:right">Total</th><th style="text-align:right">Pagado</th><th style="text-align:right">Por pagar</th></tr></thead>'+
+  '<tbody>'+(filas||'<tr><td colspan="7" style="text-align:center;padding:20px;color:#999">Sin pedidos en este periodo</td></tr>')+'</tbody>'+
+  '<tfoot><tr><td colspan="4">Total ('+lista.length+' pedido'+(lista.length===1?'':'s')+')</td><td style="text-align:right">'+money(tTot)+'</td><td style="text-align:right">'+money(tPag)+'</td><td style="text-align:right">'+money(Math.max(0,tTot-tPag))+'</td></tr></tfoot></table>'+
+  (resumen&&!prov?'<h3>Resumen por proveedor</h3><table><thead><tr><th>Proveedor</th><th style="text-align:right">Pedidos</th><th style="text-align:right">Total</th><th style="text-align:right">Pagado</th><th style="text-align:right">Por pagar</th></tr></thead><tbody>'+resumen+'</tbody></table>':'')+
+  '</body></html>';
+  var win=window.open('','_blank');
+  win.document.write(html);win.document.close();
+  setTimeout(function(){win.print();},350);
 }
 
 function mAccionesPedido(){
