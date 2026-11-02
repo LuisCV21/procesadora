@@ -3911,9 +3911,50 @@ function renderEdnInfo(){
     '</div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
       (puedeEditarPartidasNota(n)?'<button class="btn btn-p" onclick="cm();mEditarPartidasNota('+n.id+')">✏ Editar partidas</button>':'<div style="font-size:13px;color:var(--text3)">Ya fue enviada — solo el administrador puede corregirla.</div>')+
+      ((puedeEditarPartidasNota(n)||ROL==='admin')?'<button class="btn" onclick="cm();mCambiarClienteNota('+n.id+')">👤 Cambiar cliente</button>':'')+
       (puedeCorregirNota(n)?'<button class="btn btn-d" onclick="cm();mRevertirNota('+n.id+')">↩ Corregir (regresar a pendiente)</button>':'')+
       (ROL==='admin'?'<button class="btn btn-d" onclick="cm();elimNota('+n.id+')">Eliminar esta nota</button>':'')+
     '</div>';
+}
+
+// Cambiar solo el cliente de una nota (cuando se capturó para otro). No toca
+// partidas, inventario ni caja. Se bloquea si ya tiene saldo de sucursal
+// aplicado (el saldo se descuenta por cliente) o si el mes de la nota ya se
+// cerró (el corte congelado ya llevó la venta a ese cliente).
+function motivoNoCambiarCliente(n){
+  if((n.abonos||[]).some(function(a){return a.forma==='compensacion';}))
+    return 'Esta nota ya tiene saldo de sucursal aplicado. Cambiarle el cliente descuadraría ese saldo.';
+  if(n.fecha&&cortesCerrados.some(function(c){return c.cerrado&&c.mes===n.fecha.slice(0,7);}))
+    return 'El mes de esta nota ('+nombreMes(n.fecha.slice(0,7))+') ya está cerrado.';
+  return '';
+}
+function mCambiarClienteNota(id){
+  var n=notas.find(function(x){return x.id===id;});if(!n)return;
+  var motivo=motivoNoCambiarCliente(n);
+  var opts=CLIENTES.map(function(c){return '<option value="'+c.replace(/"/g,'&quot;')+'"'+(n.cliente===c?' selected':'')+'>'+c+'</option>';}).join('');
+  if(CLIENTES.indexOf(n.cliente)<0)opts='<option value="" selected>'+n.cliente+' (actual)</option>'+opts;
+  modal('<div class="modal" style="max-width:420px"><div class="modal-hdr"><div class="modal-title">Cambiar cliente — Nota #'+n.folio+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
+    '<div class="modal-body">'+
+      '<div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;margin-bottom:12px">'+
+        '<div style="font-weight:700">Cliente actual: '+n.cliente+'</div>'+
+        '<div style="color:var(--text3);font-size:13px;margin-top:2px">'+money(n.total)+' · '+(n.condiciones||'—')+' · '+fmtFecha(n.fecha)+'</div>'+
+      '</div>'+
+      (motivo?'<div style="color:var(--danger);font-size:14px">'+motivo+'</div>':
+        '<div class="field"><label>Cliente correcto</label><select id="ccn-cli">'+opts+'</select></div>'+
+        '<div style="font-size:12px;color:var(--text3);margin-top:8px">Solo cambia a quién va la nota. Las partidas, el inventario y la caja no se tocan. La ciudad, teléfono y domicilio de la nota se quedan como están.</div>')+
+    '</div>'+
+    '<div class="modal-footer"><button class="btn" onclick="cm()">Cancelar</button>'+(motivo?'':'<button class="btn btn-p" onclick="gCambiarClienteNota('+id+')">Guardar cliente</button>')+'</div>'+
+  '</div>');
+}
+function gCambiarClienteNota(id){
+  var n=notas.find(function(x){return x.id===id;});if(!n)return;
+  if(motivoNoCambiarCliente(n)){alert(motivoNoCambiarCliente(n));return;}
+  var nuevo=g('ccn-cli')?g('ccn-cli').value:'';
+  if(!nuevo||nuevo===n.cliente){alert('Elige un cliente distinto al actual.');return;}
+  var anterior=n.cliente;
+  n.cliente=nuevo;
+  audit('Cambió cliente de nota','Notas','Nota #'+n.folio+' · '+anterior+' → '+nuevo+' · '+money(n.total));
+  guardarFila('nota',n,'id');persist();cm();nav('notas');
 }
 
 function mEnviarNota(id){
