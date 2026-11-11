@@ -1139,6 +1139,13 @@ function asegurarIdsProductos(){
   PRODUCTOS.forEach(function(p){if(!p.id||(p.id>1000&&p.id<1e9)){p.id=siguienteIdProducto();nuevos.push(p);}});
   nuevos.forEach(guardarProducto);
 }
+// Los "sembrados" del catálogo (productos y reglas de proceso por defecto) NO se
+// guardan en Supabase mientras no haya terminado la primera sincronización: un
+// dispositivo con la memoria vacía (navegador nuevo o caché borrada) los veía
+// como "faltantes" y los subía encima de lo que Configuración ya tenía (así se
+// perdieron las reglas de Limpieza/Clasificación el 9-nov-2026). Se activan en
+// sembrarCatalogoTrasSincronizar(), cuando ya se sabe qué existe de verdad.
+var _SEMBRADO_LISTO=false;
 function mergeCatalogosNuevos(){
   asegurarIdsProductos();
   var primeraVez=!CATALOGO_SEEDS_VISTOS;
@@ -1167,9 +1174,11 @@ function mergeCatalogosNuevos(){
   Object.keys(PROC_REGLAS_DEF).forEach(function(t){
     if(!PROC_REGLAS[t]){PROC_REGLAS[t]=PROC_REGLAS_DEF[t];if(tiposNuevos.indexOf(t)===-1)tiposNuevos.push(t);}
   });
-  prodsNuevos.forEach(guardarProducto);
-  tiposNuevos.forEach(guardarProcTipo);
-  if(cambioVistos)save('catalogo_seeds_vistos',CATALOGO_SEEDS_VISTOS);
+  if(_SEMBRADO_LISTO){
+    prodsNuevos.forEach(guardarProducto);
+    tiposNuevos.forEach(guardarProcTipo);
+    if(cambioVistos)save('catalogo_seeds_vistos',CATALOGO_SEEDS_VISTOS);
+  }
 }
 // Migración puntual para instalaciones que ya tenían datos guardados antes de
 // que existiera el proceso de Robalo (mergeCatalogosNuevos solo agrega tipos
@@ -1191,8 +1200,10 @@ function configurarProcesoRobalo(){
   if(PROC_TIPOS.indexOf(TIPO_ROBALO_CABEZA)===-1){PROC_TIPOS.push(TIPO_ROBALO_CABEZA);tipoNuevo=true;}
   var reglaNueva=false;
   if(!PROC_REGLAS[TIPO_ROBALO_CABEZA]){PROC_REGLAS[TIPO_ROBALO_CABEZA]=PROC_REGLAS_DEF[TIPO_ROBALO_CABEZA];reglaNueva=true;}
-  prodsTocados.forEach(guardarProducto);
-  if(tipoNuevo||reglaNueva)guardarProcTipo(TIPO_ROBALO_CABEZA);
+  if(_SEMBRADO_LISTO){
+    prodsTocados.forEach(guardarProducto);
+    if(tipoNuevo||reglaNueva)guardarProcTipo(TIPO_ROBALO_CABEZA);
+  }
   if(prodsTocados.length||tipoNuevo)audit('Configuró catálogo de Robalo','Configuracion','Robalo · Cabeza de robalo · postas ch/med/gr/jumbo/para caldo');
 }
 // Igual que configurarProcesoRobalo, para el proceso de lomos + huesos.
@@ -1204,8 +1215,10 @@ function configurarProcesoRobaloLomos(){
   }
   if(PROC_TIPOS.indexOf(TIPO_ROBALO_LOMOS)===-1){PROC_TIPOS.push(TIPO_ROBALO_LOMOS);tipoNuevo=true;}
   if(!PROC_REGLAS[TIPO_ROBALO_LOMOS]){PROC_REGLAS[TIPO_ROBALO_LOMOS]=PROC_REGLAS_DEF[TIPO_ROBALO_LOMOS];reglaNueva=true;}
-  if(prodNuevo)guardarProducto(prodNuevo);
-  if(tipoNuevo||reglaNueva)guardarProcTipo(TIPO_ROBALO_LOMOS);
+  if(_SEMBRADO_LISTO){
+    if(prodNuevo)guardarProducto(prodNuevo);
+    if(tipoNuevo||reglaNueva)guardarProcTipo(TIPO_ROBALO_LOMOS);
+  }
   if(prodNuevo||tipoNuevo)audit('Configuró proceso de lomos de Robalo','Configuracion','Robalo → lomos med/gr + Huesos para caldo');
 }
 // Da de alta el tipo de proceso "Chocomite en postas" con sus reglas. NO crea ningún producto:
@@ -1218,13 +1231,36 @@ function configurarProcesoChocomitePostas(){
   // Corrección de la primera versión, que daba como salida "Posta de chocomite": la salida es "Posta ch.".
   var r=PROC_REGLAS[TIPO_CHOCOMITE_POSTAS];
   if(r&&r.salidas&&r.salidas.length===1&&(r.salidas[0]==='Posta de chocomite'||r.salidas[0]==='Posta ch.')){r.salidas=['Posta ch.','Huesos para caldo'];reglaNueva=true;}
-  if(tipoNuevo||reglaNueva)guardarProcTipo(TIPO_CHOCOMITE_POSTAS);
+  if(_SEMBRADO_LISTO&&(tipoNuevo||reglaNueva))guardarProcTipo(TIPO_CHOCOMITE_POSTAS);
   if(tipoNuevo)audit('Configuró proceso Chocomite en postas','Configuracion','Entrada: chocomite en piezas · Salida: Posta ch. (pz)');
 }
 mergeCatalogosNuevos();
 configurarProcesoRobalo();
 configurarProcesoRobaloLomos();
 configurarProcesoChocomitePostas();
+// Se llama una sola vez, justo después de la primera lectura de Supabase (con lo
+// que ya se bajó aplicado a PRODUCTOS/PROC_REGLAS). Vuelve a correr los sembrados:
+// ahora solo guardan lo que de verdad no existe. Si Supabase está vacío (base
+// nueva) se sube todo lo sembrado en memoria.
+function sembrarCatalogoTrasSincronizar(remotoVacio,datosRemotos){
+  if(_SEMBRADO_LISTO)return;
+  _SEMBRADO_LISTO=true;
+  if(remotoVacio){
+    PRODUCTOS.forEach(guardarProducto);
+    Object.keys(PROC_REGLAS).forEach(guardarProcTipo);
+    save('catalogo_seeds_vistos',CATALOGO_SEEDS_VISTOS);
+  }else if(datosRemotos){
+    // Reglas por defecto que Supabase de verdad no tiene: se suben. Las que ya
+    // existen allá (aunque estén personalizadas) nunca se tocan.
+    Object.keys(PROC_REGLAS_DEF).forEach(function(t){
+      if(!datosRemotos[kProcTipo(t)]&&PROC_REGLAS[t])guardarProcTipo(t);
+    });
+  }
+  mergeCatalogosNuevos();
+  configurarProcesoRobalo();
+  configurarProcesoRobaloLomos();
+  configurarProcesoChocomitePostas();
+}
 
 // Cámara: cada entrada es un LOTE — mismo producto puede tener múltiples lotes
 var camara=load('camara',[
@@ -8034,6 +8070,7 @@ var _timeoutArranque=setTimeout(function(){arrancarUnaVez();},8000);
 sbGetAllFilas()
   .then(function(rows){
     clearTimeout(_timeoutArranque);
+    var _remotoVacio=!(Array.isArray(rows)&&rows.length>0);
     if(Array.isArray(rows)&&rows.length>0){
       var data={};
       rows.forEach(function(r){data[r.key]=r.value;});
@@ -8046,6 +8083,7 @@ sbGetAllFilas()
         if(CUR_TAB)nav(CUR_TAB);
       }
     }
+    if(Array.isArray(rows))sembrarCatalogoTrasSincronizar(_remotoVacio,data);
     arrancarUnaVez(); // para usuarios sin datos locales
   })
   .catch(function(){

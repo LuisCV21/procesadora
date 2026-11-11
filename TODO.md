@@ -161,3 +161,17 @@ distintas ya no se pisan entre sí — cada quien sube solo lo que tocó.
   Verificado contra Supabase el mismo día: los 84 productos base del
   código y las reglas de proceso de Sargo estaban completos — no había
   nada que restaurar en ese momento.
+
+# 2026-11-11: los sembrados del catálogo ya no pisan lo configurado
+
+El 9-nov-2026 12:09 un dispositivo con la memoria vacía arrancó, vio como
+"faltantes" las reglas de proceso por defecto (y varios productos) y las subió a
+Supabase encima de lo personalizado: "Limpieza de pescado" y "Clasificación por
+talla" volvieron a Sargo S/Ordenar → Sargo Limpio → tallas, y ya no aceptaban
+"Sargo" como entrada (Jannet no podía procesar el lote P-0221). Las reglas se
+restauraron a mano a partir de lo que realmente se ha procesado.
+
+Ahora los sembrados (mergeCatalogosNuevos y configurarProceso*) solo viven en
+memoria hasta que termina la primera lectura de Supabase
+(sembrarCatalogoTrasSincronizar); después solo guardan lo que Supabase de
+verdad no tiene. Pendiente: asegurarIdsProductos() sigue guardando al arrancar.
