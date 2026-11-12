@@ -4035,7 +4035,7 @@ function mRevertirNota(id){
   if(efNota>0)lineas+='<li>Se restarán <b>'+money(efNota)+'</b> del efectivo en caja</li>';
   if(abonos.length>0)lineas+='<li>Se eliminarán los <b>'+abonos.length+' cobro(s)</b> registrados en esta nota</li>';
   lineas+='<li>La nota regresará a estado <b>Pendiente de envío</b> para corregir condición de pago, partidas, etc.</li>';
-  lineas+='<li>El inventario ya descontado por esta nota <b>no se modifica</b> (la mercancía ya salió)</li>';
+  lineas+='<li>El inventario ya descontado por esta nota <b>no se modifica</b> al corregirla. Si después cambias cantidades o productos, se te mostrará la diferencia para ajustarlo.</li>';
   modal('<div class="modal" style="max-width:480px"><div class="modal-hdr" style="background:var(--danger-dim)"><div class="modal-title" style="color:var(--danger)">↩ Corregir nota #'+n.folio+'</div><button class="btn btn-icon" onclick="cm()">✕</button></div>'+
     '<div class="modal-body">'+
       '<div class="alert al-w" style="margin-bottom:14px"><div class="al-dot"></div><b>Solo para correcciones excepcionales.</b> Esta acción revertirá el envío y el cobro.</div>'+
@@ -4746,7 +4746,7 @@ function rEditarPartidas(){
       '<div class="field" style="max-width:220px"><label>Condiciones</label><select id="epcond"><option value="Crédito"'+(n.condiciones==='Crédito'?' selected':'')+'>Crédito</option><option value="Contado"'+(n.condiciones==='Contado'?' selected':'')+'>Contado</option></select></div>':
       '<div style="color:var(--text3);font-size:13px">Condiciones: '+(n.condiciones||'—')+'</div>')+
   '</div></div>'+
-  '<div class="card"><div class="card-hdr"><div class="card-title">Partidas <span style="font-size:13px;color:var(--text3);font-weight:normal">— '+(n.mercanciaEntregada?'Corrección de papel: la mercancía ya salió, así que esta edición NO modifica el inventario':'Corrige cantidad, precio o producto; el stock disponible ya considera lo reservado por esta nota')+'</span></div></div><div class="card-body">'+
+  '<div class="card"><div class="card-hdr"><div class="card-title">Partidas <span style="font-size:13px;color:var(--text3);font-weight:normal">— '+(n.mercanciaEntregada?'Nota ya entregada: si cambias cantidades o productos, se te mostrará cuánto se ajusta el inventario antes de guardar':'Corrige cantidad, precio o producto; el stock disponible ya considera lo reservado por esta nota')+'</span></div></div><div class="card-body">'+
     '<div style="display:grid;grid-template-columns:70px 1fr 82px 90px 32px;gap:6px;padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:8px">'+
       ['Cant.','Producto / Lote','Precio $','Importe $',''].map(function(h){return '<span style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase">'+h+'</span>';}).join('')+
     '</div>'+filas+
@@ -4850,6 +4850,33 @@ function gEditarPartidas(){
   // "Corregir nota"/revertirNota): ahí el stock ya no existe físicamente para
   // devolverlo, así que esta edición queda como corrección de papel (precio,
   // condiciones, producto anotado) sin tocar cámara/bodega en absoluto.
+  // Nota ya entregada (corregida con "Corregir nota"): no se devuelve ni se vuelve a
+  // descontar todo, pero SÍ se ajusta la DIFERENCIA entre lo que había y lo que
+  // queda (ej. cambiar caracol por macuil: el caracol regresa a su lote y el
+  // macuil sale del suyo). Antes no se ajustaba nada y el inventario quedaba mal.
+  var ajustesPapel=[];
+  if(n.mercanciaEntregada){
+    var difs={};
+    n.partidas.forEach(function(p){difs[p.loteId]=(difs[p.loteId]||0)-(parseFloat(p.cant)||0);});
+    nuevas.forEach(function(p){difs[p.loteId]=(difs[p.loteId]||0)+p.cant;});
+    Object.keys(difs).forEach(function(k){
+      var d=parseFloat(difs[k].toFixed(3));
+      if(Math.abs(d)<0.0005)return;
+      ajustesPapel.push({loteId:parseInt(k),lote:buscarLoteVenta(parseInt(k)),delta:d});
+    });
+    if(ajustesPapel.length>0){
+      var lineasAj=ajustesPapel.map(function(a){
+        var nom=a.lote?(a.lote.esp+' · Lote '+a.lote.lote):('Lote '+a.loteId+' (ya no existe)');
+        var u=a.lote?(a.lote.unidad||'kg'):'kg';
+        if(a.delta>0){
+          var queda=a.lote?restarKg(a.lote.kg,a.delta):0;
+          return '• '+nom+': sale de más '+a.delta+' '+u+(a.lote?' (inventario '+a.lote.kg+' → '+queda+')'+(a.lote.kg<a.delta?'  ⚠ no alcanza, quedará en 0':''):'');
+        }
+        return '• '+nom+': regresa '+(-a.delta)+' '+u+(a.lote?' (inventario '+a.lote.kg+' → '+parseFloat((a.lote.kg-a.delta).toFixed(3))+')':'');
+      });
+      if(!confirm('Esta nota ya había salido. Los cambios que hiciste mueven el inventario así:\n\n'+lineasAj.join('\n')+'\n\n¿Aplicar este ajuste al inventario y guardar?'))return;
+    }
+  }
   var lotesEpTocados=[];
   if(!n.mercanciaEntregada){
     n.partidas.forEach(function(p){
@@ -4861,6 +4888,13 @@ function gEditarPartidas(){
       if(lote){lote.kg=restarKg(lote.kg,p.cant);lotesEpTocados.push(lote);}
     });
     guardarFilasLotes(lotesEpTocados);
+  }else{
+    ajustesPapel.forEach(function(a){
+      if(!a.lote)return;
+      a.lote.kg=a.delta>0?restarKg(a.lote.kg,a.delta):parseFloat((a.lote.kg-a.delta).toFixed(3));
+      lotesEpTocados.push(a.lote);
+    });
+    if(lotesEpTocados.length)guardarFilasLotes(lotesEpTocados);
   }
 
   var totalAnterior=n.total;
@@ -4878,7 +4912,7 @@ function gEditarPartidas(){
     n.pagada=nuevoTotal>0&&abonado>=nuevoTotal;
     if(n.pagada)n.est='pagada';else if(n.est==='pagada')n.est='entregada';
   }
-  audit('Editó partidas de nota','Notas','Nota #'+n.folio+' · '+n.cliente+' · Total '+money(totalAnterior)+' → '+money(nuevoTotal));
+  audit('Editó partidas de nota','Notas','Nota #'+n.folio+' · '+n.cliente+' · Total '+money(totalAnterior)+' → '+money(nuevoTotal)+(ajustesPapel.length?' · ajuste de inventario: '+ajustesPapel.map(function(a){return (a.lote?a.lote.esp+' '+a.lote.lote:'lote '+a.loteId)+' '+(a.delta>0?'-':'+')+Math.abs(a.delta);}).join(', '):''));
   EDITANDO_NOTA=null;
   guardarFila('nota',n,'id');persist();nav('notas');
 }
